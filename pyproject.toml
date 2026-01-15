@@ -29,6 +29,10 @@ dependencies = [
     "aiofiles>=23.0",
     "rich>=13.0",
     "prompt-toolkit>=3.0",
+    # Google Workspace API
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-api-python-client>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -87,7 +91,7 @@ force-single-line = false
 lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ARG001", "S101"]  # Allow asserts and unused args in tests
+"tests/*" = ["ARG001", "ARG002", "S101"]  # Allow asserts and unused args in tests
 
 # ===========================================================================
 # Mypy Configuration

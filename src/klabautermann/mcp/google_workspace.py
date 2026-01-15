@@ -1,25 +1,29 @@
 """
-Google Workspace MCP Bridge - Clean interface to Gmail and Calendar via MCP.
+Google Workspace Bridge - Direct API integration for Gmail and Calendar.
 
-Wraps the Google Workspace MCP server and provides Pydantic-validated responses
-for Gmail and Calendar operations. Designed for easy fallback to direct API calls
-if MCP proves unreliable.
+Uses Google APIs directly with OAuth2 refresh tokens, avoiding MCP subprocess
+complexity. Provides Pydantic-validated responses for Gmail and Calendar operations.
 
 Reference: specs/architecture/AGENTS.md Section 1.4
 """
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import os
-import uuid
 from datetime import datetime, timedelta
-from typing import Any
+from email.mime.text import MIMEText
+from typing import Any, ClassVar
 
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from pydantic import BaseModel, Field
 
-from klabautermann.core.exceptions import MCPError
+from klabautermann.core.exceptions import ExternalServiceError
 from klabautermann.core.logger import logger
-from klabautermann.mcp.client import MCPClient, MCPServerConfig, ToolInvocationContext
 
 
 # ===========================================================================
@@ -78,77 +82,102 @@ class CreateEventResult(BaseModel):
 
 class GoogleWorkspaceBridge:
     """
-    Bridge to Google Workspace services via MCP.
+    Bridge to Google Workspace services via direct API calls.
 
-    Wraps the Google Workspace MCP server and provides a clean interface
-    for Gmail and Calendar operations with Pydantic-validated responses.
+    Uses OAuth2 refresh tokens from environment variables to authenticate
+    with Gmail and Calendar APIs directly.
 
     Example:
         bridge = GoogleWorkspaceBridge()
         await bridge.start()
         emails = await bridge.search_emails("from:sarah@acme.com")
         events = await bridge.get_todays_events()
-        await bridge.stop()
 
-    Note:
-        If MCP proves unreliable, this class can be refactored to use direct
-        Google API calls while maintaining the same interface.
+    Environment Variables Required:
+        GOOGLE_CLIENT_ID: OAuth2 client ID
+        GOOGLE_CLIENT_SECRET: OAuth2 client secret
+        GOOGLE_REFRESH_TOKEN: OAuth2 refresh token with gmail and calendar scopes
     """
 
-    SERVER_CONFIG = MCPServerConfig(
-        name="google-workspace",
-        command=["npx", "-y", "@anthropic/mcp-google-workspace"],
-        env={},  # Populated with credentials during start()
-        timeout=30.0,
-    )
+    # Gmail API scopes
+    GMAIL_SCOPES: ClassVar[list[str]] = ["https://www.googleapis.com/auth/gmail.modify"]
+    CALENDAR_SCOPES: ClassVar[list[str]] = ["https://www.googleapis.com/auth/calendar"]
 
-    def __init__(self, mcp_client: MCPClient | None = None) -> None:
-        """
-        Initialize the Google Workspace bridge.
-
-        Args:
-            mcp_client: Optional shared MCP client. If not provided,
-                       creates a dedicated client for this bridge.
-        """
-        self._client = mcp_client or MCPClient()
+    def __init__(self) -> None:
+        """Initialize the Google Workspace bridge."""
+        self._credentials: Credentials | None = None
+        self._gmail_service: Any = None
+        self._calendar_service: Any = None
         self._started = False
 
     async def start(self) -> None:
         """
-        Start the Google Workspace MCP server.
+        Initialize Google API services.
 
-        Injects OAuth credentials from environment variables and initializes
-        the MCP connection.
+        Creates OAuth2 credentials from environment variables and builds
+        Gmail and Calendar service objects.
 
         Raises:
-            MCPConnectionError: If server fails to start.
+            ExternalServiceError: If credentials are missing or invalid.
         """
         if self._started:
-            logger.debug("[WHISPER] Google Workspace MCP server already running")
             return
 
-        # Inject credentials from environment
-        config = MCPServerConfig(
-            name=self.SERVER_CONFIG.name,
-            command=self.SERVER_CONFIG.command,
-            env={
-                "GOOGLE_REFRESH_TOKEN": os.getenv("GOOGLE_REFRESH_TOKEN", ""),
-                "GOOGLE_CLIENT_ID": os.getenv("GOOGLE_CLIENT_ID", ""),
-                "GOOGLE_CLIENT_SECRET": os.getenv("GOOGLE_CLIENT_SECRET", ""),
-            },
-            timeout=self.SERVER_CONFIG.timeout,
+        # Get credentials from environment
+        client_id = os.getenv("GOOGLE_CLIENT_ID")
+        client_secret = os.getenv("GOOGLE_CLIENT_SECRET")
+        refresh_token = os.getenv("GOOGLE_REFRESH_TOKEN")
+
+        if not all([client_id, client_secret, refresh_token]):
+            missing = []
+            if not client_id:
+                missing.append("GOOGLE_CLIENT_ID")
+            if not client_secret:
+                missing.append("GOOGLE_CLIENT_SECRET")
+            if not refresh_token:
+                missing.append("GOOGLE_REFRESH_TOKEN")
+            raise ExternalServiceError(
+                "google",
+                f"Missing required environment variables: {', '.join(missing)}",
+            )
+
+        # Create credentials from refresh token
+        self._credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=client_id,
+            client_secret=client_secret,
+            scopes=self.GMAIL_SCOPES + self.CALENDAR_SCOPES,
         )
 
-        await self._client.start_server(config)
+        # Refresh to get access token
+        try:
+            self._credentials.refresh(Request())
+        except Exception as e:
+            raise ExternalServiceError("google", f"Failed to refresh credentials: {e}") from e
+
+        # Build services (run in executor to avoid blocking)
+        loop = asyncio.get_event_loop()
+
+        def build_services() -> tuple[Any, Any]:
+            gmail = build("gmail", "v1", credentials=self._credentials)
+            calendar = build("calendar", "v3", credentials=self._credentials)
+            return gmail, calendar
+
+        self._gmail_service, self._calendar_service = await loop.run_in_executor(
+            None, build_services
+        )
+
         self._started = True
-        logger.info("[CHART] Google Workspace MCP server started")
+        logger.info("[CHART] Google Workspace API services initialized")
 
     async def stop(self) -> None:
-        """Stop the Google Workspace MCP server."""
-        if self._started:
-            await self._client.stop_server(self.SERVER_CONFIG.name)
-            self._started = False
-            logger.info("[CHART] Google Workspace MCP server stopped")
+        """Clean up resources (no-op for direct API)."""
+        self._started = False
+        self._gmail_service = None
+        self._calendar_service = None
+        logger.info("[CHART] Google Workspace API services stopped")
 
     # ===========================================================================
     # Gmail Operations
@@ -158,7 +187,7 @@ class GoogleWorkspaceBridge:
         self,
         query: str,
         max_results: int = 10,
-        context: ToolInvocationContext | None = None,
+        _context: Any = None,  # Kept for interface compatibility
     ) -> list[EmailMessage]:
         """
         Search Gmail messages with a query.
@@ -166,35 +195,54 @@ class GoogleWorkspaceBridge:
         Args:
             query: Gmail search query (e.g., "from:sarah@acme.com" or "is:unread")
             max_results: Maximum number of messages to return (default: 10)
-            context: Optional invocation context for tracing
+            context: Ignored (kept for interface compatibility)
 
         Returns:
             List of matching email messages
 
         Raises:
-            MCPError: If search fails
+            ExternalServiceError: If search fails
         """
         await self.start()
 
+        loop = asyncio.get_event_loop()
+
+        def do_search() -> list[dict[str, Any]]:
+            try:
+                # List message IDs matching query
+                results = (
+                    self._gmail_service.users()
+                    .messages()
+                    .list(userId="me", q=query, maxResults=max_results)
+                    .execute()
+                )
+
+                messages = results.get("messages", [])
+                if not messages:
+                    return []
+
+                # Fetch full message details
+                full_messages = []
+                for msg in messages:
+                    full = (
+                        self._gmail_service.users()
+                        .messages()
+                        .get(userId="me", id=msg["id"], format="full")
+                        .execute()
+                    )
+                    full_messages.append(full)
+
+                return full_messages
+
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Search failed: {e}") from e
+
         try:
-            result = await self._client.invoke_tool(
-                server_name=self.SERVER_CONFIG.name,
-                tool_name="gmail_search_messages",
-                arguments={
-                    "query": query,
-                    "maxResults": max_results,
-                },
-                context=context or self._default_context(),
-            )
-
-            return self._parse_email_list(result)
-
+            raw_messages = await loop.run_in_executor(None, do_search)
+            return self._parse_gmail_messages(raw_messages)
         except Exception as e:
-            logger.error(
-                f"[STORM] Gmail search failed: {e}",
-                extra={"query": query},
-            )
-            raise MCPError(f"Gmail search failed: {e}", tool_name="gmail_search_messages") from e
+            logger.error(f"[STORM] Gmail search failed: {e}", extra={"query": query})
+            raise
 
     async def send_email(
         self,
@@ -203,7 +251,7 @@ class GoogleWorkspaceBridge:
         body: str,
         cc: str | None = None,
         draft_only: bool = False,
-        context: ToolInvocationContext | None = None,
+        _context: Any = None,
     ) -> SendEmailResult:
         """
         Send or draft an email via Gmail.
@@ -214,65 +262,70 @@ class GoogleWorkspaceBridge:
             body: Email body (plain text)
             cc: Optional CC recipients (comma-separated)
             draft_only: If True, save as draft instead of sending
-            context: Optional invocation context for tracing
+            context: Ignored (kept for interface compatibility)
 
         Returns:
             Result containing message ID or error details
         """
         await self.start()
 
-        tool_name = "gmail_create_draft" if draft_only else "gmail_send_message"
+        loop = asyncio.get_event_loop()
+
+        def do_send() -> dict[str, Any]:
+            try:
+                # Create message
+                message = MIMEText(body)
+                message["to"] = to
+                message["subject"] = subject
+                if cc:
+                    message["cc"] = cc
+
+                raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+                if draft_only:
+                    # Create draft
+                    draft = (
+                        self._gmail_service.users()
+                        .drafts()
+                        .create(userId="me", body={"message": {"raw": raw}})
+                        .execute()
+                    )
+                    return {"id": draft["id"], "is_draft": True}
+                else:
+                    # Send message
+                    sent = (
+                        self._gmail_service.users()
+                        .messages()
+                        .send(userId="me", body={"raw": raw})
+                        .execute()
+                    )
+                    return {"id": sent["id"], "is_draft": False}
+
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Send failed: {e}") from e
 
         try:
-            arguments: dict[str, Any] = {
-                "to": to,
-                "subject": subject,
-                "body": body,
-            }
-            if cc:
-                arguments["cc"] = cc
-
-            result = await self._client.invoke_tool(
-                server_name=self.SERVER_CONFIG.name,
-                tool_name=tool_name,
-                arguments=arguments,
-                context=context or self._default_context(),
-            )
-
+            result = await loop.run_in_executor(None, do_send)
             return SendEmailResult(
                 success=True,
-                message_id=result.get("id"),
-                is_draft=draft_only,
+                message_id=result["id"],
+                is_draft=result.get("is_draft", False),
             )
-
         except Exception as e:
             logger.error(
                 f"[STORM] Email {'draft' if draft_only else 'send'} failed: {e}",
                 extra={"to": to, "subject": subject},
             )
-            return SendEmailResult(
-                success=False,
-                error=str(e),
-                is_draft=draft_only,
-            )
+            return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
 
     async def get_recent_emails(
         self,
         hours: int = 24,
-        context: ToolInvocationContext | None = None,
+        _context: Any = None,
     ) -> list[EmailMessage]:
-        """
-        Get emails from the last N hours.
-
-        Args:
-            hours: Number of hours to look back (default: 24)
-            context: Optional invocation context for tracing
-
-        Returns:
-            List of recent email messages
-        """
+        """Get emails from the last N hours."""
         query = f"newer_than:{hours}h"
-        return await self.search_emails(query, max_results=50, context=context)
+        return await self.search_emails(query, max_results=50)
 
     # ===========================================================================
     # Calendar Operations
@@ -283,7 +336,7 @@ class GoogleWorkspaceBridge:
         start: datetime | None = None,
         end: datetime | None = None,
         max_results: int = 10,
-        context: ToolInvocationContext | None = None,
+        _context: Any = None,
     ) -> list[CalendarEvent]:
         """
         List calendar events in a time range.
@@ -292,13 +345,13 @@ class GoogleWorkspaceBridge:
             start: Start of time range (default: now)
             end: End of time range (default: 7 days from start)
             max_results: Maximum number of events to return (default: 10)
-            context: Optional invocation context for tracing
+            context: Ignored (kept for interface compatibility)
 
         Returns:
             List of calendar events in the specified range
 
         Raises:
-            MCPError: If listing fails
+            ExternalServiceError: If listing fails
         """
         await self.start()
 
@@ -307,26 +360,36 @@ class GoogleWorkspaceBridge:
         if end is None:
             end = start + timedelta(days=7)
 
+        loop = asyncio.get_event_loop()
+
+        def do_list() -> list[dict[str, Any]]:
+            try:
+                results = (
+                    self._calendar_service.events()
+                    .list(
+                        calendarId="primary",
+                        timeMin=start.isoformat() + "Z",
+                        timeMax=end.isoformat() + "Z",
+                        maxResults=max_results,
+                        singleEvents=True,
+                        orderBy="startTime",
+                    )
+                    .execute()
+                )
+                items: list[dict[str, Any]] = results.get("items", [])
+                return items
+            except HttpError as e:
+                raise ExternalServiceError("calendar", f"List failed: {e}") from e
+
         try:
-            result = await self._client.invoke_tool(
-                server_name=self.SERVER_CONFIG.name,
-                tool_name="calendar_list_events",
-                arguments={
-                    "timeMin": start.isoformat() + "Z",
-                    "timeMax": end.isoformat() + "Z",
-                    "maxResults": max_results,
-                },
-                context=context or self._default_context(),
-            )
-
-            return self._parse_event_list(result)
-
+            raw_events = await loop.run_in_executor(None, do_list)
+            return self._parse_calendar_events(raw_events)
         except Exception as e:
             logger.error(
                 f"[STORM] Calendar list failed: {e}",
                 extra={"start": start.isoformat(), "end": end.isoformat()},
             )
-            raise MCPError(f"Calendar list failed: {e}", tool_name="calendar_list_events") from e
+            raise
 
     async def create_event(
         self,
@@ -336,7 +399,7 @@ class GoogleWorkspaceBridge:
         description: str | None = None,
         location: str | None = None,
         attendees: list[str] | None = None,
-        context: ToolInvocationContext | None = None,
+        _context: Any = None,
     ) -> CreateEventResult:
         """
         Create a new calendar event.
@@ -348,130 +411,112 @@ class GoogleWorkspaceBridge:
             description: Optional event description
             location: Optional event location
             attendees: Optional list of attendee email addresses
-            context: Optional invocation context for tracing
+            context: Ignored (kept for interface compatibility)
 
         Returns:
             Result containing event ID and link, or error details
         """
         await self.start()
 
+        loop = asyncio.get_event_loop()
+
+        def do_create() -> dict[str, Any]:
+            try:
+                event_body: dict[str, Any] = {
+                    "summary": title,
+                    "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+                    "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+                }
+
+                if description:
+                    event_body["description"] = description
+                if location:
+                    event_body["location"] = location
+                if attendees:
+                    event_body["attendees"] = [{"email": email} for email in attendees]
+
+                event: dict[str, Any] = (
+                    self._calendar_service.events()
+                    .insert(calendarId="primary", body=event_body)
+                    .execute()
+                )
+                return event
+
+            except HttpError as e:
+                raise ExternalServiceError("calendar", f"Create failed: {e}") from e
+
         try:
-            arguments: dict[str, Any] = {
-                "summary": title,
-                "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
-            }
-
-            if description:
-                arguments["description"] = description
-            if location:
-                arguments["location"] = location
-            if attendees:
-                arguments["attendees"] = [{"email": email} for email in attendees]
-
-            result = await self._client.invoke_tool(
-                server_name=self.SERVER_CONFIG.name,
-                tool_name="calendar_create_event",
-                arguments=arguments,
-                context=context or self._default_context(),
-            )
-
+            result = await loop.run_in_executor(None, do_create)
             return CreateEventResult(
                 success=True,
                 event_id=result.get("id"),
                 event_link=result.get("htmlLink"),
             )
-
         except Exception as e:
             logger.error(
                 f"[STORM] Calendar event creation failed: {e}",
                 extra={"title": title, "start": start.isoformat()},
             )
-            return CreateEventResult(
-                success=False,
-                error=str(e),
-            )
+            return CreateEventResult(success=False, error=str(e))
 
-    async def get_todays_events(
-        self,
-        context: ToolInvocationContext | None = None,
-    ) -> list[CalendarEvent]:
-        """
-        Get all events for today.
-
-        Args:
-            context: Optional invocation context for tracing
-
-        Returns:
-            List of today's calendar events
-        """
+    async def get_todays_events(self, _context: Any = None) -> list[CalendarEvent]:
+        """Get all events for today."""
         now = datetime.now()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return await self.list_events(start, end, max_results=50, context=context)
+        return await self.list_events(start, end, max_results=50)
 
-    async def get_tomorrows_events(
-        self,
-        context: ToolInvocationContext | None = None,
-    ) -> list[CalendarEvent]:
-        """
-        Get all events for tomorrow.
-
-        Args:
-            context: Optional invocation context for tracing
-
-        Returns:
-            List of tomorrow's calendar events
-        """
+    async def get_tomorrows_events(self, _context: Any = None) -> list[CalendarEvent]:
+        """Get all events for tomorrow."""
         tomorrow = datetime.now() + timedelta(days=1)
         start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end = tomorrow.replace(hour=23, minute=59, second=59, microsecond=999999)
-        return await self.list_events(start, end, max_results=50, context=context)
+        return await self.list_events(start, end, max_results=50)
 
     # ===========================================================================
     # Helper Methods
     # ===========================================================================
 
-    def _default_context(self) -> ToolInvocationContext:
-        """Create a default invocation context with generated trace ID."""
-        return ToolInvocationContext(
-            trace_id=str(uuid.uuid4()),
-            agent_name="google_workspace_bridge",
-        )
-
-    def _parse_email_list(self, result: dict[str, Any]) -> list[EmailMessage]:
-        """
-        Parse MCP response into list of EmailMessage models.
-
-        Args:
-            result: Raw MCP tool result
-
-        Returns:
-            List of validated EmailMessage instances
-        """
-        messages = result.get("messages", [])
+    def _parse_gmail_messages(self, messages: list[dict[str, Any]]) -> list[EmailMessage]:
+        """Parse Gmail API response into EmailMessage models."""
         parsed: list[EmailMessage] = []
 
         for msg in messages:
             try:
-                # Parse date, handling various formats
-                date_str = msg.get("date", datetime.now().isoformat())
+                headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+
+                # Parse date
+                date_str = headers.get("Date", "")
                 try:
-                    # Try ISO format first
-                    date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                except (ValueError, AttributeError):
-                    # Fall back to now if parsing fails
+                    # Try parsing common date formats
+                    from email.utils import parsedate_to_datetime
+
+                    date = parsedate_to_datetime(date_str)
+                except Exception:
                     date = datetime.now()
+
+                # Extract body
+                body = None
+                payload = msg.get("payload", {})
+                if "body" in payload and payload["body"].get("data"):
+                    body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+                elif "parts" in payload:
+                    for part in payload["parts"]:
+                        if part.get("mimeType") == "text/plain" and part.get("body", {}).get(
+                            "data"
+                        ):
+                            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+                            break
 
                 email = EmailMessage(
                     id=msg.get("id", ""),
                     thread_id=msg.get("threadId", ""),
-                    subject=msg.get("subject", "(no subject)"),
-                    sender=msg.get("from", "unknown"),
-                    recipient=msg.get("to"),
+                    subject=headers.get("Subject", "(no subject)"),
+                    sender=headers.get("From", "unknown"),
+                    recipient=headers.get("To"),
                     date=date,
                     snippet=msg.get("snippet", ""),
-                    body=msg.get("body"),
+                    body=body,
                     is_unread="UNREAD" in msg.get("labelIds", []),
                 )
                 parsed.append(email)
@@ -485,17 +530,8 @@ class GoogleWorkspaceBridge:
 
         return parsed
 
-    def _parse_event_list(self, result: dict[str, Any]) -> list[CalendarEvent]:
-        """
-        Parse MCP response into list of CalendarEvent models.
-
-        Args:
-            result: Raw MCP tool result
-
-        Returns:
-            List of validated CalendarEvent instances
-        """
-        events = result.get("items", [])
+    def _parse_calendar_events(self, events: list[dict[str, Any]]) -> list[CalendarEvent]:
+        """Parse Calendar API response into CalendarEvent models."""
         parsed: list[CalendarEvent] = []
 
         for evt in events:
@@ -512,7 +548,7 @@ class GoogleWorkspaceBridge:
                     "date", datetime.now().isoformat()
                 )
 
-                # Remove Z suffix and parse
+                # Parse ISO format
                 start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
 

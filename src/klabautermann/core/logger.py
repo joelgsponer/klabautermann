@@ -15,7 +15,7 @@ import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 
 if TYPE_CHECKING:
@@ -77,7 +77,7 @@ class KlabautermannLogger(logging.Logger):
 class NauticalFormatter(logging.Formatter):
     """Formatter that converts levels to nautical names with optional color."""
 
-    LEVEL_MAP: dict[str, str] = {
+    LEVEL_MAP: ClassVar[dict[str, str]] = {
         "DEBUG": "[WHISPER]",
         "INFO": "[CHART]",
         "SUCCESS": "[BEACON]",
@@ -87,7 +87,7 @@ class NauticalFormatter(logging.Formatter):
     }
 
     # ANSI color codes for terminal output
-    COLORS: dict[str, str] = {
+    COLORS: ClassVar[dict[str, str]] = {
         "DEBUG": "\033[90m",  # Gray
         "INFO": "\033[36m",  # Cyan
         "SUCCESS": "\033[32m",  # Green
@@ -118,7 +118,7 @@ class NauticalFormatter(logging.Formatter):
             reset = self.COLORS["RESET"]
             nautical_level = f"{color}{nautical_level}{reset}"
 
-        # Format: timestamp | trace_id | agent | level | message
+        # Log line layout: timestamp, trace_id, agent, level, message
         base_msg = f"{timestamp} | {trace_id:8} | {agent_name:12} | {nautical_level:12} | {record.getMessage()}"
 
         # Add exception info if present
@@ -187,8 +187,8 @@ def setup_logger(
     log: KlabautermannLogger = logging.getLogger(name)  # type: ignore[assignment]
 
     # Set level from arg, env var, or default
-    level = level or os.getenv("LOG_LEVEL", "INFO")
-    log.setLevel(getattr(logging, level.upper(), logging.INFO))
+    resolved_level = level or os.getenv("LOG_LEVEL") or "INFO"
+    log.setLevel(getattr(logging, resolved_level.upper(), logging.INFO))
 
     # Clear existing handlers to avoid duplicates
     log.handlers.clear()
