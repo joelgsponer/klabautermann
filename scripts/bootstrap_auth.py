@@ -173,9 +173,9 @@ def verify_credentials(credentials: Credentials):
         email = profile.get("emailAddress", "unknown")
         print(f"  - Gmail: Connected as {email}")
 
-        # Test Calendar API
+        # Test Calendar API (use events.list on primary calendar - works with calendar.events scope)
         calendar = build("calendar", "v3", credentials=credentials)
-        _ = calendar.calendarList().list(maxResults=1).execute()
+        _ = calendar.events().list(calendarId="primary", maxResults=1).execute()
         print("  - Calendar: Access confirmed")
 
     except Exception as e:
