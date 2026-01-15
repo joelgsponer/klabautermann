@@ -644,3 +644,229 @@ async def test_lifecycle_uses_parameterized_queries(
     query = call_args[0][0]
     assert "$thread_uuid" in query
     assert "$now" in query
+
+
+# ===========================================================================
+# Message Pruning Tests (T043)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_verify_thread_archived_returns_true_for_archived_with_summary(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test verify_thread_archived returns True for archived thread with summary."""
+    # Mock successful verification
+    mock_neo4j_client.execute_query.return_value = [
+        {"t.uuid": "thread-123", "note_uuid": "note-456"}
+    ]
+
+    result = await thread_manager.verify_thread_archived("thread-123", trace_id="test-trace")
+
+    # Verify success
+    assert result is True
+
+    # Verify query structure
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "MATCH (t:Thread {uuid: $thread_uuid})" in query
+    assert "WHERE t.status = 'archived'" in query
+    assert "MATCH (n:Note)-[:SUMMARY_OF]->(t)" in query
+
+    # Verify parameters
+    params = call_args[0][1]
+    assert params["thread_uuid"] == "thread-123"
+
+
+@pytest.mark.asyncio
+async def test_verify_thread_archived_returns_false_for_non_archived(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test verify_thread_archived returns False for non-archived thread."""
+    # Empty result means thread not archived
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.verify_thread_archived("thread-123")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_verify_thread_archived_returns_false_for_archived_without_summary(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test verify_thread_archived returns False if archived but missing summary."""
+    # Empty result because MATCH on Note-[:SUMMARY_OF]->Thread failed
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.verify_thread_archived("thread-123")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_deletes_messages(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages successfully deletes messages."""
+    # First call: verify_thread_archived returns True
+    # Second call: delete messages returns count
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 5}],  # delete
+    ]
+
+    result = await thread_manager.prune_thread_messages("thread-123", trace_id="test-trace")
+
+    # Verify result
+    assert result == 5
+
+    # Verify delete query was called
+    assert mock_neo4j_client.execute_query.call_count == 2
+
+    # Check delete query structure
+    delete_call = mock_neo4j_client.execute_query.call_args_list[1]
+    query = delete_call[0][0]
+    assert "MATCH (t:Thread {uuid: $thread_uuid})-[:CONTAINS]->(m:Message)" in query
+    assert "DETACH DELETE" in query
+    assert "SET t.messages_pruned_at = $now" in query
+    assert "t.messages_pruned_count = message_count" in query
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_returns_zero_for_non_archived_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages returns 0 for non-archived thread (logs warning)."""
+    # verify_thread_archived returns False
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.prune_thread_messages("thread-123", trace_id="test-trace")
+
+    # Verify result is 0 (no messages pruned)
+    assert result == 0
+
+    # Verify only verification query was called, not delete
+    # (This proves the warning path was taken and deletion was skipped)
+    assert mock_neo4j_client.execute_query.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_uses_parameterized_queries(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages uses parameterized queries (injection safety)."""
+    # Setup successful pruning
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 3}],  # delete
+    ]
+
+    await thread_manager.prune_thread_messages("thread-123")
+
+    # Check verify query uses parameters
+    verify_call = mock_neo4j_client.execute_query.call_args_list[0]
+    verify_query = verify_call[0][0]
+    verify_params = verify_call[0][1]
+    assert "$thread_uuid" in verify_query
+    assert "thread_uuid" in verify_params
+
+    # Check delete query uses parameters
+    delete_call = mock_neo4j_client.execute_query.call_args_list[1]
+    delete_query = delete_call[0][0]
+    delete_params = delete_call[0][1]
+    assert "$thread_uuid" in delete_query
+    assert "$now" in delete_query
+    assert "thread_uuid" in delete_params
+    assert "now" in delete_params
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_preserves_thread_node(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages preserves Thread node while deleting messages."""
+    # Setup successful pruning
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 10}],  # delete
+    ]
+
+    result = await thread_manager.prune_thread_messages("thread-123")
+
+    assert result == 10
+
+    # Verify delete query only targets Message nodes
+    delete_call = mock_neo4j_client.execute_query.call_args_list[1]
+    query = delete_call[0][0]
+    # Should delete messages but SET properties on thread (not delete thread)
+    assert "DETACH DELETE msg" in query or "DETACH DELETE m" in query
+    assert "SET t.messages_pruned_at" in query  # Thread is updated, not deleted
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_sets_pruning_metadata(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages sets pruning metadata on Thread."""
+    # Setup successful pruning
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 7}],  # delete
+    ]
+
+    await thread_manager.prune_thread_messages("thread-123")
+
+    # Check delete query sets metadata
+    delete_call = mock_neo4j_client.execute_query.call_args_list[1]
+    query = delete_call[0][0]
+    assert "SET t.messages_pruned_at = $now" in query
+    assert "t.messages_pruned_count = message_count" in query
+    assert "t.updated_at = $now" in query
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_trace_id_propagation(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test that trace_id is passed through both verify and prune calls."""
+    trace_id = "test-trace-prune-123"
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 3}],  # delete
+    ]
+
+    await thread_manager.prune_thread_messages("thread-123", trace_id=trace_id)
+
+    # Verify trace_id passed to both queries
+    verify_call = mock_neo4j_client.execute_query.call_args_list[0]
+    assert verify_call[1]["trace_id"] == trace_id
+
+    delete_call = mock_neo4j_client.execute_query.call_args_list[1]
+    assert delete_call[1]["trace_id"] == trace_id
+
+
+@pytest.mark.asyncio
+async def test_prune_thread_messages_handles_empty_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test prune_thread_messages handles thread with no messages."""
+    # Thread is verified but has no messages
+    mock_neo4j_client.execute_query.side_effect = [
+        [{"t.uuid": "thread-123", "note_uuid": "note-456"}],  # verify
+        [{"message_count": 0}],  # no messages to delete
+    ]
+
+    result = await thread_manager.prune_thread_messages("thread-123")
+
+    assert result == 0

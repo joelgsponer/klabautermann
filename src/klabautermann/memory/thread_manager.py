@@ -609,6 +609,119 @@ class ThreadManager:
 
         return thread_uuids
 
+    async def verify_thread_archived(
+        self,
+        thread_uuid: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Verify that a thread is safely archived.
+
+        Checks both:
+        1. Thread status is 'archived'
+        2. Thread has a linked [:SUMMARY_OF] Note relationship
+
+        Args:
+            thread_uuid: Thread UUID to verify
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if thread is archived with summary, False otherwise
+        """
+        query = """
+        MATCH (t:Thread {uuid: $thread_uuid})
+        WHERE t.status = 'archived'
+        MATCH (n:Note)-[:SUMMARY_OF]->(t)
+        RETURN t.uuid, n.uuid as note_uuid
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {"thread_uuid": thread_uuid},
+            trace_id=trace_id,
+        )
+
+        is_verified = len(result) > 0
+
+        if is_verified:
+            logger.debug(
+                f"[WHISPER] Thread {thread_uuid[:8]}... is verified archived with summary",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+        else:
+            logger.debug(
+                f"[WHISPER] Thread {thread_uuid[:8]}... is NOT verified archived",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+
+        return is_verified
+
+    async def prune_thread_messages(
+        self,
+        thread_uuid: str,
+        trace_id: str | None = None,
+    ) -> int:
+        """
+        Delete all Message nodes from an archived thread.
+
+        This is aggressive pruning - only the summary Note survives.
+        The Thread node is preserved as a reference point.
+
+        SAFETY: This operation is IRREVERSIBLE. Only works if:
+        1. Thread status is 'archived'
+        2. Thread has a linked [:SUMMARY_OF] Note
+
+        Args:
+            thread_uuid: Thread UUID to prune messages from
+            trace_id: Trace ID for logging
+
+        Returns:
+            Count of deleted messages (0 if thread not safely archived)
+        """
+        # First verify thread is safely archived
+        is_verified = await self.verify_thread_archived(thread_uuid, trace_id=trace_id)
+
+        if not is_verified:
+            logger.warning(
+                f"[SWELL] Cannot prune thread {thread_uuid[:8]}...: "
+                "not archived or missing summary",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+            return 0
+
+        # Delete messages and count them
+        delete_query = """
+        MATCH (t:Thread {uuid: $thread_uuid})-[:CONTAINS]->(m:Message)
+        WITH t, count(m) as message_count, collect(m) as messages
+        FOREACH (msg IN messages | DETACH DELETE msg)
+        SET t.messages_pruned_at = $now,
+            t.messages_pruned_count = message_count,
+            t.updated_at = $now
+        RETURN message_count
+        """
+
+        now = time.time()
+        result = await self.neo4j.execute_query(
+            delete_query,
+            {"thread_uuid": thread_uuid, "now": now},
+            trace_id=trace_id,
+        )
+
+        deleted_count: int = result[0]["message_count"] if result else 0
+
+        if deleted_count > 0:
+            logger.info(
+                f"[BEACON] Pruned {deleted_count} messages from thread {thread_uuid[:8]}...",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+        else:
+            logger.debug(
+                f"[WHISPER] No messages to prune from thread {thread_uuid[:8]}...",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+
+        return deleted_count
+
 
 # ===========================================================================
 # Export
