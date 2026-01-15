@@ -16,10 +16,11 @@ from klabautermann.core.exceptions import (
     ValidationError,
 )
 
+
 __all__ = [
-    "KlabautermannError",
-    "GraphConnectionError",
-    "ExternalServiceError",
-    "ValidationError",
     "CircuitOpenError",
+    "ExternalServiceError",
+    "GraphConnectionError",
+    "KlabautermannError",
+    "ValidationError",
 ]

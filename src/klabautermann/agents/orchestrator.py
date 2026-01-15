@@ -141,7 +141,11 @@ Example responses:
 
         # Anthropic client (lazy initialization)
         self._anthropic = None
-        self.model = (config or {}).get("model", "claude-sonnet-4-20250514")
+        model_config = (config or {}).get("model", {})
+        if isinstance(model_config, dict):
+            self.model = model_config.get("primary", "claude-sonnet-4-20250514")
+        else:
+            self.model = model_config or "claude-sonnet-4-20250514"
 
         # Background tasks set to prevent garbage collection of fire-and-forget tasks
         self._background_tasks: set[asyncio.Task[Any]] = set()
@@ -711,7 +715,7 @@ Example responses:
     async def _handle_action(
         self,
         intent: IntentClassification,
-        context: ThreadContext | None,
+        _context: ThreadContext | None,
         trace_id: str,
     ) -> str:
         """
@@ -722,7 +726,7 @@ Example responses:
 
         Args:
             intent: Classified action intent with action description.
-            context: Conversation context for Researcher lookup.
+            _context: Conversation context for Researcher lookup.
             trace_id: Request trace ID.
 
         Returns:

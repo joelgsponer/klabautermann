@@ -10,7 +10,7 @@ Reference: specs/architecture/MEMORY.md
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from klabautermann.core.exceptions import ExternalServiceError, GraphConnectionError
@@ -163,7 +163,7 @@ class GraphitiClient:
             episode_type = episode_type_map.get(source, EpisodeType.message)
 
             # Use current time if no reference time provided
-            ref_time = reference_time or datetime.now(tz=timezone.utc)
+            ref_time = reference_time or datetime.now(tz=UTC)
 
             await self._client.add_episode(
                 name=f"episode_{trace_id or 'unknown'}_{ref_time.timestamp():.0f}",

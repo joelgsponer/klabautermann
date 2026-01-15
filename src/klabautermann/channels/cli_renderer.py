@@ -179,4 +179,4 @@ class CLIRenderer:
 # Export
 # ===========================================================================
 
-__all__ = ["CLIRenderer", "NAUTICAL_THEME"]
+__all__ = ["NAUTICAL_THEME", "CLIRenderer"]

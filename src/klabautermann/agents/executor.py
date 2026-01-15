@@ -77,11 +77,14 @@ ERROR HANDLING:
         """
         super().__init__(name, config)
         self.google = google_bridge or GoogleWorkspaceBridge()
-        self.model = (
-            self.config.get("model", "claude-3-5-sonnet-20241022")
-            if config
-            else "claude-3-5-sonnet-20241022"
-        )
+        if config:
+            model_config = self.config.get("model", {})
+            if isinstance(model_config, dict):
+                self.model = model_config.get("primary", "claude-3-5-sonnet-20241022")
+            else:
+                self.model = model_config or "claude-3-5-sonnet-20241022"
+        else:
+            self.model = "claude-3-5-sonnet-20241022"
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -136,7 +139,7 @@ ERROR HANDLING:
             )
 
     async def _parse_action(
-        self, action: str, context: dict[str, Any], trace_id: str
+        self, action: str, _context: dict[str, Any], _trace_id: str
     ) -> ActionRequest:
         """
         Parse action string into structured request.
@@ -178,7 +181,7 @@ ERROR HANDLING:
         return ActionRequest(type=ActionType.EMAIL_SEARCH, query=action)
 
     async def _validate_request(
-        self, request: ActionRequest, context: dict[str, Any], trace_id: str
+        self, request: ActionRequest, context: dict[str, Any], _trace_id: str
     ) -> ActionResult:
         """
         Validate request has all required information.
@@ -596,7 +599,7 @@ ERROR HANDLING:
 
     async def _handle_calendar_list(
         self,
-        request: ActionRequest,
+        _request: ActionRequest,
         trace_id: str,
         invocation_ctx: ToolInvocationContext,
     ) -> ActionResult:

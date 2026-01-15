@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -106,7 +106,7 @@ class NauticalFormatter(logging.Formatter):
         nautical_level = self.LEVEL_MAP.get(record.levelname, f"[{record.levelname}]")
 
         # Build timestamp
-        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime("%H:%M:%S")
+        timestamp = datetime.fromtimestamp(record.created, tz=UTC).strftime("%H:%M:%S")
 
         # Get trace_id and agent_name from extra fields
         trace_id = getattr(record, "trace_id", "-")
@@ -133,7 +133,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: LogRecord) -> str:
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "nautical_level": NauticalFormatter.LEVEL_MAP.get(record.levelname, record.levelname),
             "logger": record.name,
@@ -256,11 +256,11 @@ def log_with_context(
 
 __all__ = [
     "SUCCESS",
+    "JSONFormatter",
     "KlabautermannLogger",
     "NauticalFormatter",
-    "JSONFormatter",
-    "setup_logger",
-    "logger",
     "get_logger",
     "log_with_context",
+    "logger",
+    "setup_logger",
 ]

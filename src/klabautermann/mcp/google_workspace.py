@@ -542,9 +542,9 @@ class GoogleWorkspaceBridge:
 # ===========================================================================
 
 __all__ = [
-    "GoogleWorkspaceBridge",
-    "EmailMessage",
     "CalendarEvent",
-    "SendEmailResult",
     "CreateEventResult",
+    "EmailMessage",
+    "GoogleWorkspaceBridge",
+    "SendEmailResult",
 ]

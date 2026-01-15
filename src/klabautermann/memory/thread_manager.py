@@ -13,7 +13,7 @@ import time
 import uuid as uuid_lib
 from typing import TYPE_CHECKING
 
-from klabautermann.core.exceptions import GraphConnectionError, ThreadNotFoundError
+from klabautermann.core.exceptions import ThreadNotFoundError
 from klabautermann.core.logger import logger
 from klabautermann.core.models import (
     ChannelType,

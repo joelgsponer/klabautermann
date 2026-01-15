@@ -74,7 +74,7 @@ class CLIDriver(BaseChannel):
         """Return channel identifier."""
         return "cli"
 
-    def get_thread_id(self, event: Any = None) -> str:
+    def get_thread_id(self, _event: Any = None) -> str:
         """
         Get thread ID for CLI session.
 

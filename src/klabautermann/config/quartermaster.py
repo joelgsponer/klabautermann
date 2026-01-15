@@ -370,8 +370,8 @@ class Quartermaster:
 # ===========================================================================
 
 __all__ = [
-    "Quartermaster",
     "ConfigChangeHandler",
+    "Quartermaster",
     "ReloadCallback",
     "ReloadStats",
 ]

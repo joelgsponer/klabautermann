@@ -163,14 +163,14 @@ class Klabautermann:
             cfg = self.config_manager.get(name) if self.config_manager else None
             return cfg.model_dump() if cfg else None
 
-        # Orchestrator (Sonnet)
+        # Create Orchestrator - uses Sonnet model
         self.agents["orchestrator"] = Orchestrator(
             graphiti=self.graphiti,
             thread_manager=None,  # Will be created in Sprint 3 if needed
             config=get_config_dict("orchestrator"),
         )
 
-        # Ingestor (Haiku)
+        # Create Ingestor - uses Haiku model
         if self.graphiti:
             self.agents["ingestor"] = Ingestor(
                 name="ingestor",
@@ -181,7 +181,7 @@ class Klabautermann:
         else:
             logger.warning("[SWELL] Ingestor not created - Graphiti unavailable")
 
-        # Researcher (Haiku)
+        # Create Researcher - uses Haiku model
         self.agents["researcher"] = Researcher(
             name="researcher",
             config=get_config_dict("researcher"),
@@ -189,7 +189,7 @@ class Klabautermann:
             neo4j=self.neo4j,
         )
 
-        # Executor (Sonnet)
+        # Create Executor - uses Sonnet model
         self.agents["executor"] = Executor(
             name="executor",
             config=get_config_dict("executor"),

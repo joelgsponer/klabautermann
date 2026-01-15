@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import re
 from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, ClassVar
 from zoneinfo import ZoneInfo
 
-from klabautermann.mcp.google_workspace import CalendarEvent
+
+if TYPE_CHECKING:
+    from klabautermann.mcp.google_workspace import CalendarEvent
 
 
 # ===========================================================================
@@ -42,7 +45,7 @@ class TimeParser:
     """
 
     # Day name mapping (English)
-    DAYS = {
+    DAYS: ClassVar[dict[str, int]] = {
         "monday": 0,
         "tuesday": 1,
         "wednesday": 2,
@@ -60,7 +63,7 @@ class TimeParser:
     }
 
     # Relative day patterns (ordered by length, longest first to avoid substring matching)
-    RELATIVE_DAYS = {
+    RELATIVE_DAYS: ClassVar[dict[str, int]] = {
         "day after tomorrow": 2,
         "next week": 7,
         "tomorrow": 1,
@@ -428,9 +431,8 @@ class ConflictChecker:
             current = max(current, event.end)
 
         # Check time after last event
-        if current < day_end:
-            if day_end - current >= duration:
-                free_slots.append((current, day_end))
+        if current < day_end and day_end - current >= duration:
+            free_slots.append((current, day_end))
 
         return free_slots
 
@@ -440,7 +442,7 @@ class ConflictChecker:
 # ===========================================================================
 
 __all__ = [
-    "TimeParser",
     "CalendarFormatter",
     "ConflictChecker",
+    "TimeParser",
 ]

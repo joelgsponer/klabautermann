@@ -11,8 +11,11 @@ Reference: specs/architecture/AGENTS.md Section 1.4
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING, ClassVar
 
-from klabautermann.mcp.google_workspace import EmailMessage
+
+if TYPE_CHECKING:
+    from klabautermann.mcp.google_workspace import EmailMessage
 
 
 # ===========================================================================
@@ -29,7 +32,7 @@ class EmailComposer:
     """
 
     # Common greeting patterns by tone
-    GREETINGS = {
+    GREETINGS: ClassVar[dict[str, str]] = {
         "formal": "Dear {name},",
         "casual": "Hi {name},",
         "brief": "{name},",
@@ -268,7 +271,7 @@ class GmailQueryBuilder:
     # Pattern matching rules: (pattern, template)
     # {0}, {1}, etc. are group captures from the pattern
     # Order matters: more specific patterns should come first
-    PATTERNS = [
+    PATTERNS: ClassVar[list[tuple[str, str]]] = [
         # Time patterns (must come before general "from" pattern)
         (r"(?:from\s+)?(?:this|last)\s+week", "newer_than:7d"),
         (r"(?:from\s+)?today", "newer_than:1d"),
@@ -318,11 +321,7 @@ class GmailQueryBuilder:
             match = re.search(pattern, remaining, re.IGNORECASE)
             if match:
                 # Format template with captured groups
-                if match.groups():
-                    query_part = template.format(*match.groups())
-                else:
-                    query_part = template
-
+                query_part = template.format(*match.groups()) if match.groups() else template
                 query_parts.append(query_part)
 
                 # Remove matched part from remaining text
@@ -515,6 +514,6 @@ class EmailFormatter:
 
 __all__ = [
     "EmailComposer",
-    "GmailQueryBuilder",
     "EmailFormatter",
+    "GmailQueryBuilder",
 ]

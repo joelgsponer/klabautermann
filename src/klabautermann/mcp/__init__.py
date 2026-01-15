@@ -21,9 +21,9 @@ from klabautermann.mcp.google_workspace import (
 
 
 __all__ = [
-    "GoogleWorkspaceBridge",
-    "EmailMessage",
     "CalendarEvent",
-    "SendEmailResult",
     "CreateEventResult",
+    "EmailMessage",
+    "GoogleWorkspaceBridge",
+    "SendEmailResult",
 ]

@@ -134,7 +134,11 @@ Conversation to analyze:
         super().__init__(name, config)
         self.graphiti = graphiti_client
         self.llm = llm_client
-        self.model = self.config.get("model", "claude-3-haiku-20240307")
+        model_config = self.config.get("model", {})
+        if isinstance(model_config, dict):
+            self.model = model_config.get("primary", "claude-3-haiku-20240307")
+        else:
+            self.model = model_config or "claude-3-haiku-20240307"
         self.max_tokens = self.config.get("max_tokens", 2048)
         self.temperature = self.config.get("temperature", 0.3)
 
@@ -327,8 +331,8 @@ Conversation to analyze:
     async def _write_to_graph(
         self,
         extraction: ExtractionResult,
-        thread_id: str | None,
-        captain_uuid: str | None,
+        thread_id: str | None,  # noqa: ARG002
+        captain_uuid: str | None,  # noqa: ARG002
         trace_id: str,
     ) -> None:
         """

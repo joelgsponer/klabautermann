@@ -50,6 +50,9 @@ class BaseAgent(ABC):
         self._error_count = 0
         self._total_latency_ms = 0.0
 
+        # Task reference for start()
+        self._run_task: asyncio.Task[None] | None = None
+
     @property
     def agent_registry(self) -> dict[str, BaseAgent]:
         """Registry of all agents for message routing."""
@@ -233,7 +236,7 @@ class BaseAgent(ABC):
 
         Convenience method that calls run() in a task.
         """
-        asyncio.create_task(self.run())
+        self._run_task = asyncio.create_task(self.run())
 
     async def stop(self) -> None:
         """Stop the agent gracefully."""

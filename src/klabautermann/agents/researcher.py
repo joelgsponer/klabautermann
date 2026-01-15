@@ -15,7 +15,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -83,7 +83,7 @@ class Researcher(BaseAgent):
     """
 
     # Patterns for query classification
-    STRUCTURAL_PATTERNS: list[str] = [
+    STRUCTURAL_PATTERNS: ClassVar[list[str]] = [
         r"who (?:does|did) .+ (?:work|report)",
         r"what (?:tasks?|projects?) (?:are |is )?(?:blocked|blocking)",
         r"who (?:attended|went to)",
@@ -92,7 +92,7 @@ class Researcher(BaseAgent):
         r"what.+(?:status|progress)",
     ]
 
-    TEMPORAL_PATTERNS: list[str] = [
+    TEMPORAL_PATTERNS: ClassVar[list[str]] = [
         r"last (?:week|month|year)",
         r"yesterday|today|tomorrow",
         r"in \d{4}",
@@ -119,7 +119,11 @@ class Researcher(BaseAgent):
         super().__init__(name, config)
         self.graphiti = graphiti
         self.neo4j = neo4j
-        self.model = (config or {}).get("model", "claude-3-haiku-20240307")
+        model_config = (config or {}).get("model", {})
+        if isinstance(model_config, dict):
+            self.model = model_config.get("primary", "claude-3-haiku-20240307")
+        else:
+            self.model = model_config or "claude-3-haiku-20240307"
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -416,17 +420,17 @@ class Researcher(BaseAgent):
         """
         query_lower = query.lower()
 
-        # Pattern: "who is/does/did <name>"
+        # Match queries like "who is John" or "who did Sarah"
         match = re.search(r"who (?:is|does|did|was) (\w+)", query_lower)
         if match:
             return match.group(1).title()
 
-        # Pattern: "what <name> ..."
+        # Match queries like "what does John do"
         match = re.search(r"what (?:does|did|is|was) (\w+)", query_lower)
         if match:
             return match.group(1).title()
 
-        # Pattern: "<name> works/worked at"
+        # Match queries like "John works at Acme"
         match = re.search(r"(\w+) (?:works?|worked) (?:at|for)", query_lower)
         if match:
             return match.group(1).title()
@@ -576,4 +580,4 @@ class Researcher(BaseAgent):
 # Export
 # ===========================================================================
 
-__all__ = ["Researcher", "SearchType", "SearchResult", "SearchResponse"]
+__all__ = ["Researcher", "SearchResponse", "SearchResult", "SearchType"]
