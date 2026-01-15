@@ -94,14 +94,25 @@ def run_oauth_flow(headless: bool = False):
     """Run the OAuth2 flow."""
     print("[2/5] Starting OAuth flow...")
 
+    # For headless mode, we use a redirect URI that the user will manually handle
+    redirect_uri = "http://localhost:8080/" if headless else None
+
     flow = InstalledAppFlow.from_client_secrets_file(
         str(CREDENTIALS_FILE),
         SCOPES,
+        redirect_uri=redirect_uri,
     )
 
     if headless:
         # Headless mode: manual copy/paste of auth code
         print("  - Running in HEADLESS mode")
+        print()
+        print("  IMPORTANT: Your Google Cloud OAuth client must have this redirect URI:")
+        print("     http://localhost:8080/")
+        print()
+        print(
+            "  (Add it at: Google Cloud Console → APIs & Services → Credentials → Edit OAuth Client)"
+        )
         print()
 
         # Generate authorization URL
@@ -115,18 +126,19 @@ def run_oauth_flow(headless: bool = False):
         print(f"     {auth_url}")
         print()
         print("  2. Log in and grant access to Gmail and Calendar")
-        print("  3. Copy the authorization code from the redirect URL")
-        print("     (Look for 'code=' in the URL or the code shown on screen)")
+        print("  3. After authorization, you'll be redirected to a localhost URL that won't load")
+        print("  4. Copy the ENTIRE URL from your browser's address bar")
+        print("     (It looks like: http://localhost:8080/?code=4/0ABC...&scope=...)")
         print()
 
-        auth_code = input("  Enter authorization code: ").strip()
+        redirect_response = input("  Paste the full redirect URL here: ").strip()
 
-        if not auth_code:
-            print("\n  ERROR: No authorization code provided!")
+        if not redirect_response:
+            print("\n  ERROR: No URL provided!")
             sys.exit(1)
 
-        # Exchange code for credentials
-        flow.fetch_token(code=auth_code)
+        # Extract code from URL and fetch token
+        flow.fetch_token(authorization_response=redirect_response)
         credentials = flow.credentials
     else:
         # Interactive mode: local server
