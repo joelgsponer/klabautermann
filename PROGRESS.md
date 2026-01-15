@@ -1,6 +1,42 @@
 # Progress
 
-Current sprint: **Sprint 2 - Multi-Agent Architecture**
+Current sprint: **Sprint 3 - Thread Archival & Daily Journal**
+
+## Sprint 3 Status: IN PROGRESS
+
+**Goal:** Implement Archivist (thread summarization/pruning) and Scribe (daily journal) agents
+
+### Task Status
+
+| Task | Description | Status | Assignee |
+|------|-------------|--------|----------|
+| T036 | Cooldown detection query | **completed** | navigator |
+| T037 | Thread status lifecycle | pending | carpenter |
+| T038 | Thread summary models | pending | carpenter |
+| T039 | LLM summarization pipeline | pending | carpenter |
+| T040 | Archivist agent skeleton | pending | carpenter |
+| T041 | Note node creation | pending | navigator |
+| T042 | Day node management | pending | navigator |
+| T043 | Message pruning | pending | navigator |
+| T044 | Scribe analytics queries | pending | navigator |
+| T045 | Journal generation pipeline | pending | carpenter |
+| T046 | Scribe agent implementation | pending | carpenter |
+| T047 | APScheduler integration | pending | engineer |
+| T048 | Conflict detection summaries | pending | alchemist |
+| T049 | Entity deduplication | pending | navigator |
+| T050 | Sprint 3 integration tests | pending | inspector |
+
+### Sprint 3 Completed Tasks
+
+| Task | Description | Completed |
+|------|-------------|-----------|
+| T036 | Cooldown detection query | 2026-01-15 |
+
+### Key Decisions (Sprint 3)
+
+1. **Cooldown query pattern**: Uses parameterized Cypher with $cutoff_timestamp and $limit. Orders by oldest first (ASC) to ensure fair processing. Default 60 minutes cooldown, 10 thread batch limit.
+
+---
 
 ## Sprint 2 Status: COMPLETE ✓
 
@@ -186,6 +222,7 @@ None currently.
 
 ## Recent Activity
 
+- 2026-01-15: **Sprint 3 STARTED** - T036 completed (cooldown detection query). ThreadManager.get_inactive_threads() finds threads inactive 60+ min. 409 tests passing.
 - 2026-01-15: Post-Sprint 2 bugfixes: entity search parameter conflict, intent classification for external services, Claude post-processing for search results, Google OAuth token helper script. 398 tests passing.
 - 2026-01-15: Added README.md, headless OAuth support, contract tests, and golden scenario E2E tests
 - 2026-01-15: **Sprint 2 COMPLETE** - All 391 tests passing. Fixed test suite issues: Ingestor signature mismatch (graphiti_client), query parameter bindings (FIND_BLOCKED_TASKS), executor assertions, and integration test mock fixtures. Ready for Sprint 3
