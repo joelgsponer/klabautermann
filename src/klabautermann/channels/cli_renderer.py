@@ -83,6 +83,7 @@ class CLIRenderer:
 | `help` | Show this help |
 | `exit` / `quit` | End the session |
 | `/clear` | Clear the screen |
+| `/logs` | Toggle log output on/off |
 
 ## Tips
 

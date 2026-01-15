@@ -25,7 +25,15 @@ from prompt_toolkit.history import FileHistory
 
 from klabautermann.channels.base_channel import BaseChannel
 from klabautermann.channels.cli_renderer import CLIRenderer
-from klabautermann.core.logger import logger
+from klabautermann.core.logger import (
+    logger,
+    restore_console_logging,
+    suppress_console_logging,
+)
+
+
+# Track log visibility state
+_logs_visible = True
 
 
 if TYPE_CHECKING:
@@ -134,6 +142,18 @@ class CLIDriver(BaseChannel):
                 if user_input.lower() in ("/clear", "clear"):
                     self.renderer.clear()
                     self.renderer.render_banner()
+                    continue
+
+                # Check for logs toggle command
+                if user_input.lower() in ("/logs", "/log"):
+                    global _logs_visible
+                    _logs_visible = not _logs_visible
+                    if _logs_visible:
+                        restore_console_logging()
+                        self.renderer.render_info("Logs enabled")
+                    else:
+                        suppress_console_logging()
+                        self.renderer.render_info("Logs disabled")
                     continue
 
                 # Process the message with spinner

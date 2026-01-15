@@ -161,6 +161,9 @@ class JSONFormatter(logging.Formatter):
 # Logger Setup
 # ===========================================================================
 
+# Store reference to console handler for suppression control
+_console_handler: logging.Handler | None = None
+
 
 def setup_logger(
     name: str = "klabautermann",
@@ -196,13 +199,15 @@ def setup_logger(
     # Prevent propagation to root logger
     log.propagate = False
 
-    # Console handler
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Console handler (use stderr to avoid interfering with CLI input)
+    global _console_handler
+    console_handler = logging.StreamHandler(sys.stderr)
     if json_output or os.getenv("LOG_FORMAT") == "json":
         console_handler.setFormatter(JSONFormatter())
     else:
         console_handler.setFormatter(NauticalFormatter())
     log.addHandler(console_handler)
+    _console_handler = console_handler  # Store for suppression control
 
     # File handler (always JSON for structured analysis)
     if log_file or os.getenv("LOG_TO_FILE", "").lower() in ("true", "1", "yes"):
@@ -221,6 +226,25 @@ def setup_logger(
 
 # Create the global logger instance
 logger: KlabautermannLogger = setup_logger()
+
+
+# ===========================================================================
+# Console Logging Control
+# ===========================================================================
+
+
+def suppress_console_logging() -> None:
+    """Suppress console log output (for CLI mode to avoid interfering with input)."""
+    global _console_handler
+    if _console_handler and _console_handler in logger.handlers:
+        logger.removeHandler(_console_handler)
+
+
+def restore_console_logging() -> None:
+    """Restore console log output after CLI session ends."""
+    global _console_handler
+    if _console_handler and _console_handler not in logger.handlers:
+        logger.addHandler(_console_handler)
 
 
 # ===========================================================================
@@ -262,5 +286,7 @@ __all__ = [
     "get_logger",
     "log_with_context",
     "logger",
+    "restore_console_logging",
     "setup_logger",
+    "suppress_console_logging",
 ]
