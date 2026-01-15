@@ -165,6 +165,7 @@ class ChannelType(str, Enum):
     CLI = "cli"
     TELEGRAM = "telegram"
     DISCORD = "discord"
+    TEST = "test"
 
 
 # ===========================================================================

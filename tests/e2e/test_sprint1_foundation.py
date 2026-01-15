@@ -14,13 +14,11 @@ Reference: specs/quality/TESTING.md
 
 from __future__ import annotations
 
-import asyncio
 import os
 import sys
 import time
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -29,25 +27,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 
-if TYPE_CHECKING:
-    from klabautermann.memory.graphiti_client import GraphitiClient
-    from klabautermann.memory.neo4j_client import Neo4jClient
-
-
 # ===========================================================================
 # Fixtures
 # ===========================================================================
 
 
-@pytest.fixture(scope="module")
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def neo4j_client():
     """Initialize Neo4j client for tests."""
     from klabautermann.memory.neo4j_client import Neo4jClient
@@ -62,7 +47,7 @@ async def neo4j_client():
     await client.disconnect()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 async def graphiti_client():
     """Initialize Graphiti client for tests (optional)."""
     from klabautermann.memory.graphiti_client import GraphitiClient
@@ -70,7 +55,6 @@ async def graphiti_client():
     openai_key = os.getenv("OPENAI_API_KEY")
     if not openai_key:
         pytest.skip("OPENAI_API_KEY not set - skipping Graphiti tests")
-        return None
 
     client = GraphitiClient(
         neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
@@ -123,7 +107,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that threads can be created and retrieved."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -141,7 +125,7 @@ class TestSprint1Foundation:
         assert thread is not None
         assert thread.uuid is not None
         assert thread.external_id == test_thread_id
-        assert thread.channel_type.value == "cli" or str(thread.channel_type) == "test"
+        assert thread.channel_type.value == "test"
 
         # Act - get same thread again
         thread2 = await thread_manager.get_or_create_thread(
@@ -157,7 +141,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that messages are persisted to the graph."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -170,13 +154,13 @@ class TestSprint1Foundation:
         )
 
         # Act - add messages
-        msg1 = await thread_manager.add_message(
+        await thread_manager.add_message(
             thread_uuid=thread.uuid,
             role="user",
             content="Hello, world!",
         )
 
-        msg2 = await thread_manager.add_message(
+        await thread_manager.add_message(
             thread_uuid=thread.uuid,
             role="assistant",
             content="Hello! How can I help?",
@@ -202,7 +186,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that context window returns messages in order."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -249,7 +233,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that context window respects limit parameter."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -296,7 +280,7 @@ class TestOrchestratorIntegration:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that orchestrator generates responses."""
         from klabautermann.agents.orchestrator import Orchestrator
@@ -332,7 +316,7 @@ class TestOrchestratorIntegration:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test that response time is under 10 seconds."""
         from klabautermann.agents.orchestrator import Orchestrator
@@ -371,7 +355,7 @@ class TestGraphOperations:
     async def test_create_and_retrieve_node(
         self,
         neo4j_client,
-        cleanup_test_thread,
+        cleanup_test_thread,  # noqa: ARG002
     ):
         """Test basic node creation and retrieval."""
         from klabautermann.core.ontology import NodeLabel
