@@ -6,7 +6,7 @@
 - **Category**: subagent
 - **Effort**: L
 - **Status**: pending
-- **Assignee**: @backend-engineer
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 1.4

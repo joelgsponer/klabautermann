@@ -5,8 +5,8 @@
 - **Priority**: P1
 - **Category**: core
 - **Effort**: S
-- **Status**: pending
-- **Assignee**: @backend-engineer
+- **Status**: completed
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [CODING_STANDARDS.md](../../specs/quality/CODING_STANDARDS.md)
@@ -20,36 +20,36 @@
 External API calls (LLM, MCP tools, Neo4j) can fail transiently. A retry utility with exponential backoff ensures resilience without manual retry logic in every function. This is a foundational utility used throughout Sprint 2.
 
 ## Requirements
-- [ ] Create `src/klabautermann/utils/retry.py`:
+- [x] Create `src/klabautermann/utils/retry.py`:
 
 ### Retry Decorator
-- [ ] `@with_retry` decorator for async functions
-- [ ] Configurable max retries (default: 3)
-- [ ] Exponential backoff with jitter
-- [ ] Exception filtering (only retry specific exceptions)
+- [x] `@with_retry` decorator for async functions
+- [x] Configurable max retries (default: 3)
+- [x] Exponential backoff with jitter
+- [x] Exception filtering (only retry specific exceptions)
 
 ### Backoff Calculation
-- [ ] Base delay configurable (default: 1.0s)
-- [ ] Multiplier configurable (default: 2.0)
-- [ ] Max delay cap configurable (default: 30s)
-- [ ] Jitter: random 0-25% of delay
+- [x] Base delay configurable (default: 1.0s)
+- [x] Multiplier configurable (default: 2.0)
+- [x] Max delay cap configurable (default: 30s)
+- [x] Jitter: random 0-25% of delay
 
 ### Logging
-- [ ] Log each retry attempt with remaining count
-- [ ] Log final failure
-- [ ] Include trace_id if available in context
+- [x] Log each retry attempt with remaining count
+- [x] Log final failure
+- [x] Include trace_id if available in context
 
 ### Exception Handling
-- [ ] Allow specifying which exceptions to retry
-- [ ] Default: retry on `TimeoutError`, `ConnectionError`
-- [ ] Never retry on `ValidationError`, `AuthenticationError`
+- [x] Allow specifying which exceptions to retry
+- [x] Default: retry on `TimeoutError`, `ConnectionError`
+- [x] Never retry on `ValidationError`, `AuthenticationError`
 
 ## Acceptance Criteria
-- [ ] Decorator works with async functions
-- [ ] Backoff increases exponentially with each retry
-- [ ] Jitter prevents thundering herd
-- [ ] Only specified exceptions trigger retry
-- [ ] All retries logged appropriately
+- [x] Decorator works with async functions
+- [x] Backoff increases exponentially with each retry
+- [x] Jitter prevents thundering herd
+- [x] Only specified exceptions trigger retry
+- [x] All retries logged appropriately
 
 ## Implementation Notes
 
@@ -166,3 +166,24 @@ from klabautermann.utils.retry import with_retry, retry_on_llm_errors
 async def call_claude(prompt: str) -> str:
     return await anthropic_client.messages.create(...)
 ```
+
+## Development Notes
+
+**Files Created:**
+- `src/klabautermann/utils/retry.py` - Main retry decorator implementation
+- `src/klabautermann/utils/__init__.py` - Module exports
+- `tests/unit/test_retry.py` - Comprehensive unit tests (12 tests)
+
+**Implementation Details:**
+- Generic `with_retry` decorator with all configurable parameters
+- Convenience shortcuts: `retry_on_timeout`, `retry_on_connection`, `retry_on_llm_errors`, `retry_on_graph_errors`
+- Dynamic exception import for LLM/graph libraries to avoid hard dependencies
+
+**Testing:**
+- All 12 unit tests pass
+- Tests cover: success case, retries, max retries exhaustion, no_retry_on exceptions, exponential backoff, max delay cap, jitter
+
+**Patterns Established:**
+- Async-first utilities with decorator pattern
+- Dynamic imports for optional dependencies
+- Comprehensive test coverage for utilities

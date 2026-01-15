@@ -6,7 +6,7 @@
 - **Category**: maintenance
 - **Effort**: M
 - **Status**: pending
-- **Assignee**: @qa-engineer
+- **Assignee**: inspector
 
 ## Specs
 - Primary: [TESTING.md](../../specs/quality/TESTING.md)

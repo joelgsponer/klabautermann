@@ -5,8 +5,8 @@
 - **Priority**: P0
 - **Category**: core
 - **Effort**: M
-- **Status**: pending
-- **Assignee**: @integration-engineer
+- **Status**: in-progress
+- **Assignee**: purser
 
 ## Specs
 - Primary: [MCP_INTEGRATION.md](../../specs/architecture/MCP_INTEGRATION.md) (if exists)

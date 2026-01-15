@@ -1,0 +1,62 @@
+# Orchestrator Configuration
+# The "CEO" agent that routes intents and coordinates sub-agents
+
+model:
+  primary: claude-sonnet-4-20250514
+  fallback: claude-3-haiku-20240307
+  temperature: 0.7
+  max_context_tokens: 8000
+  max_output_tokens: 4096
+
+personality:
+  name: klabautermann
+  wit_level: 0.3  # 0.0 = terse, 1.0 = very witty
+
+intent_classification:
+  search_keywords:
+    - "who is"
+    - "what is"
+    - "when did"
+    - "where is"
+    - "find"
+    - "tell me about"
+    - "remind me"
+    - "what do you know about"
+    - "who was"
+    - "what was"
+    - "where was"
+    - "when was"
+  action_keywords:
+    - "send"
+    - "email"
+    - "schedule"
+    - "create"
+    - "draft"
+    - "book"
+    - "set up"
+    - "add to calendar"
+    - "write an email"
+  ingestion_keywords:
+    - "i met"
+    - "i talked to"
+    - "i'm working on"
+    - "i learned"
+    - "i just"
+    - "i spoke with"
+    - "i had a meeting with"
+
+delegation:
+  search: researcher
+  action: executor
+  ingest: ingestor
+
+timeouts:
+  agent_response: 30.0
+  llm_call: 60.0
+  mcp_call: 30.0
+
+retry:
+  max_attempts: 3
+  base_delay: 1.0
+  max_delay: 30.0
+  jitter: 0.25

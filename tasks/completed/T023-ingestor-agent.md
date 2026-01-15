@@ -5,8 +5,8 @@
 - **Priority**: P0
 - **Category**: subagent
 - **Effort**: L
-- **Status**: pending
-- **Assignee**: @backend-engineer
+- **Status**: completed
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 1.2
@@ -244,3 +244,72 @@ Conversation to analyze:
 ```
 
 Note: The actual Graphiti integration may need adjustment based on the Graphiti client implementation from T009. The extraction format should match what Graphiti expects.
+
+## Development Notes
+
+### Implementation
+
+**Files Created:**
+- `/home/klabautermann/klabautermann3/src/klabautermann/agents/ingestor.py` - Full Ingestor agent implementation
+- `/home/klabautermann/klabautermann3/tests/unit/test_ingestor.py` - Comprehensive unit tests (15 tests, all passing)
+
+**Key Components:**
+1. **Ingestor class** - Inherits from BaseAgent, implements fire-and-forget pattern
+2. **EXTRACTION_PROMPT** - Comprehensive prompt with full ontology constraints (20+ relationship types)
+3. **_extract()** - LLM-based entity/relationship extraction with retry decorator
+4. **_write_to_graph()** - Graphiti integration for episode ingestion
+5. **process_message()** - Main entry point, never returns response (fire-and-forget)
+
+### Decisions Made
+
+1. **Used existing Pydantic models** - Leveraged `EntityExtraction`, `RelationshipExtraction`, and `ExtractionResult` from `core.models` instead of creating new ones. This maintains consistency with the codebase.
+
+2. **Comprehensive EXTRACTION_PROMPT** - Included all relationship types from ONTOLOGY.md (WORKS_AT, REPORTS_TO, FAMILY_OF, FRIEND_OF, PRACTICES, etc.) to enable rich entity extraction from day one.
+
+3. **retry_on_llm_errors decorator** - Applied to `_extract()` method for resilience against transient LLM failures (rate limits, timeouts).
+
+4. **Graceful error handling** - All extraction failures are logged but never crash the agent. Empty text returns None immediately without calling LLM.
+
+5. **Markdown code block parsing** - LLM sometimes returns JSON wrapped in ```json blocks. Parser handles both raw JSON and markdown-wrapped JSON.
+
+6. **Entity label validation** - Invalid entity labels are skipped with warning rather than crashing. Maintains robustness against LLM hallucinations.
+
+7. **Episode formatting** - Extraction results are formatted as human-readable bullet lists for Graphiti episodes, making them easy to query and understand.
+
+8. **Fire-and-forget confirmation** - `process_message()` always returns None, confirming this agent never blocks the orchestrator's response to the user.
+
+### Patterns Established
+
+1. **LLM retry pattern** - Use `@retry_on_llm_errors()` decorator for all LLM calls in agents
+2. **JSON parsing pattern** - Always handle markdown code blocks and invalid JSON gracefully
+3. **Entity validation pattern** - Use Pydantic enum validation (EntityLabel) with try/except to skip invalid entries
+4. **Fire-and-forget pattern** - Background agents return None and never block caller
+5. **Episode content format** - Structure as "Extracted from conversation:\n- fact1\n- fact2" for readability
+
+### Testing
+
+**15 unit tests, all passing:**
+- Entity extraction (Person, Organization, Task, Event, Location)
+- Relationship extraction (WORKS_AT, HELD_AT, REPORTS_TO)
+- Temporal awareness (historical relationship detection)
+- Error handling (empty text, invalid JSON, invalid labels, LLM failures)
+- Graphiti integration (episode formatting, disconnected client)
+- Fire-and-forget pattern validation
+- Complex multi-entity conversation extraction
+
+**Test coverage includes:**
+- All entity types from ontology
+- Multiple relationship types
+- JSON parsing edge cases
+- Graceful degradation scenarios
+- Integration test with realistic conversation
+
+### Issues Encountered
+
+**None.** Implementation went smoothly. All tests pass on first run.
+
+### Next Steps
+
+1. **T024 - Researcher Agent** - Search counterpart to Ingestor
+2. **T029 - Executor Agent** - Action execution with MCP tools
+3. **Integration testing** - Wire Ingestor into Orchestrator for full flow testing

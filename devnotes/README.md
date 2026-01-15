@@ -6,17 +6,17 @@ Team knowledge repository for insights, decisions, and patterns discovered durin
 
 ```
 devnotes/
-├── pm/           # Project Manager - sprint status, decisions, blockers
-├── backend/      # Backend Engineer - agent patterns, async gotchas
-├── graph/        # Graph Engineer - schema migrations, query patterns
-├── ml/           # ML Engineer - prompt iterations, extraction quality
-├── devops/       # DevOps Engineer - docker setup, monitoring, incidents
-├── fullstack/    # Full-Stack Engineer - component design, API contracts
-├── mobile/       # Mobile Engineer - RN patterns, offline sync
-├── integration/  # Integration Engineer - MCP tools, OAuth flows
-├── qa/           # QA Engineer - test coverage, golden scenarios
-├── security/     # Security Engineer - threat model, Sieve rules
-└── docs/         # Tech Writer - changelog, terminology
+├── shipwright/   # The Shipwright (PM) - sprint status, decisions, blockers
+├── carpenter/    # The Carpenter (Backend) - agent patterns, async gotchas
+├── navigator/    # The Navigator (Graph) - schema migrations, query patterns
+├── alchemist/    # The Alchemist (ML) - prompt iterations, extraction quality
+├── engineer/     # The Engineer (DevOps) - docker setup, monitoring, incidents
+├── helmsman/     # The Helmsman (Full-Stack) - component design, API contracts
+├── scout/        # The Scout (Mobile) - RN patterns, offline sync
+├── purser/       # The Purser (Integration) - MCP tools, OAuth flows
+├── inspector/    # The Inspector (QA) - test coverage, golden scenarios
+├── watchman/     # The Watchman (Security) - threat model, Sieve rules
+└── chronicler/   # The Chronicler (Docs) - changelog, terminology
 ```
 
 ## Conventions
@@ -78,14 +78,14 @@ The actual information.
 
 ```
 Sprint Start:
-  PM creates devnotes/pm/sprint-XX-plan.md
+  Shipwright creates devnotes/shipwright/sprint-XX-plan.md
 
 During Sprint:
-  Each engineer updates their learnings.md
+  Each crew member updates their learnings.md
 
 Sprint End:
-  PM creates devnotes/pm/sprint-XX-retro.md
-  Engineers archive resolved blockers
+  Shipwright creates devnotes/shipwright/sprint-XX-retro.md
+  Crew archives resolved blockers
 ```
 
 ### Handoffs
@@ -103,10 +103,10 @@ When handing off work between roles:
 | Question | Look In |
 |----------|---------|
 | Why did we choose X? | `*/decisions.md` |
-| Current sprint status | `pm/sprint-*.md` |
-| Known issues with Neo4j | `graph/blockers.md` |
-| Async patterns to follow | `backend/learnings.md` |
-| Security concerns | `security/threat-model.md` |
+| Current sprint status | `shipwright/sprint-*.md` |
+| Known issues with Neo4j | `navigator/blockers.md` |
+| Async patterns to follow | `carpenter/learnings.md` |
+| Security concerns | `watchman/threat-model.md` |
 
 ### Creating Notes
 

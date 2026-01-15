@@ -72,6 +72,33 @@ class MCPConnectionError(KlabautermannError):
         self.server = server
 
 
+class MCPError(KlabautermannError):
+    """MCP tool invocation failed."""
+
+    def __init__(
+        self,
+        message: str,
+        tool_name: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, **kwargs)
+        self.tool_name = tool_name
+
+
+class MCPTimeoutError(MCPError):
+    """MCP tool invocation timed out."""
+
+    def __init__(
+        self,
+        message: str,
+        tool_name: str | None = None,
+        timeout_seconds: float | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, tool_name, **kwargs)
+        self.timeout_seconds = timeout_seconds
+
+
 # ===========================================================================
 # Validation Errors
 # ===========================================================================
@@ -246,6 +273,8 @@ __all__ = [
     "GraphConnectionError",
     "ExternalServiceError",
     "MCPConnectionError",
+    "MCPError",
+    "MCPTimeoutError",
     # Validation
     "ValidationError",
     "LLMOutputValidationError",

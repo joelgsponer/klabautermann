@@ -5,55 +5,55 @@
 - **Priority**: P1
 - **Category**: core
 - **Effort**: M
-- **Status**: pending
-- **Assignee**: @backend-engineer
+- **Status**: completed
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 4.2
 - Related: [AGENTS_EXTENDED.md](../../specs/architecture/AGENTS_EXTENDED.md)
 
 ## Dependencies
-- [ ] T032 - Agent configuration system
+- [x] T032 - Agent configuration system
 
 ## Context
 The Quartermaster is a utility agent that watches for configuration file changes and triggers hot-reloads. This enables tuning agent behavior (prompts, models, parameters) without restarting the system. It uses file system watching to detect changes.
 
 ## Requirements
-- [ ] Create `src/klabautermann/config/quartermaster.py`:
+- [x] Create `src/klabautermann/config/quartermaster.py`:
 
 ### File Watching
-- [ ] Watch `config/agents/` directory for changes
-- [ ] Detect file modifications (checksum comparison)
-- [ ] Debounce rapid changes (wait 500ms)
-- [ ] Handle file creation and deletion
+- [x] Watch `config/agents/` directory for changes
+- [x] Detect file modifications (checksum comparison)
+- [x] Debounce rapid changes (wait 500ms)
+- [x] Handle file creation and deletion
 
 ### Reload Mechanism
-- [ ] Trigger ConfigManager reload on change
-- [ ] Notify affected agents of config update
-- [ ] Validate new config before applying
-- [ ] Rollback on validation failure
+- [x] Trigger ConfigManager reload on change
+- [x] Notify affected agents of config update
+- [x] Validate new config before applying
+- [x] Rollback on validation failure
 
 ### Agent Notification
-- [ ] Callback system for config change events
-- [ ] Per-agent reload callbacks
-- [ ] Logging of reload events
+- [x] Callback system for config change events
+- [x] Per-agent reload callbacks
+- [x] Logging of reload events
 
 ### Error Handling
-- [ ] Invalid YAML handling
-- [ ] Schema validation errors
-- [ ] Filesystem permission errors
+- [x] Invalid YAML handling
+- [x] Schema validation errors
+- [x] Filesystem permission errors
 
 ### Status Reporting
-- [ ] Current config versions
-- [ ] Last reload timestamps
-- [ ] Reload success/failure counts
+- [x] Current config versions
+- [x] Last reload timestamps
+- [x] Reload success/failure counts
 
 ## Acceptance Criteria
-- [ ] Modifying orchestrator.yaml triggers reload
-- [ ] Agents receive new config on next request
-- [ ] Invalid YAML doesn't crash the system
-- [ ] Reload events logged
-- [ ] No reload if content unchanged
+- [x] Modifying orchestrator.yaml triggers reload
+- [x] Agents receive new config on next request
+- [x] Invalid YAML doesn't crash the system
+- [x] Reload events logged
+- [x] No reload if content unchanged
 
 ## Implementation Notes
 
@@ -325,3 +325,79 @@ orchestrator = Orchestrator(
 # Start watching
 quartermaster.start()
 ```
+
+## Development Notes
+
+### Implementation
+
+**Files Created:**
+- `src/klabautermann/config/quartermaster.py` - Main Quartermaster implementation with ConfigChangeHandler and ReloadStats
+- `tests/unit/test_quartermaster.py` - Comprehensive test suite with 28 tests
+
+**Files Modified:**
+- `src/klabautermann/config/__init__.py` - Added exports for Quartermaster, ConfigChangeHandler, ReloadCallback, ReloadStats
+- `requirements.txt` - Added watchdog>=3.0.0 dependency
+
+### Decisions Made
+
+1. **Thread-safe event handling**: Watchdog runs in a separate thread, so we use `call_soon_threadsafe` to schedule reloads on the main event loop. This ensures proper async coordination.
+
+2. **Event loop storage**: The Quartermaster stores a reference to the event loop when `start()` is called. This allows the ConfigChangeHandler (which runs in watchdog's thread) to schedule tasks on the correct loop.
+
+3. **Debouncing strategy**: Implemented debouncing using `call_later` with cancellation of pending reloads. This prevents multiple rapid file changes (e.g., from editor autosave) from triggering multiple reloads.
+
+4. **Graceful error handling**: Callbacks that raise exceptions don't prevent other callbacks from running or crash the reload process. All errors are logged with appropriate nautical log levels.
+
+5. **Statistics tracking**: ReloadStats dataclass tracks reload_count, success_count, failure_count, and last_reload timestamp per agent for monitoring and debugging.
+
+### Patterns Established
+
+1. **File system watcher integration**: Pattern for integrating watchdog with asyncio event loops using thread-safe calls.
+
+2. **Callback notification system**: Type-safe callback system using `ReloadCallback = Callable[[str], Awaitable[None]]` for agent notifications.
+
+3. **Debounce pattern**: Cancellable timer handles for debouncing rapid events.
+
+4. **Statistics tracking**: Dataclass-based stats with success/failure counts and timestamps.
+
+### Testing
+
+Created comprehensive test suite with 28 tests covering:
+- Initialization and configuration
+- Start/stop lifecycle management
+- Callback registration (single and multiple)
+- Force reload with success/failure scenarios
+- Invalid YAML handling
+- Statistics tracking
+- File system event handling (on_modified, on_created)
+- Event filtering (ignoring directories and non-YAML files)
+- Debouncing behavior
+- End-to-end hot-reload workflow
+
+All tests pass successfully.
+
+### Issues Encountered
+
+**Challenge**: Initial implementation had event loop issues where watchdog's observer thread couldn't properly schedule async tasks.
+
+**Solution**: Implemented thread-safe scheduling using `call_soon_threadsafe` to bridge between watchdog's observer thread and the main asyncio event loop. The Quartermaster stores the event loop reference when `start()` is called, and the handler uses this to schedule reloads safely.
+
+### Integration Pattern
+
+Agents can integrate with hot-reload by:
+1. Storing a reference to ConfigManager
+2. Registering a callback with Quartermaster during initialization
+3. Implementing callback handler to reload config and apply changes
+
+Example:
+```python
+async def _on_config_change(self, agent_name: str) -> None:
+    new_config = self.config_manager.get(agent_name)
+    if new_config:
+        self._config = new_config
+        await self._apply_config()  # Apply new settings
+```
+
+### Next Steps
+
+This pattern enables zero-downtime config updates for all agents. Future agents (Ingestor, Researcher, Executor) should follow this pattern for hot-reload support.

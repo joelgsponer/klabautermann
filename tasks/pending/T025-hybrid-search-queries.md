@@ -6,7 +6,7 @@
 - **Category**: core
 - **Effort**: M
 - **Status**: pending
-- **Assignee**: @graph-engineer
+- **Assignee**: navigator
 
 ## Specs
 - Primary: [MEMORY.md](../../specs/architecture/MEMORY.md)

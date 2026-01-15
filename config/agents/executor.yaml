@@ -1,0 +1,26 @@
+# Executor Configuration
+# Executes actions via MCP tools (Gmail, Calendar, etc.)
+
+model:
+  primary: claude-sonnet-4-20250514
+  temperature: 0.3
+  max_context_tokens: 4000
+  max_output_tokens: 2048
+
+tools:
+  enabled_tools:
+    - gmail
+    - calendar
+    - filesystem
+  require_confirmation: true
+  dry_run: false
+
+timeouts:
+  agent_response: 60.0
+  llm_call: 30.0
+  mcp_call: 30.0
+
+retry:
+  max_attempts: 2
+  base_delay: 2.0
+  max_delay: 30.0

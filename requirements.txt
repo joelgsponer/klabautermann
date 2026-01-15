@@ -17,6 +17,7 @@ aiofiles>=23.0
 tenacity>=8.0
 python-dotenv>=1.0
 pyyaml>=6.0
+watchdog>=3.0.0
 
 # === Development (install separately or use requirements-dev.txt) ===
 # pytest>=8.0

@@ -142,7 +142,7 @@ class BaseAgent(ABC):
             response = await self.process_message(msg)
 
             if response:
-                await self._route_response(response)
+                await self._route_response(response, original_msg=msg)
 
             self._success_count += 1
             logger.debug(
@@ -164,13 +164,29 @@ class BaseAgent(ABC):
             self._total_latency_ms += elapsed_ms
             self.inbox.task_done()
 
-    async def _route_response(self, response: AgentMessage) -> None:
+    async def _route_response(
+        self, response: AgentMessage, original_msg: AgentMessage | None = None
+    ) -> None:
         """
-        Route response to target agent.
+        Route response to target agent or response queue.
+
+        If the original message has a response_queue, send there instead
+        of the target agent's inbox (dispatch-and-wait pattern).
 
         Args:
             response: Response message to route.
+            original_msg: Original message that triggered this response.
         """
+        # Check if original message has a response queue (dispatch-and-wait pattern)
+        if original_msg and original_msg.response_queue is not None:
+            await original_msg.response_queue.put(response)
+            logger.debug(
+                f"[WHISPER] Response sent to queue for {response.target_agent}",
+                extra={"trace_id": response.trace_id, "agent_name": self.name},
+            )
+            return
+
+        # Normal routing to target agent's inbox
         target = self._agent_registry.get(response.target_agent)
         if target:
             await target.inbox.put(response)

@@ -5,8 +5,8 @@
 - **Priority**: P1
 - **Category**: core
 - **Effort**: M
-- **Status**: pending
-- **Assignee**: @backend-engineer
+- **Status**: completed
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 4
@@ -19,41 +19,41 @@
 Each agent needs configurable parameters (model, temperature, prompts, keywords). This task creates a YAML-based configuration system that allows tuning agent behavior without code changes. This is the foundation for the hot-reload system (T033).
 
 ## Requirements
-- [ ] Create configuration infrastructure:
+- [x] Create configuration infrastructure:
 
 ### Directory Structure
-- [ ] Create `config/agents/` directory
-- [ ] One YAML file per agent:
+- [x] Create `config/agents/` directory
+- [x] One YAML file per agent:
   - `orchestrator.yaml`
   - `ingestor.yaml`
   - `researcher.yaml`
   - `executor.yaml`
 
 ### Configuration Schema
-- [ ] Model settings (model name, fallback, temperature)
-- [ ] Token limits (max_context, max_output)
-- [ ] Intent classification keywords
-- [ ] Delegation mappings
-- [ ] Timeout settings
-- [ ] Retry configuration
+- [x] Model settings (model name, fallback, temperature)
+- [x] Token limits (max_context, max_output)
+- [x] Intent classification keywords
+- [x] Delegation mappings
+- [x] Timeout settings
+- [x] Retry configuration
 
 ### Config Manager
-- [ ] Create `src/klabautermann/config/manager.py`
-- [ ] Load all configs on startup
-- [ ] Validate configs against schema
-- [ ] Provide typed access to configs
+- [x] Create `src/klabautermann/config/manager.py`
+- [x] Load all configs on startup
+- [x] Validate configs against schema
+- [x] Provide typed access to configs
 
 ### Pydantic Models
-- [ ] `AgentConfig` base model
-- [ ] Agent-specific config models
-- [ ] Validation with helpful errors
+- [x] `AgentConfig` base model
+- [x] Agent-specific config models
+- [x] Validation with helpful errors
 
 ## Acceptance Criteria
-- [ ] All agent configs defined in YAML
-- [ ] Configs validated on load
-- [ ] Invalid config raises clear error
-- [ ] Configs accessible via typed interface
-- [ ] Missing optional fields use defaults
+- [x] All agent configs defined in YAML
+- [x] Configs validated on load
+- [x] Invalid config raises clear error
+- [x] Configs accessible via typed interface
+- [x] Missing optional fields use defaults
 
 ## Implementation Notes
 
@@ -369,3 +369,30 @@ class ConfigManager:
 ```
 
 Create default YAML files for each agent during setup.
+
+## Development Notes
+
+**Files Created:**
+- `src/klabautermann/config/__init__.py` - Module exports
+- `src/klabautermann/config/manager.py` - ConfigManager and Pydantic models
+- `config/agents/orchestrator.yaml` - Orchestrator configuration
+- `config/agents/ingestor.yaml` - Ingestor configuration
+- `config/agents/researcher.yaml` - Researcher configuration
+- `config/agents/executor.yaml` - Executor configuration
+- `tests/unit/test_config_manager.py` - 22 unit tests
+
+**Implementation Details:**
+- Pydantic models with validation for all config fields
+- ConfigManager with YAML loading and typed access
+- Checksum-based hot-reload detection
+- Graceful defaults when config files missing
+- Agent-specific config models (OrchestratorConfig, IngestorConfig, etc.)
+
+**Testing:**
+- All 22 unit tests pass
+- Tests cover: validation, loading, typed access, reload, missing configs
+
+**Patterns Established:**
+- YAML config in `config/agents/<agent>.yaml`
+- `ConfigManager.get_typed()` for typed config access
+- Checksum tracking for hot-reload detection

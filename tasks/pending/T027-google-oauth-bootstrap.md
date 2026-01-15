@@ -6,7 +6,7 @@
 - **Category**: deployment
 - **Effort**: M
 - **Status**: pending
-- **Assignee**: @integration-engineer
+- **Assignee**: purser
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 1.4

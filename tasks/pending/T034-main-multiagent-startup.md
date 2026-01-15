@@ -6,7 +6,7 @@
 - **Category**: core
 - **Effort**: M
 - **Status**: pending
-- **Assignee**: @backend-engineer
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 8

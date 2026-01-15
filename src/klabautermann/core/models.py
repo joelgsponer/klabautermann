@@ -302,6 +302,8 @@ class AttendedRelation(BaseRelation):
 class AgentMessage(BaseModel):
     """Message format for inter-agent communication."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     trace_id: str
     source_agent: str
     target_agent: str
@@ -309,6 +311,45 @@ class AgentMessage(BaseModel):
     payload: dict[str, Any]
     timestamp: float = Field(default_factory=current_timestamp)
     priority: str = "normal"
+    # Optional queue for synchronous dispatch-and-wait pattern
+    response_queue: Any | None = Field(default=None, exclude=True)
+
+
+# ===========================================================================
+# Intent Classification Models
+# ===========================================================================
+
+
+class IntentType(str, Enum):
+    """User intent categories for orchestrator routing."""
+
+    SEARCH = "search"
+    ACTION = "action"
+    INGESTION = "ingestion"
+    CONVERSATION = "conversation"
+
+
+class IntentClassification(BaseModel):
+    """
+    Classified user intent with confidence score.
+
+    Used by Orchestrator to route requests to appropriate sub-agents.
+    Reference: specs/architecture/AGENTS.md Section 1.1
+    """
+
+    type: IntentType
+    confidence: float = Field(ge=0.0, le=1.0)
+    query: str | None = None  # For SEARCH intent
+    action: str | None = None  # For ACTION intent
+    context_query: str | None = None  # For ACTION context lookup
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Ensure confidence is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Confidence must be between 0.0 and 1.0")
+        return v
 
 
 class ThreadContext(BaseModel):
@@ -449,6 +490,9 @@ __all__ = [
     "EntityLabel",
     "RelationshipExtraction",
     "ExtractionResult",
+    # Intent classification
+    "IntentType",
+    "IntentClassification",
     # Configuration
     "AgentConfig",
     "ChannelConfig",

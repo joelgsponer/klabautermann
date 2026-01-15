@@ -5,50 +5,50 @@
 - **Priority**: P0
 - **Category**: subagent
 - **Effort**: M
-- **Status**: pending
-- **Assignee**: @backend-engineer
+- **Status**: completed
+- **Assignee**: carpenter
 
 ## Specs
 - Primary: [AGENTS.md](../../specs/architecture/AGENTS.md) Section 2.3
 - Related: [CODING_STANDARDS.md](../../specs/quality/CODING_STANDARDS.md)
 
 ## Dependencies
-- [ ] T020 - Orchestrator intent classification
+- [x] T020 - Orchestrator intent classification
 
 ## Context
 The Orchestrator needs to delegate work to sub-agents (Researcher, Executor, Ingestor). This task implements the dispatch/wait and fire-and-forget patterns for inter-agent communication using asyncio queues.
 
 ## Requirements
-- [ ] Extend `src/klabautermann/agents/orchestrator.py`:
+- [x] Extend `src/klabautermann/agents/orchestrator.py`:
 
 ### Dispatch and Wait Pattern
-- [ ] Implement `_dispatch_and_wait()` for synchronous agent calls
-- [ ] Create response queue for waiting on sub-agent replies
-- [ ] Add timeout handling (default 30s)
-- [ ] Propagate trace ID through all calls
+- [x] Implement `_dispatch_and_wait()` for synchronous agent calls
+- [x] Create response queue for waiting on sub-agent replies
+- [x] Add timeout handling (default 30s)
+- [x] Propagate trace ID through all calls
 
 ### Fire and Forget Pattern
-- [ ] Implement `_dispatch_fire_and_forget()` for async background tasks
-- [ ] Use `asyncio.create_task()` for non-blocking dispatch
-- [ ] No response expected - used for Ingestor
+- [x] Implement `_dispatch_fire_and_forget()` for async background tasks
+- [x] Use `asyncio.create_task()` for non-blocking dispatch
+- [x] No response expected - used for Ingestor
 
 ### Response Aggregation
-- [ ] Support waiting on multiple agents in parallel
-- [ ] Combine results from Researcher + graph context for Executor
+- [x] Support waiting on multiple agents in parallel
+- [x] Combine results from Researcher + graph context for Executor
 
 ### Integration with Intent Handlers
-- [ ] Update `_handle_search()` to use `_dispatch_and_wait("researcher", ...)`
-- [ ] Update `_handle_action()` to:
+- [x] Update `_handle_search()` to use `_dispatch_and_wait("researcher", ...)`
+- [x] Update `_handle_action()` to:
   1. First dispatch to Researcher for context
   2. Then dispatch to Executor with context
-- [ ] Add fire-and-forget Ingestor call after all responses
+- [x] Add fire-and-forget Ingestor call after all responses
 
 ## Acceptance Criteria
-- [ ] Search intent delegates to Researcher and waits for response
-- [ ] Action intent queries Researcher then delegates to Executor
-- [ ] Ingestion happens in background (non-blocking)
-- [ ] Timeout triggers graceful error response
-- [ ] All delegations logged with trace ID
+- [x] Search intent delegates to Researcher and waits for response
+- [x] Action intent queries Researcher then delegates to Executor
+- [x] Ingestion happens in background (non-blocking)
+- [x] Timeout triggers graceful error response
+- [x] All delegations logged with trace ID
 
 ## Implementation Notes
 
@@ -189,3 +189,28 @@ class Orchestrator(BaseAgent):
 ```
 
 Note: The `response_queue` field will need to be added to `AgentMessage` model, or we can use a separate response routing mechanism.
+
+## Development Notes
+
+**Files Modified:**
+- `src/klabautermann/core/models.py` - Added `response_queue` field to `AgentMessage` model
+- `src/klabautermann/agents/base_agent.py` - Updated `_route_response()` to handle response queues
+- `src/klabautermann/agents/orchestrator.py` - Added `_dispatch_and_wait()`, `_dispatch_fire_and_forget()`, `_has_agent()` methods; Updated intent handlers to use delegation
+
+**Files Created:**
+- `tests/unit/test_agent_delegation.py` - 13 unit tests for delegation patterns
+
+**Implementation Details:**
+- `response_queue` field in `AgentMessage` allows synchronous dispatch-and-wait pattern
+- `_route_response()` in `BaseAgent` checks for response_queue and routes accordingly
+- Intent handlers gracefully fall back when target agents unavailable
+- All delegation logged with trace_id for observability
+
+**Testing:**
+- All 13 new tests pass
+- All 52 unit tests pass (no regressions)
+
+**Patterns Established:**
+- dispatch-and-wait: Use `response_queue` in `AgentMessage` for synchronous calls
+- fire-and-forget: No `response_queue`, message goes to inbox only
+- Graceful fallback: All handlers work without sub-agents, allowing incremental deployment
