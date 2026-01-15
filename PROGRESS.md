@@ -6,13 +6,15 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 
 **Goal:** Decompose orchestrator into specialized sub-agents with MCP integration
 
-### Current Focus (Wave 2 - Parallel Execution)
+### Current Focus (Wave 2 - COMPLETE)
+
+Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 
 | Task | Description | Status | Assignee |
 |------|-------------|--------|----------|
 | T023 | Ingestor agent | **completed** | carpenter |
 | T024 | Researcher agent | **completed** | carpenter |
-| T026 | MCP client wrapper | **in-progress** | purser |
+| T026 | MCP client wrapper | **completed** | purser |
 | T033 | Config hot-reload | **completed** | carpenter |
 
 ### Task Status
@@ -24,9 +26,9 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 | T022 | Retry utility | **completed** | carpenter |
 | T023 | Ingestor agent | **completed** | carpenter |
 | T024 | Researcher agent | **completed** | carpenter |
-| T025 | Hybrid search queries | pending | navigator |
-| T026 | MCP client wrapper | **in-progress** | purser |
-| T027 | OAuth bootstrap | pending | purser |
+| T025 | Hybrid search queries | **completed** | navigator |
+| T026 | MCP client wrapper | **completed** | purser |
+| T027 | OAuth bootstrap | **completed** | purser |
 | T028 | Google Workspace bridge | pending | purser |
 | T029 | Executor agent | pending | carpenter |
 | T030 | Gmail handlers | pending | purser |
@@ -40,7 +42,6 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 
 | Task | Assignee | Blocked By |
 |------|----------|------------|
-| T025 | navigator | T024 interface |
 | T027 | purser | T026 |
 | T029 | carpenter | T021 (done), T028 |
 
@@ -53,6 +54,9 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 | T022 | Retry utility | 2026-01-15 |
 | T023 | Ingestor agent | 2026-01-15 |
 | T024 | Researcher agent | 2026-01-15 |
+| T025 | Hybrid search queries | 2026-01-15 |
+| T026 | MCP client wrapper | 2026-01-15 |
+| T027 | Google OAuth bootstrap | 2026-01-15 |
 | T032 | Agent config system | 2026-01-15 |
 | T033 | Config hot-reload (Quartermaster) | 2026-01-15 |
 
@@ -83,6 +87,12 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 12. **Pattern-based query classification**: Researcher uses regex patterns for fast search type classification (SEMANTIC, STRUCTURAL, TEMPORAL, HYBRID) without LLM calls.
 
 13. **Search graceful degradation**: When Graphiti or Neo4j unavailable, Researcher returns empty results rather than crashing, with fallback to semantic search for unparseable queries.
+
+14. **Parametrized queries only**: All Cypher queries use $param placeholders, never f-strings or string concatenation. QueryBuilder wraps Neo4jClient with timing metadata via QueryResult dataclass.
+
+15. **Comprehensive query library**: CypherQueries class provides 20+ query strings covering Person, Task, Event, Temporal, Thread, and Graph Traversal categories. All temporal queries correctly filter expired relationships.
+
+16. **OAuth bootstrap script**: Interactive script guides users through Google OAuth2 setup, storing refresh tokens in .env with timestamped backups. Verifies credentials with test API calls before saving. Follows least-privilege principle with minimal scopes (gmail.modify, calendar.events only).
 
 ---
 
@@ -136,12 +146,12 @@ Current sprint: **Sprint 2 - Multi-Agent Architecture**
 - Intent classification keywords as `ClassVar[list[str]]` class attributes
 - Handler methods prefixed with `_handle_` for intent dispatch
 
-### Next Steps (Sprint 2)
+### Next Steps (Wave 3 - MCP Integration)
 
-1. Implement Ingestor agent for entity extraction
-2. Implement Researcher agent for hybrid search
-3. Add MCP tool integration for Executor agent
-4. Telegram channel implementation
+1. **T027**: OAuth2 bootstrap script for Google Workspace
+2. **T028**: Google Workspace MCP bridge (Gmail + Calendar)
+3. **T029**: Executor agent with MCP tool invocation
+4. **T030/T031**: Gmail and Calendar tool handlers
 
 ## Blockers
 
@@ -149,6 +159,10 @@ None currently.
 
 ## Recent Activity
 
+- 2026-01-15: T027 completed - Google OAuth bootstrap script with interactive credential setup, verification, and secure .env storage
+- 2026-01-15: **Wave 2 COMPLETE** - All core agent and infrastructure tasks completed
+- 2026-01-15: T025 completed - Hybrid search queries with 50+ unit tests. Parametrized Cypher query library with QueryBuilder and QueryResult metadata tracking
+- 2026-01-15: T026 completed - MCP client wrapper with 13 passing unit tests, JSON-RPC over stdio, async queue testing pattern established
 - 2026-01-15: T033 completed - Quartermaster hot-reload with 28 unit tests, thread-safe watchdog integration for zero-downtime config updates
 - 2026-01-15: T024 completed - Researcher agent with 36 unit tests, all passing. Implements hybrid search with SEMANTIC, STRUCTURAL, TEMPORAL, and HYBRID strategies
 - 2026-01-15: T023 completed - Ingestor agent with 15 unit tests, all passing

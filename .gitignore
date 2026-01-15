@@ -3,6 +3,7 @@
 
 # === SECRETS (CRITICAL - NEVER COMMIT) ===
 .env
+.env.backup.*
 *.pem
 *.key
 *.p12
