@@ -255,6 +255,24 @@ class JournalEntryNode(BaseNode):
     generated_at: float = Field(default_factory=current_timestamp)
 
 
+class DailyAnalytics(BaseModel):
+    """
+    Aggregated statistics for a single day.
+
+    Used by Scribe to gather data for daily journal generation.
+    Reference: specs/architecture/AGENTS.md Section 1.6
+    """
+
+    date: str  # ISO format YYYY-MM-DD
+    interaction_count: int
+    new_entities: dict[str, int] = Field(default_factory=dict)
+    tasks_completed: int
+    tasks_created: int
+    top_projects: list[dict[str, Any]] = Field(default_factory=list)
+    notes_created: int
+    events_count: int
+
+
 # ===========================================================================
 # Relationship Models
 # ===========================================================================
@@ -582,6 +600,38 @@ class ActionResult(BaseModel):
 
 
 # ===========================================================================
+# Deduplication Models
+# ===========================================================================
+
+
+class DuplicateCandidate(BaseModel):
+    """
+    Potential duplicate entity pair detected in the knowledge graph.
+
+    Used by the Archivist to identify entities that may represent
+    the same real-world object (e.g., "Sarah" and "Sarah Johnson").
+
+    Reference: specs/architecture/MEMORY.md Section 7.1
+    """
+
+    uuid1: str
+    uuid2: str
+    name1: str
+    name2: str
+    entity_type: str  # Person, Organization
+    similarity_score: float = Field(ge=0.0, le=1.0)
+    match_reasons: list[str] = Field(default_factory=list)
+
+    @field_validator("similarity_score")
+    @classmethod
+    def validate_similarity_score(cls, v: float) -> float:
+        """Ensure similarity score is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Similarity score must be between 0.0 and 1.0")
+        return v
+
+
+# ===========================================================================
 # Export
 # ===========================================================================
 
@@ -604,7 +654,11 @@ __all__ = [
     "ChannelType",
     # Thread summarization
     "ConflictResolution",
+    # Analytics
+    "DailyAnalytics",
     "DayNode",
+    # Deduplication
+    "DuplicateCandidate",
     "EntityExtraction",
     "EntityLabel",
     "EventNode",

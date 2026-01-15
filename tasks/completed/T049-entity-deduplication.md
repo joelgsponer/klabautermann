@@ -5,7 +5,7 @@
 - **Priority**: P2
 - **Category**: core
 - **Effort**: L
-- **Status**: pending
+- **Status**: completed
 - **Assignee**: navigator
 
 ## Specs
@@ -20,20 +20,20 @@
 Over time, the same person or organization may be created multiple times with slight name variations ("Sarah", "Sarah Johnson", "S. Johnson"). The Archivist needs to detect and merge these duplicates. High-confidence matches are merged automatically; ambiguous cases are flagged for user review.
 
 ## Requirements
-- [ ] Create `src/klabautermann/memory/deduplication.py`:
+- [x] Create `src/klabautermann/memory/deduplication.py`:
 
 ### Duplicate Detection
-- [ ] `find_duplicate_persons(driver: AsyncDriver) -> list[DuplicateCandidate]`
+- [x] `find_duplicate_persons(driver: AsyncDriver) -> list[DuplicateCandidate]`
   - Find Person nodes with similar names
   - Find Person nodes with same email
   - Score similarity (0.0 to 1.0)
 
-- [ ] `find_duplicate_organizations(driver: AsyncDriver) -> list[DuplicateCandidate]`
+- [x] `find_duplicate_organizations(driver: AsyncDriver) -> list[DuplicateCandidate]`
   - Find Org nodes with similar names
   - Find Org nodes with same domain
 
 ### DuplicateCandidate Model
-- [ ] Add to `core/models.py`:
+- [x] Add to `core/models.py`:
   ```python
   class DuplicateCandidate(BaseModel):
       uuid1: str
@@ -46,35 +46,35 @@ Over time, the same person or organization may be created multiple times with sl
   ```
 
 ### Merge Operations
-- [ ] `merge_entities(keep_uuid: str, remove_uuid: str, entity_type: str) -> bool`
+- [x] `merge_entities(keep_uuid: str, remove_uuid: str, entity_type: str) -> bool`
   - Transfer all relationships to kept node
   - Merge properties (keep existing, fill missing)
   - Delete duplicate node
   - Log merge action
 
-- [ ] `flag_for_review(candidate: DuplicateCandidate) -> str`
+- [x] `flag_for_review(candidate: DuplicateCandidate) -> str`
   - Create [:POTENTIAL_DUPLICATE] relationship
   - Add to user review queue
   - Return flag UUID
 
 ### Similarity Scoring
-- [ ] Name similarity: Levenshtein distance or fuzzy match
-- [ ] Email match: exact match = 1.0, domain match = 0.5
-- [ ] Combined score with weights
+- [x] Name similarity: Levenshtein distance or fuzzy match
+- [x] Email match: exact match = 1.0, domain match = 0.5
+- [x] Combined score with weights
 
 ### Thresholds
-- [ ] Auto-merge: score >= 0.9
-- [ ] Flag for review: 0.7 <= score < 0.9
-- [ ] Ignore: score < 0.7
+- [x] Auto-merge: score >= 0.9
+- [x] Flag for review: 0.7 <= score < 0.9
+- [x] Ignore: score < 0.7
 
 ## Acceptance Criteria
-- [ ] Same-email persons detected as duplicates
-- [ ] Similar names scored appropriately
-- [ ] High-confidence duplicates auto-merged
-- [ ] Ambiguous duplicates flagged for review
-- [ ] Merge transfers all relationships
-- [ ] Merge preserves merged-into node properties
-- [ ] Unit tests for detection and merging
+- [x] Same-email persons detected as duplicates
+- [x] Similar names scored appropriately
+- [x] High-confidence duplicates auto-merged
+- [x] Ambiguous duplicates flagged for review
+- [x] Merge transfers all relationships
+- [x] Merge preserves merged-into node properties
+- [x] Unit tests for detection and merging
 
 ## Implementation Notes
 
@@ -240,3 +240,73 @@ For large graphs, consider:
 - Blocking by first letter of name
 - Using trigram indexes
 - Batch processing with limits
+
+---
+
+## Development Notes
+
+### Implementation
+**Files Created:**
+- `src/klabautermann/memory/deduplication.py` - Full deduplication module with all required functions
+- `tests/unit/test_deduplication.py` - Comprehensive unit tests (22 tests, all passing)
+
+**Files Modified:**
+- `src/klabautermann/core/models.py` - Added `DuplicateCandidate` Pydantic model with validation
+- `pyproject.toml` - Added `rapidfuzz>=3.0` dependency for fuzzy string matching
+
+### Decisions Made
+
+1. **APOC-Free Implementation**: Used type-specific FOREACH queries instead of APOC's dynamic relationship creation to avoid external dependency. This keeps the implementation portable across Neo4j deployments.
+
+2. **Similarity Algorithm**: Chose `rapidfuzz.fuzz.ratio()` (Levenshtein-based) for name matching. It provides good balance between accuracy and performance for short strings like names.
+
+3. **Multi-Stage Detection**:
+   - Exact email match (score = 1.0)
+   - Email domain match combined with name similarity (score = (0.5 + name_sim) / 2)
+   - Pure name similarity using fuzzy matching
+   This catches different types of duplicates at appropriate confidence levels.
+
+4. **Graceful Error Handling**: Used `.get()` for dict access to handle empty query results without crashing. Returns False on merge failure, allowing caller to handle appropriately.
+
+5. **Property Merging Strategy**: COALESCE approach - keep existing properties on kept node, only fill in missing values from removed node. This preserves higher-quality data.
+
+### Patterns Established
+
+1. **Neo4jClient Usage**: All queries use `execute_read` for read-only operations and `execute_write` for mutations, following the established pattern in `memory/queries.py`.
+
+2. **Nautical Logging**: Used consistent logging levels:
+   - `[CHART]` for starting operations
+   - `[BEACON]` for successful completions
+   - `[WHISPER]` for debug details
+   - `[STORM]` for errors
+
+3. **Parametrized Queries**: All Cypher queries use parameter binding (`$param`) to prevent injection, following the safety pattern from `neo4j_client.py`.
+
+4. **Type-Specific Merge Queries**: Separate property merge logic for Person vs Organization, allowing for entity-specific field handling.
+
+### Testing
+
+**Test Coverage:**
+- Duplicate detection (exact email, domain match, name similarity)
+- Threshold filtering (min_score respected)
+- Duplicate avoidance (no repeated candidates)
+- Merge operations (persons, organizations, error handling)
+- Flag for review functionality
+- Full pipeline processing (auto-merge, flag, ignore)
+- Pydantic model validation
+
+**All 22 tests passing.** Tests use AsyncMock for Neo4jClient to avoid database dependency.
+
+### Issues Encountered
+
+1. **Initial Test Failure**: Name similarity scores were higher than expected. "John Smith" vs "John Smyth" = 0.95, "Robert" vs "Roberto" = 0.92. Had to use "Michael" vs "Michelle" (0.80) for medium-confidence test case.
+
+2. **Dict Access Error**: Initial implementation used `result[0]["key"]` which threw KeyError on empty results. Changed to `result[0].get("key", 0) if result else 0` for safety.
+
+### Next Steps
+
+This module can be integrated into the Archivist agent for periodic deduplication runs. Consider:
+- Adding scheduled execution (daily/weekly)
+- Building UI for reviewing flagged duplicates
+- Optimizing for large graphs (>1000 entities) with blocking strategies
+- Adding metrics tracking (merge rate, false positive rate)

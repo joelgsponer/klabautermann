@@ -29,6 +29,7 @@ dependencies = [
     "aiofiles>=23.0",
     "rich>=13.0",
     "prompt-toolkit>=3.0",
+    "rapidfuzz>=3.0",
     # Google Workspace API
     "google-auth>=2.0",
     "google-auth-oauthlib>=1.0",
