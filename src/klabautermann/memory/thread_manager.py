@@ -168,6 +168,9 @@ class ThreadManager:
         Creates the message node, links it to the thread via [:CONTAINS],
         and links to the previous message via [:PRECEDES].
 
+        If the thread is in 'archiving' status, it will be reactivated first
+        to prevent message loss during archival.
+
         Args:
             thread_uuid: Thread UUID to add message to
             role: Message role (user or assistant)
@@ -178,6 +181,15 @@ class ThreadManager:
         Returns:
             MessageNode representing the created message
         """
+        # Check thread status and reactivate if archiving
+        thread = await self.get_thread(thread_uuid, trace_id=trace_id)
+        if thread.status == ThreadStatus.ARCHIVING:
+            logger.info(
+                f"[BEACON] Reactivating archiving thread {thread_uuid[:8]}... due to new message",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+            await self.reactivate_thread(thread_uuid, trace_id=trace_id)
+
         # Normalize role to string
         if isinstance(role, MessageRole):
             role = role.value
@@ -400,6 +412,153 @@ class ThreadManager:
         result = await self.neo4j.execute_query(query, params, trace_id=trace_id)
 
         return [ThreadNode(**r["t"]) for r in result]
+
+    async def mark_archiving(
+        self,
+        thread_uuid: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Atomically mark thread as archiving.
+
+        This method implements the first state transition in the thread lifecycle:
+        active -> archiving. The atomic WHERE clause ensures that only active
+        threads can transition to archiving, preventing race conditions.
+
+        Args:
+            thread_uuid: Thread UUID to mark as archiving
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if successful, False if thread not in 'active' state
+        """
+        now = time.time()
+        query = """
+        MATCH (t:Thread {uuid: $thread_uuid})
+        WHERE t.status = 'active'
+        SET t.status = 'archiving',
+            t.archiving_started_at = $now,
+            t.updated_at = $now
+        RETURN t.uuid
+        """
+        result = await self.neo4j.execute_query(
+            query,
+            {"thread_uuid": thread_uuid, "now": now},
+            trace_id=trace_id,
+        )
+
+        success = len(result) > 0
+        if success:
+            logger.info(
+                f"[CHART] Thread {thread_uuid[:8]}... status -> archiving",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+        else:
+            logger.debug(
+                f"[WHISPER] Cannot mark thread {thread_uuid[:8]}... as archiving (not active)",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+
+        return success
+
+    async def mark_archived(
+        self,
+        thread_uuid: str,
+        summary_uuid: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Mark thread as archived and link summary note.
+
+        This method implements the second state transition in the thread lifecycle:
+        archiving -> archived. The atomic WHERE clause ensures that only threads
+        currently in 'archiving' state can be archived.
+
+        Args:
+            thread_uuid: Thread UUID to mark as archived
+            summary_uuid: UUID of the summary Note node
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if successful, False if thread not in 'archiving' state
+        """
+        now = time.time()
+        query = """
+        MATCH (t:Thread {uuid: $thread_uuid})
+        WHERE t.status = 'archiving'
+        MATCH (n:Note {uuid: $summary_uuid})
+        SET t.status = 'archived',
+            t.archived_at = $now,
+            t.updated_at = $now
+        CREATE (n)-[:SUMMARY_OF]->(t)
+        RETURN t.uuid
+        """
+        result = await self.neo4j.execute_query(
+            query,
+            {"thread_uuid": thread_uuid, "summary_uuid": summary_uuid, "now": now},
+            trace_id=trace_id,
+        )
+
+        success = len(result) > 0
+        if success:
+            logger.info(
+                f"[CHART] Thread {thread_uuid[:8]}... status -> archived (summary: {summary_uuid[:8]}...)",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+        else:
+            logger.debug(
+                f"[WHISPER] Cannot mark thread {thread_uuid[:8]}... as archived (not archiving)",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+
+        return success
+
+    async def reactivate_thread(
+        self,
+        thread_uuid: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Reactivate a thread that was being archived.
+
+        This method reverts the archiving -> active transition. It's used when
+        archival fails or when a new message arrives while a thread is being archived.
+
+        Args:
+            thread_uuid: Thread UUID to reactivate
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if successful, False if thread not in 'archiving' state
+        """
+        now = time.time()
+        query = """
+        MATCH (t:Thread {uuid: $thread_uuid})
+        WHERE t.status = 'archiving'
+        SET t.status = 'active',
+            t.updated_at = $now
+        REMOVE t.archiving_started_at
+        RETURN t.uuid
+        """
+        result = await self.neo4j.execute_query(
+            query,
+            {"thread_uuid": thread_uuid, "now": now},
+            trace_id=trace_id,
+        )
+
+        success = len(result) > 0
+        if success:
+            logger.info(
+                f"[CHART] Thread {thread_uuid[:8]}... status -> active (reactivated)",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+        else:
+            logger.debug(
+                f"[WHISPER] Cannot reactivate thread {thread_uuid[:8]}... (not archiving)",
+                extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+            )
+
+        return success
 
     async def get_inactive_threads(
         self,

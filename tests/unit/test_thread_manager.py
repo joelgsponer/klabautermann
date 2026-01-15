@@ -304,3 +304,343 @@ async def test_get_inactive_threads_prevents_overwhelming_pipeline(
 
     # In real scenario, Neo4j would return only 10 results
     # Our mock returns all 100, but that's okay for testing parameter passing
+
+
+# ===========================================================================
+# Thread Status Lifecycle Tests (T037)
+# ===========================================================================
+
+
+@pytest.mark.asyncio
+async def test_mark_archiving_success_for_active_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archiving succeeds for active thread."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    result = await thread_manager.mark_archiving("thread-123", trace_id="test-trace")
+
+    # Verify success
+    assert result is True
+
+    # Verify query structure
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "MATCH (t:Thread {uuid: $thread_uuid})" in query
+    assert "WHERE t.status = 'active'" in query
+    assert "SET t.status = 'archiving'" in query
+    assert "t.archiving_started_at = $now" in query
+    assert "t.updated_at = $now" in query
+
+    # Verify parameters
+    params = call_args[0][1]
+    assert params["thread_uuid"] == "thread-123"
+    assert "now" in params
+
+
+@pytest.mark.asyncio
+async def test_mark_archiving_fails_for_non_active_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archiving fails if thread is not active."""
+    # Empty result means WHERE clause didn't match
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.mark_archiving("thread-123")
+
+    # Verify failure
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_mark_archiving_atomic_check_and_update(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archiving uses atomic WHERE clause."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    await thread_manager.mark_archiving("thread-123")
+
+    # Verify WHERE clause is used for atomicity
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "WHERE t.status = 'active'" in query
+    # This ensures only one archiving process can succeed
+
+
+@pytest.mark.asyncio
+async def test_mark_archived_success_for_archiving_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archived succeeds for archiving thread."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    result = await thread_manager.mark_archived("thread-123", "summary-456", trace_id="test-trace")
+
+    # Verify success
+    assert result is True
+
+    # Verify query structure
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "MATCH (t:Thread {uuid: $thread_uuid})" in query
+    assert "WHERE t.status = 'archiving'" in query
+    assert "MATCH (n:Note {uuid: $summary_uuid})" in query
+    assert "SET t.status = 'archived'" in query
+    assert "t.archived_at = $now" in query
+    assert "CREATE (n)-[:SUMMARY_OF]->(t)" in query
+
+    # Verify parameters
+    params = call_args[0][1]
+    assert params["thread_uuid"] == "thread-123"
+    assert params["summary_uuid"] == "summary-456"
+    assert "now" in params
+
+
+@pytest.mark.asyncio
+async def test_mark_archived_fails_for_non_archiving_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archived fails if thread is not archiving."""
+    # Empty result means WHERE clause didn't match
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.mark_archived("thread-123", "summary-456")
+
+    # Verify failure
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_mark_archived_creates_summary_relationship(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test mark_archived creates [:SUMMARY_OF] relationship."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    await thread_manager.mark_archived("thread-123", "summary-456")
+
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "CREATE (n)-[:SUMMARY_OF]->(t)" in query
+
+
+@pytest.mark.asyncio
+async def test_reactivate_thread_success_for_archiving_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test reactivate_thread succeeds for archiving thread."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    result = await thread_manager.reactivate_thread("thread-123", trace_id="test-trace")
+
+    # Verify success
+    assert result is True
+
+    # Verify query structure
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "MATCH (t:Thread {uuid: $thread_uuid})" in query
+    assert "WHERE t.status = 'archiving'" in query
+    assert "SET t.status = 'active'" in query
+    assert "REMOVE t.archiving_started_at" in query
+
+    # Verify parameters
+    params = call_args[0][1]
+    assert params["thread_uuid"] == "thread-123"
+    assert "now" in params
+
+
+@pytest.mark.asyncio
+async def test_reactivate_thread_fails_for_non_archiving_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test reactivate_thread fails if thread is not archiving."""
+    # Empty result means WHERE clause didn't match
+    mock_neo4j_client.execute_query.return_value = []
+
+    result = await thread_manager.reactivate_thread("thread-123")
+
+    # Verify failure
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_reactivate_thread_removes_archiving_started_at(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test reactivate_thread removes archiving_started_at timestamp."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    await thread_manager.reactivate_thread("thread-123")
+
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "REMOVE t.archiving_started_at" in query
+
+
+@pytest.mark.asyncio
+async def test_full_lifecycle_active_to_archived(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test full lifecycle: active -> archiving -> archived."""
+    # Step 1: Mark as archiving
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+    success = await thread_manager.mark_archiving("thread-123")
+    assert success is True
+
+    # Step 2: Mark as archived
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+    success = await thread_manager.mark_archived("thread-123", "summary-456")
+    assert success is True
+
+    # Verify two separate calls were made
+    assert mock_neo4j_client.execute_query.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_reactivation_during_archiving(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test lifecycle: active -> archiving -> active (reactivated)."""
+    # Step 1: Mark as archiving
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+    success = await thread_manager.mark_archiving("thread-123")
+    assert success is True
+
+    # Step 2: Reactivate
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+    success = await thread_manager.reactivate_thread("thread-123")
+    assert success is True
+
+    # Verify two separate calls were made
+    assert mock_neo4j_client.execute_query.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_add_message_reactivates_archiving_thread(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test add_message reactivates archiving thread automatically."""
+    # Mock get_thread to return archiving thread
+
+    archiving_thread = {
+        "t": {
+            "uuid": "thread-123",
+            "external_id": "cli-123",
+            "channel_type": "cli",
+            "status": "archiving",
+            "created_at": 1234567890.0,
+            "updated_at": 1234567890.0,
+            "last_message_at": 1234567890.0,
+        }
+    }
+
+    # First call: get_thread returns archiving thread
+    # Second call: reactivate_thread
+    # Third call: add_message query
+    mock_neo4j_client.execute_query.side_effect = [
+        [archiving_thread],  # get_thread
+        [{"t.uuid": "thread-123"}],  # reactivate_thread
+        [
+            {"m": {"uuid": "msg-123", "role": "user", "content": "test", "timestamp": 1234567890.0}}
+        ],  # add_message
+    ]
+
+    result = await thread_manager.add_message("thread-123", "user", "test")
+
+    # Verify message was created
+    assert result.role.value == "user"
+    assert result.content == "test"
+
+    # Verify reactivate_thread was called
+    assert mock_neo4j_client.execute_query.call_count == 3
+    second_call = mock_neo4j_client.execute_query.call_args_list[1]
+    query = second_call[0][0]
+    assert "WHERE t.status = 'archiving'" in query
+    assert "SET t.status = 'active'" in query
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_prevents_double_archiving(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test that only one archiving process can succeed (race condition prevention)."""
+    # First attempt succeeds
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+    success1 = await thread_manager.mark_archiving("thread-123")
+    assert success1 is True
+
+    # Second concurrent attempt fails (thread is already archiving)
+    mock_neo4j_client.execute_query.return_value = []
+    success2 = await thread_manager.mark_archiving("thread-123")
+    assert success2 is False
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_trace_id_propagation(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test that trace_id is passed through all lifecycle methods."""
+    trace_id = "test-trace-lifecycle-123"
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    # Test mark_archiving
+    await thread_manager.mark_archiving("thread-123", trace_id=trace_id)
+    call_args = mock_neo4j_client.execute_query.call_args
+    assert call_args[1]["trace_id"] == trace_id
+
+    # Test mark_archived
+    await thread_manager.mark_archived("thread-123", "summary-456", trace_id=trace_id)
+    call_args = mock_neo4j_client.execute_query.call_args
+    assert call_args[1]["trace_id"] == trace_id
+
+    # Test reactivate_thread
+    await thread_manager.reactivate_thread("thread-123", trace_id=trace_id)
+    call_args = mock_neo4j_client.execute_query.call_args
+    assert call_args[1]["trace_id"] == trace_id
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_uses_parameterized_queries(
+    thread_manager: ThreadManager,
+    mock_neo4j_client: Neo4jClient,
+):
+    """Test that all lifecycle methods use parameterized queries (injection safety)."""
+    mock_neo4j_client.execute_query.return_value = [{"t.uuid": "thread-123"}]
+
+    # Test mark_archiving
+    await thread_manager.mark_archiving("thread-123")
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "$thread_uuid" in query
+    assert "$now" in query
+
+    # Test mark_archived
+    await thread_manager.mark_archived("thread-123", "summary-456")
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "$thread_uuid" in query
+    assert "$summary_uuid" in query
+    assert "$now" in query
+
+    # Test reactivate_thread
+    await thread_manager.reactivate_thread("thread-123")
+    call_args = mock_neo4j_client.execute_query.call_args
+    query = call_args[0][0]
+    assert "$thread_uuid" in query
+    assert "$now" in query
