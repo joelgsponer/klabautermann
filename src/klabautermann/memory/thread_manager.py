@@ -401,6 +401,55 @@ class ThreadManager:
 
         return [ThreadNode(**r["t"]) for r in result]
 
+    async def get_inactive_threads(
+        self,
+        cooldown_minutes: int = 60,
+        limit: int = 10,
+        trace_id: str | None = None,
+    ) -> list[str]:
+        """
+        Find threads inactive for longer than cooldown period.
+
+        This query identifies threads ready for archival by the Archivist agent.
+        Threads must be in 'active' status and have not received a message for
+        the specified cooldown period.
+
+        Args:
+            cooldown_minutes: Minutes of inactivity before considered cold
+            limit: Maximum threads to return
+            trace_id: Trace ID for logging
+
+        Returns:
+            List of thread UUIDs ready for archival, ordered by last_message_at ASC
+            (oldest inactive threads first)
+        """
+        # Calculate cutoff timestamp
+        cutoff = time.time() - (cooldown_minutes * 60)
+
+        query = """
+        MATCH (t:Thread)
+        WHERE t.status = 'active'
+          AND t.last_message_at < $cutoff_timestamp
+        RETURN t.uuid
+        ORDER BY t.last_message_at ASC
+        LIMIT $limit
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {"cutoff_timestamp": cutoff, "limit": limit},
+            trace_id=trace_id,
+        )
+
+        thread_uuids = [r["t.uuid"] for r in result]
+
+        logger.debug(
+            f"[WHISPER] Found {len(thread_uuids)} inactive threads (cooldown: {cooldown_minutes}m)",
+            extra={"trace_id": trace_id, "agent_name": "thread_manager"},
+        )
+
+        return thread_uuids
+
 
 # ===========================================================================
 # Export
