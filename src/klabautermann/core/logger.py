@@ -108,9 +108,9 @@ class NauticalFormatter(logging.Formatter):
         # Build timestamp
         timestamp = datetime.fromtimestamp(record.created, tz=UTC).strftime("%H:%M:%S")
 
-        # Get trace_id and agent_name from extra fields
-        trace_id = getattr(record, "trace_id", "-")
-        agent_name = getattr(record, "agent_name", "-")
+        # Get trace_id and agent_name from extra fields (handle None values)
+        trace_id = getattr(record, "trace_id", None) or "-"
+        agent_name = getattr(record, "agent_name", None) or "-"
 
         # Apply colors if enabled
         if self.use_colors:
