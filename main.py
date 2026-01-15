@@ -19,182 +19,272 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
 import sys
 from pathlib import Path
-
-
-def setup_path() -> None:
-    """Add src to Python path for imports."""
-    src_path = Path(__file__).parent / "src"
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
+from typing import TYPE_CHECKING, Any
 
 
 # Set up path before imports
-setup_path()
+src_path = Path(__file__).parent / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 
 from dotenv import load_dotenv  # noqa: E402
 
-from klabautermann.core.exceptions import GraphConnectionError  # noqa: E402
+from klabautermann.agents.executor import Executor  # noqa: E402
+from klabautermann.agents.ingestor import Ingestor  # noqa: E402
+from klabautermann.agents.orchestrator import Orchestrator  # noqa: E402
+from klabautermann.agents.researcher import Researcher  # noqa: E402
+from klabautermann.channels.cli_driver import CLIDriver  # noqa: E402
+from klabautermann.config.manager import ConfigManager  # noqa: E402
+from klabautermann.config.quartermaster import Quartermaster  # noqa: E402
+from klabautermann.core.exceptions import GraphConnectionError, StartupError  # noqa: E402
 from klabautermann.core.logger import logger  # noqa: E402
+from klabautermann.memory.graphiti_client import GraphitiClient  # noqa: E402
+from klabautermann.memory.neo4j_client import Neo4jClient  # noqa: E402
+
+if TYPE_CHECKING:
+    from klabautermann.agents.base_agent import BaseAgent
 
 
-def check_environment() -> dict[str, str | None]:
+class Klabautermann:
     """
-    Verify required environment variables are set.
+    Main application class.
 
-    Returns:
-        Configuration dictionary with environment values.
-
-    Raises:
-        SystemExit: If required variables are missing.
+    Manages lifecycle of all agents and shared resources.
+    Coordinates initialization, startup, and shutdown.
     """
-    required = [
-        "ANTHROPIC_API_KEY",
-    ]
 
-    # These have defaults but warn if not set
-    recommended = [
-        ("NEO4J_URI", "bolt://localhost:7687"),
-        ("NEO4J_USERNAME", "neo4j"),
-        ("NEO4J_PASSWORD", None),  # No default - must be set
-    ]
+    def __init__(self) -> None:
+        """Initialize application state."""
+        # Configuration
+        self.config_manager: ConfigManager | None = None
+        self.quartermaster: Quartermaster | None = None
 
-    optional = [
-        "OPENAI_API_KEY",  # For embeddings
-        "LOG_LEVEL",
-    ]
+        # Shared clients
+        self.neo4j: Neo4jClient | None = None
+        self.graphiti: GraphitiClient | None = None
 
-    config: dict[str, str | None] = {}
-    missing: list[str] = []
+        # LLM client (lazy init)
+        self._anthropic: Any = None
 
-    # Check required
-    for var in required:
-        value = os.getenv(var)
-        if not value:
-            missing.append(var)
-        config[var] = value
+        # Agents
+        self.agents: dict[str, BaseAgent] = {}
+        self.agent_tasks: list[asyncio.Task[Any]] = []
 
-    # Check recommended with defaults
-    for var, default in recommended:
-        value = os.getenv(var, default)
-        if value is None:
-            missing.append(var)
-        config[var] = value
+        # Shutdown coordination
+        self._shutdown_event = asyncio.Event()
+        self._cli_task: asyncio.Task[Any] | None = None
 
-    # Add optional
-    for var in optional:
-        config[var] = os.getenv(var)
+    @property
+    def anthropic(self) -> Any:
+        """Lazy-load Anthropic client."""
+        if self._anthropic is None:
+            import anthropic
 
-    if missing:
-        logger.error(f"[SHIPWRECK] Missing required environment variables: {missing}")
-        logger.error("Copy .env.example to .env and fill in values:")
-        logger.error("  cp .env.example .env")
-        logger.error("  # Edit .env with your API keys and database credentials")
-        sys.exit(1)
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                raise StartupError("ANTHROPIC_API_KEY not set")
+            self._anthropic = anthropic.Anthropic(api_key=api_key)
+        return self._anthropic
 
-    return config
+    async def initialize(self) -> None:
+        """Initialize all components."""
+        logger.info("[CHART] Initializing Klabautermann...")
 
+        # Load environment
+        load_dotenv()
+        self._validate_environment()
 
-async def initialize_components(
-    config: dict[str, str | None],
-    session_id: str | None = None,
-) -> tuple:
-    """
-    Initialize all application components.
+        # Initialize configuration
+        logger.info("[CHART] Loading configuration...")
+        config_dir = Path(__file__).parent / "config" / "agents"
+        self.config_manager = ConfigManager(config_dir)
+        self.quartermaster = Quartermaster(self.config_manager)
 
-    Args:
-        config: Configuration dictionary from check_environment.
-        session_id: Optional session ID to resume.
+        # Initialize Neo4j
+        logger.info("[CHART] Connecting to Neo4j...")
+        self.neo4j = Neo4jClient(
+            uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+            username=os.getenv("NEO4J_USERNAME", "neo4j"),
+            password=os.getenv("NEO4J_PASSWORD", ""),
+        )
+        await self.neo4j.connect()
 
-    Returns:
-        Tuple of (neo4j, graphiti, orchestrator, cli).
-    """
-    from klabautermann.agents.orchestrator import Orchestrator
-    from klabautermann.channels.cli_driver import CLIDriver
-    from klabautermann.memory.graphiti_client import GraphitiClient
-    from klabautermann.memory.neo4j_client import Neo4jClient
-    from klabautermann.memory.thread_manager import ThreadManager
+        # Initialize Graphiti (optional - may fail if OpenAI key not set)
+        if os.getenv("OPENAI_API_KEY"):
+            try:
+                logger.info("[CHART] Initializing Graphiti...")
+                self.graphiti = GraphitiClient(
+                    neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+                    neo4j_user=os.getenv("NEO4J_USERNAME", "neo4j"),
+                    neo4j_password=os.getenv("NEO4J_PASSWORD", ""),
+                    openai_api_key=os.getenv("OPENAI_API_KEY"),
+                )
+                await self.graphiti.connect()
+            except Exception as e:
+                logger.warning(
+                    f"[SWELL] Graphiti initialization failed (entity extraction disabled): {e}"
+                )
+                self.graphiti = None
+        else:
+            logger.warning("[SWELL] OPENAI_API_KEY not set - entity extraction disabled")
 
-    logger.info("[CHART] Initializing components...")
+        # Create agents
+        await self._create_agents()
 
-    # Neo4j client
-    neo4j = Neo4jClient(
-        uri=config["NEO4J_URI"],
-        username=config["NEO4J_USERNAME"],
-        password=config["NEO4J_PASSWORD"],
-    )
-    await neo4j.connect()
+        # Wire up agent registry
+        self._wire_agent_registry()
 
-    # Thread manager
-    thread_manager = ThreadManager(neo4j)
+        # Start hot-reload
+        self.quartermaster.start()
 
-    # Graphiti client (optional - may fail if OpenAI key not set)
-    graphiti: GraphitiClient | None = None
-    if config.get("OPENAI_API_KEY"):
-        try:
-            graphiti = GraphitiClient(
-                neo4j_uri=config["NEO4J_URI"],
-                neo4j_user=config["NEO4J_USERNAME"],
-                neo4j_password=config["NEO4J_PASSWORD"],
-                openai_api_key=config["OPENAI_API_KEY"],
+        logger.info("[BEACON] Klabautermann initialized successfully")
+
+    def _validate_environment(self) -> None:
+        """Validate required environment variables."""
+        required = [
+            "ANTHROPIC_API_KEY",
+            "NEO4J_PASSWORD",
+        ]
+
+        missing = [var for var in required if not os.getenv(var)]
+        if missing:
+            raise StartupError(f"Missing required environment variables: {', '.join(missing)}")
+
+    async def _create_agents(self) -> None:
+        """Create all agent instances."""
+        logger.info("[CHART] Creating agents...")
+
+        # Orchestrator (Sonnet)
+        self.agents["orchestrator"] = Orchestrator(
+            graphiti=self.graphiti,
+            thread_manager=None,  # Will be created in Sprint 3 if needed
+            config=self.config_manager.get("orchestrator"),
+        )
+
+        # Ingestor (Haiku)
+        if self.graphiti:
+            self.agents["ingestor"] = Ingestor(
+                name="ingestor",
+                config=self.config_manager.get("ingestor"),
+                graphiti_client=self.graphiti,
+                llm_client=self.anthropic,
             )
-            await graphiti.connect()
-        except Exception as e:
-            logger.warning(
-                f"[SWELL] Graphiti initialization failed (entity extraction disabled): {e}"
-            )
-            graphiti = None
-    else:
-        logger.warning("[SWELL] OPENAI_API_KEY not set - entity extraction disabled")
+        else:
+            logger.warning("[SWELL] Ingestor not created - Graphiti unavailable")
 
-    # Orchestrator
-    orchestrator = Orchestrator(
-        graphiti=graphiti,
-        thread_manager=thread_manager,
-    )
+        # Researcher (Haiku)
+        self.agents["researcher"] = Researcher(
+            name="researcher",
+            config=self.config_manager.get("researcher"),
+            graphiti_client=self.graphiti,
+            neo4j_client=self.neo4j,
+            llm_client=self.anthropic,
+        )
 
-    # CLI driver with optional session ID
-    cli_config = {}
-    if session_id:
-        cli_config["session_id"] = session_id
+        # Executor (Sonnet)
+        self.agents["executor"] = Executor(
+            name="executor",
+            config=self.config_manager.get("executor"),
+            llm_client=self.anthropic,
+        )
 
-    cli = CLIDriver(
-        orchestrator=orchestrator,
-        config=cli_config,
-    )
+        logger.info(f"[CHART] Created {len(self.agents)} agents")
 
-    logger.info("[BEACON] All components initialized")
+    def _wire_agent_registry(self) -> None:
+        """Wire up agent registry for message routing."""
+        logger.debug("[WHISPER] Wiring agent registry...")
 
-    return neo4j, graphiti, orchestrator, cli
+        for agent in self.agents.values():
+            agent.agent_registry = self.agents
 
+        # Register config change callbacks
+        for name in self.agents:
+            self.quartermaster.register_callback(name, lambda n: self._on_agent_config_change(n))
 
-async def shutdown(
-    neo4j: object | None,
-    graphiti: object | None,
-) -> None:
-    """
-    Clean shutdown of all connections.
+    async def _on_agent_config_change(self, agent_name: str) -> None:
+        """Handle agent config change."""
+        logger.info(f"[BEACON] Config changed for {agent_name}")
+        # Agent will pick up new config on next request
 
-    Args:
-        neo4j: Neo4j client instance.
-        graphiti: Graphiti client instance.
-    """
-    logger.info("[CHART] Shutting down...")
+    async def start(self) -> None:
+        """Start all agents and CLI."""
+        logger.info("[CHART] Starting agent loops...")
 
-    if graphiti:
+        # Start agent processing loops
+        for name, agent in self.agents.items():
+            task = asyncio.create_task(agent.run(), name=f"agent-{name}")
+            self.agent_tasks.append(task)
+            logger.debug(f"[WHISPER] Started {name} agent loop")
+
+        # Set up signal handlers
+        loop = asyncio.get_event_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, self._handle_shutdown)
+
+        # Start CLI
+        logger.info("[BEACON] Klabautermann ready. Starting CLI...")
+        cli = CLIDriver(self.agents["orchestrator"])
+
         try:
-            await graphiti.disconnect()
-        except Exception as e:
-            logger.warning(f"[SWELL] Graphiti disconnect error: {e}")
+            # Run CLI in the main task
+            await cli.start()
+        except asyncio.CancelledError:
+            logger.info("[CHART] CLI cancelled")
 
-    if neo4j:
+    def _handle_shutdown(self) -> None:
+        """Handle shutdown signal."""
+        logger.info("[CHART] Shutdown signal received")
+        self._shutdown_event.set()
+
+        # Cancel all agent tasks
+        for task in self.agent_tasks:
+            task.cancel()
+
+    async def shutdown(self) -> None:
+        """Clean shutdown of all components."""
+        logger.info("[CHART] Shutting down Klabautermann...")
+
+        # Stop agents
+        for name, agent in self.agents.items():
+            await agent.stop()
+            logger.debug(f"[WHISPER] Stopped {name}")
+
+        # Wait for tasks to complete
+        if self.agent_tasks:
+            await asyncio.gather(*self.agent_tasks, return_exceptions=True)
+
+        # Stop hot-reload
+        if self.quartermaster:
+            self.quartermaster.stop()
+
+        # Close clients
+        if self.graphiti:
+            try:
+                await self.graphiti.disconnect()
+            except Exception as e:
+                logger.warning(f"[SWELL] Graphiti disconnect error: {e}")
+
+        if self.neo4j:
+            try:
+                await self.neo4j.disconnect()
+            except Exception as e:
+                logger.warning(f"[SWELL] Neo4j disconnect error: {e}")
+
+        logger.info("[BEACON] Klabautermann shutdown complete")
+
+    async def run(self) -> None:
+        """Main entry point."""
         try:
-            await neo4j.disconnect()
+            await self.initialize()
+            await self.start()
         except Exception as e:
-            logger.warning(f"[SWELL] Neo4j disconnect error: {e}")
-
-    logger.info("[BEACON] Shutdown complete")
+            logger.error(f"[STORM] Fatal error: {e}", exc_info=True)
+            raise
+        finally:
+            await self.shutdown()
 
 
 def parse_args() -> argparse.Namespace:
@@ -212,7 +302,7 @@ Environment Variables:
   NEO4J_URI            Neo4j connection URI (default: bolt://localhost:7687)
   NEO4J_USERNAME       Neo4j username (default: neo4j)
   NEO4J_PASSWORD       Required - Neo4j password
-  OPENAI_API_KEY       Optional - For entity extraction
+  OPENAI_API_KEY       Optional - For entity extraction via Graphiti
   LOG_LEVEL            Log verbosity (default: INFO)
 """,
     )
@@ -228,7 +318,7 @@ Environment Variables:
         "--version",
         "-V",
         action="version",
-        version="Klabautermann v0.1.0",
+        version="Klabautermann v0.2.0 (Sprint 2)",
     )
 
     return parser.parse_args()
@@ -244,25 +334,14 @@ async def main() -> int:
     # Parse arguments
     args = parse_args()
 
-    # Load environment variables from .env file
-    load_dotenv()
+    # Note: session_id support will be implemented in Sprint 3 with thread persistence
+    if args.session:
+        logger.warning("[SWELL] Session resumption not yet implemented (Sprint 3 feature)")
 
-    # Check environment
-    config = check_environment()
-
-    neo4j = None
-    graphiti = None
+    app = Klabautermann()
 
     try:
-        # Initialize components
-        neo4j, graphiti, orchestrator, cli = await initialize_components(
-            config,
-            session_id=args.session,
-        )
-
-        # Start CLI (blocking)
-        await cli.start()
-
+        await app.run()
         return 0
 
     except GraphConnectionError as e:
@@ -272,6 +351,13 @@ async def main() -> int:
         logger.error("  # Wait for Neo4j to start, then try again")
         return 1
 
+    except StartupError as e:
+        logger.error(f"[SHIPWRECK] Startup failed: {e}")
+        logger.error("Check your .env file:")
+        logger.error("  cp .env.example .env")
+        logger.error("  # Edit .env with your API keys and database credentials")
+        return 1
+
     except KeyboardInterrupt:
         logger.info("[CHART] Interrupted by user")
         return 0
@@ -279,9 +365,6 @@ async def main() -> int:
     except Exception as e:
         logger.error(f"[SHIPWRECK] Unexpected error: {e}", exc_info=True)
         return 1
-
-    finally:
-        await shutdown(neo4j, graphiti)
 
 
 if __name__ == "__main__":

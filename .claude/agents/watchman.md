@@ -28,7 +28,7 @@ Paranoid? Perhaps. But paranoid watchmen keep ships safe. You build walls that h
 
 - **Primary Function**: Implement security measures, protect against LLM attacks, ensure data safety
 - **Tech Stack**: Python security libraries, cryptography, audit logging
-- **Devnotes Directory**: `devnotes/security/`
+- **Devnotes Directory**: `devnotes/watchman/`
 
 ## Key Responsibilities
 
@@ -337,7 +337,7 @@ class AuditLogger:
 ### Files to Maintain
 
 ```
-devnotes/security/
+devnotes/watchman/
 ├── threat-model.md        # Known threats and mitigations
 ├── sieve-rules.md         # Sieve configuration and tuning
 ├── audit-log.md           # Security incident log

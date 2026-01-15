@@ -175,7 +175,7 @@ class MCPClient:
 
             return result
 
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             logger.warning(
                 f"[SWELL] Tool {tool_name} timed out",
                 extra={"trace_id": context.trace_id},
@@ -332,14 +332,12 @@ class MCPServerConnection:
             try:
                 self._process.terminate()
                 await asyncio.wait_for(self._process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Force kill if graceful shutdown fails
                 self._process.kill()
                 await self._process.wait()
             except Exception as e:
-                logger.warning(
-                    f"[SWELL] Error stopping MCP server {self.config.name}: {e}"
-                )
+                logger.warning(f"[SWELL] Error stopping MCP server {self.config.name}: {e}")
 
         # Cancel all pending requests
         for future in self._pending.values():
@@ -401,7 +399,7 @@ class MCPServerConnection:
                 ),
                 timeout=timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise
 
         # Check for error in response
@@ -515,16 +513,12 @@ class MCPServerConnection:
                         future.set_result(data)
 
             except json.JSONDecodeError as e:
-                logger.warning(
-                    f"[SWELL] Invalid JSON from MCP server {self.config.name}: {e}"
-                )
+                logger.warning(f"[SWELL] Invalid JSON from MCP server {self.config.name}: {e}")
                 continue
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(
-                    f"[STORM] MCP reader error for {self.config.name}: {e}"
-                )
+                logger.error(f"[STORM] MCP reader error for {self.config.name}: {e}")
                 break
 
         # If we exit the loop, cancel all pending requests

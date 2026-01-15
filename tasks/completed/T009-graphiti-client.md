@@ -165,4 +165,4 @@ class GraphitiClient:
             raise
 ```
 
-**Graphiti Fallback**: If Graphiti integration proves too complex, this task may need to be simplified to direct Neo4j operations with manual temporal handling. Document any fallback decisions in `devnotes/graph/graphiti-decision.md`.
+**Graphiti Fallback**: If Graphiti integration proves too complex, this task may need to be simplified to direct Neo4j operations with manual temporal handling. Document any fallback decisions in `devnotes/navigator/graphiti-decision.md`.

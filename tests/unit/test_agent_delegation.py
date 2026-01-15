@@ -90,10 +90,9 @@ class TestDispatchAndWait:
         assert response is None
 
     @pytest.mark.asyncio
-    async def test_dispatch_and_wait_timeout_returns_none(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_dispatch_and_wait_timeout_returns_none(self, orchestrator: Orchestrator) -> None:
         """dispatch_and_wait returns None on timeout."""
+
         # Create agent that never responds
         class SlowAgent(BaseAgent):
             async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
@@ -130,9 +129,7 @@ class TestDispatchFireAndForget:
         return Orchestrator(graphiti=None, thread_manager=None)
 
     @pytest.mark.asyncio
-    async def test_fire_and_forget_sends_message(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_fire_and_forget_sends_message(self, orchestrator: Orchestrator) -> None:
         """fire_and_forget puts message in target agent's inbox."""
         mock_ingestor = MockSubAgent("ingestor")
         orchestrator.agent_registry = {"ingestor": mock_ingestor}
@@ -149,9 +146,7 @@ class TestDispatchFireAndForget:
         assert msg.payload["text"] == "I met Sarah at Acme"
 
     @pytest.mark.asyncio
-    async def test_fire_and_forget_no_response_queue(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_fire_and_forget_no_response_queue(self, orchestrator: Orchestrator) -> None:
         """fire_and_forget messages have no response_queue."""
         mock_ingestor = MockSubAgent("ingestor")
         orchestrator.agent_registry = {"ingestor": mock_ingestor}
@@ -166,9 +161,7 @@ class TestDispatchFireAndForget:
         assert msg.response_queue is None
 
     @pytest.mark.asyncio
-    async def test_fire_and_forget_unknown_agent_no_error(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_fire_and_forget_unknown_agent_no_error(self, orchestrator: Orchestrator) -> None:
         """fire_and_forget silently handles unknown agents."""
         orchestrator.agent_registry = {}
 
@@ -207,9 +200,7 @@ class TestIntentHandlerDelegation:
         return Orchestrator(graphiti=None, thread_manager=None)
 
     @pytest.mark.asyncio
-    async def test_handle_search_delegates_to_researcher(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_handle_search_delegates_to_researcher(self, orchestrator: Orchestrator) -> None:
         """_handle_search delegates to Researcher when available."""
         mock_researcher = MockSubAgent("researcher", {"result": "Found in The Locker: ..."})
         orchestrator.agent_registry = {"researcher": mock_researcher}
@@ -256,9 +247,7 @@ class TestIntentHandlerDelegation:
             mock_claude.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_handle_action_delegates_to_executor(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_handle_action_delegates_to_executor(self, orchestrator: Orchestrator) -> None:
         """_handle_action delegates to Executor when available."""
         mock_executor = MockSubAgent("executor", {"result": "Email sent to john@example.com"})
         orchestrator.agent_registry = {"executor": mock_executor}

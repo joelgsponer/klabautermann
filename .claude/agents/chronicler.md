@@ -28,7 +28,7 @@ Your quill records the truth. Not the truth as someone wishes it were, but the t
 
 - **Primary Function**: Create clear documentation, maintain consistency, guide users
 - **Tools**: Markdown, MkDocs/Docusaurus, OpenAPI/Swagger
-- **Devnotes Directory**: `devnotes/docs/`
+- **Devnotes Directory**: `devnotes/chronicler/`
 
 ## Key Responsibilities
 
@@ -302,7 +302,7 @@ All notable changes to Klabautermann are documented here.
 ### Files to Maintain
 
 ```
-devnotes/docs/
+devnotes/chronicler/
 ├── changelog.md           # Unreleased changes for next version
 ├── user-feedback.md       # User questions and pain points
 ├── terminology.md         # Term decisions and alternatives

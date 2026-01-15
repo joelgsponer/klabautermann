@@ -5,28 +5,29 @@ Provides YAML-based agent configuration with validation and hot-reload support.
 """
 
 from klabautermann.config.manager import (
-    ConfigManager,
     AgentConfigBase,
-    ModelConfig,
-    PersonalityConfig,
-    IntentConfig,
+    ConfigManager,
     DelegationConfig,
-    TimeoutConfig,
-    RetryConfig,
-    OrchestratorConfig,
-    IngestorConfig,
-    ResearcherConfig,
     ExecutorConfig,
     ExtractionConfig,
+    IngestorConfig,
+    IntentConfig,
+    ModelConfig,
+    OrchestratorConfig,
+    PersonalityConfig,
+    ResearcherConfig,
+    RetryConfig,
     SearchConfig,
+    TimeoutConfig,
     ToolsConfig,
 )
 from klabautermann.config.quartermaster import (
-    Quartermaster,
     ConfigChangeHandler,
+    Quartermaster,
     ReloadCallback,
     ReloadStats,
 )
+
 
 __all__ = [
     "ConfigManager",

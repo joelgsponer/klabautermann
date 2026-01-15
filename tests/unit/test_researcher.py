@@ -195,9 +195,7 @@ class TestTimeReferenceParsing:
         assert "start" in time_filter
         assert "end" in time_filter
 
-    def test_parse_returns_none_for_no_temporal_reference(
-        self, researcher: Researcher
-    ) -> None:
+    def test_parse_returns_none_for_no_temporal_reference(self, researcher: Researcher) -> None:
         """Returns None when no temporal pattern found."""
         query = "Who is Sarah?"
         time_filter = researcher._parse_time_reference(query)
@@ -282,9 +280,7 @@ class TestStructuralSearch:
             {"person": "Sarah", "org": "Acme Corp", "title": "PM"}
         ]
 
-        response = await researcher._structural_search(
-            "Who does Sarah work for?", "trace-123"
-        )
+        response = await researcher._structural_search("Who does Sarah work for?", "trace-123")
 
         assert response.search_type == SearchType.STRUCTURAL
         assert len(response.results) == 1
@@ -296,13 +292,9 @@ class TestStructuralSearch:
         self, researcher: Researcher, mock_neo4j: MagicMock
     ) -> None:
         """Structural search for REPORTS_TO relationship."""
-        mock_neo4j.execute_query.return_value = [
-            {"person": "John", "manager": "Sarah"}
-        ]
+        mock_neo4j.execute_query.return_value = [{"person": "John", "manager": "Sarah"}]
 
-        response = await researcher._structural_search(
-            "Who does John report to?", "trace-123"
-        )
+        response = await researcher._structural_search("Who does John report to?", "trace-123")
 
         assert response.search_type == SearchType.STRUCTURAL
         assert len(response.results) == 1
@@ -314,9 +306,7 @@ class TestStructuralSearch:
         """Structural search returns empty when nothing found."""
         mock_neo4j.execute_query.return_value = []
 
-        response = await researcher._structural_search(
-            "Who does Unknown work for?", "trace-123"
-        )
+        response = await researcher._structural_search("Who does Unknown work for?", "trace-123")
 
         assert len(response.results) == 0
 
@@ -328,9 +318,7 @@ class TestStructuralSearch:
         mock_graphiti.search.return_value = []
 
         # Query without clear entity
-        response = await researcher._structural_search(
-            "Tell me about the project", "trace-123"
-        )
+        response = await researcher._structural_search("Tell me about the project", "trace-123")
 
         # Should have fallen back to semantic search
         mock_graphiti.search.assert_called_once()
@@ -353,22 +341,16 @@ class TestTemporalSearch:
             {"n": {"name": "Project A", "created_at": time.time()}, "type": ["Project"]}
         ]
 
-        response = await researcher._temporal_search(
-            "What did I work on last week?", "trace-123"
-        )
+        response = await researcher._temporal_search("What did I work on last week?", "trace-123")
 
         assert response.search_type == SearchType.TEMPORAL
         assert len(response.results) == 1
         assert response.results[0].temporal_context is not None
 
     @pytest.mark.asyncio
-    async def test_temporal_search_no_time_reference(
-        self, researcher: Researcher
-    ) -> None:
+    async def test_temporal_search_no_time_reference(self, researcher: Researcher) -> None:
         """Temporal search returns empty when time reference can't be parsed."""
-        response = await researcher._temporal_search(
-            "Who is Sarah?", "trace-123"
-        )
+        response = await researcher._temporal_search("Who is Sarah?", "trace-123")
 
         assert response.search_type == SearchType.TEMPORAL
         assert len(response.results) == 0
@@ -396,13 +378,9 @@ class TestHybridSearch:
         ]
 
         # Mock structural results
-        mock_neo4j.execute_query.return_value = [
-            {"person": "John", "org": "Acme"}
-        ]
+        mock_neo4j.execute_query.return_value = [{"person": "John", "org": "Acme"}]
 
-        response = await researcher._hybrid_search(
-            "Who does John work for last week?", "trace-123"
-        )
+        response = await researcher._hybrid_search("Who does John work for last week?", "trace-123")
 
         assert response.search_type == SearchType.HYBRID
         # Should have results from both searches
@@ -557,9 +535,7 @@ class TestNeverFabricates:
     """Tests that Researcher NEVER fabricates results."""
 
     @pytest.mark.asyncio
-    async def test_empty_query_returns_empty_not_fabricated(
-        self, researcher: Researcher
-    ) -> None:
+    async def test_empty_query_returns_empty_not_fabricated(self, researcher: Researcher) -> None:
         """Empty query returns empty, doesn't fabricate."""
         msg = AgentMessage(
             trace_id="trace-123",

@@ -320,9 +320,7 @@ class TestIntentClassification:
     # =========================================================================
 
     @pytest.mark.asyncio
-    async def test_intent_classification_model_fields(
-        self, orchestrator: Orchestrator
-    ) -> None:
+    async def test_intent_classification_model_fields(self, orchestrator: Orchestrator) -> None:
         """IntentClassification model should have all expected fields."""
         intent = await orchestrator._classify_intent(
             text="Who is Sarah?",

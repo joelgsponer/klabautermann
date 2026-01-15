@@ -196,6 +196,22 @@ class RateLimitError(KlabautermannError):
 
 
 # ===========================================================================
+# Startup Errors
+# ===========================================================================
+
+
+class StartupError(KlabautermannError):
+    """Application startup failed."""
+
+    def __init__(
+        self,
+        message: str = "Application startup failed",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(message, **kwargs)
+
+
+# ===========================================================================
 # Agent Errors
 # ===========================================================================
 
@@ -283,6 +299,8 @@ __all__ = [
     "CircuitOpenError",
     "OperationTimeoutError",
     "RateLimitError",
+    # Startup
+    "StartupError",
     # Agent
     "AgentError",
     "DelegationError",

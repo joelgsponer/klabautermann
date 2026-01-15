@@ -445,6 +445,43 @@ class ChannelConfig(BaseModel):
 
 
 # ===========================================================================
+# Action Execution Models
+# ===========================================================================
+
+
+class ActionType(str, Enum):
+    """Action types for the Executor agent."""
+
+    EMAIL_SEND = "email_send"
+    EMAIL_SEARCH = "email_search"
+    CALENDAR_CREATE = "calendar_create"
+    CALENDAR_LIST = "calendar_list"
+
+
+class ActionRequest(BaseModel):
+    """Parsed action request for Executor agent."""
+
+    type: ActionType
+    target: str | None = None  # Recipient email or calendar ID
+    subject: str | None = None
+    body: str | None = None
+    start_time: str | None = None  # ISO format datetime string
+    end_time: str | None = None  # ISO format datetime string
+    draft_only: bool = False
+    query: str | None = None  # For search operations
+
+
+class ActionResult(BaseModel):
+    """Result of action execution."""
+
+    success: bool
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+    needs_confirmation: bool = False
+    confirmation_prompt: str | None = None
+
+
+# ===========================================================================
 # Export
 # ===========================================================================
 
@@ -493,6 +530,10 @@ __all__ = [
     # Intent classification
     "IntentType",
     "IntentClassification",
+    # Action execution
+    "ActionType",
+    "ActionRequest",
+    "ActionResult",
     # Configuration
     "AgentConfig",
     "ChannelConfig",

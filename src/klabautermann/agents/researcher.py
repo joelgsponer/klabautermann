@@ -23,6 +23,7 @@ from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
 
+
 if TYPE_CHECKING:
     from klabautermann.memory.graphiti_client import GraphitiClient
     from klabautermann.memory.neo4j_client import Neo4jClient
@@ -355,9 +356,7 @@ class Researcher(BaseAgent):
         """
 
         try:
-            records = await self.neo4j.execute_query(
-                cypher, time_filter, trace_id=trace_id
-            )
+            records = await self.neo4j.execute_query(cypher, time_filter, trace_id=trace_id)
 
             search_results = [
                 SearchResult(

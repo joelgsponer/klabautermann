@@ -29,13 +29,13 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 | T025 | Hybrid search queries | **completed** | navigator |
 | T026 | MCP client wrapper | **completed** | purser |
 | T027 | OAuth bootstrap | **completed** | purser |
-| T028 | Google Workspace bridge | pending | purser |
-| T029 | Executor agent | pending | carpenter |
+| T028 | Google Workspace bridge | **completed** | purser |
+| T029 | Executor agent | **completed** | carpenter |
 | T030 | Gmail handlers | pending | purser |
 | T031 | Calendar handlers | pending | purser |
 | T032 | Agent config system | **completed** | carpenter |
 | T033 | Config hot-reload | **completed** | carpenter |
-| T034 | Main.py multi-agent | pending | carpenter |
+| T034 | Main.py multi-agent | **completed** | carpenter |
 | T035 | Integration tests | pending | inspector |
 
 ### Next Up (Wave 3 - After Wave 2 Completes)
@@ -57,8 +57,11 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 | T025 | Hybrid search queries | 2026-01-15 |
 | T026 | MCP client wrapper | 2026-01-15 |
 | T027 | Google OAuth bootstrap | 2026-01-15 |
+| T028 | Google Workspace MCP bridge | 2026-01-15 |
+| T029 | Executor agent | 2026-01-15 |
 | T032 | Agent config system | 2026-01-15 |
 | T033 | Config hot-reload (Quartermaster) | 2026-01-15 |
+| T034 | Main.py multi-agent startup | 2026-01-15 |
 
 ### Key Decisions (Sprint 2)
 
@@ -93,6 +96,22 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 15. **Comprehensive query library**: CypherQueries class provides 20+ query strings covering Person, Task, Event, Temporal, Thread, and Graph Traversal categories. All temporal queries correctly filter expired relationships.
 
 16. **OAuth bootstrap script**: Interactive script guides users through Google OAuth2 setup, storing refresh tokens in .env with timestamped backups. Verifies credentials with test API calls before saving. Follows least-privilege principle with minimal scopes (gmail.modify, calendar.events only).
+
+17. **Resilient MCP response parsing**: Google Workspace bridge uses forgiving parsing that fills in defaults for missing fields rather than skipping entries. Enables maximum data availability even with malformed responses.
+
+18. **Auto-start MCP servers**: Bridge automatically starts MCP server on first operation, removing need for explicit lifecycle management. Idempotent start() allows safe repeated calls.
+
+19. **Structured result objects**: Email/calendar operations return Result objects (SendEmailResult, CreateEventResult) with success/error state for graceful error handling at agent level.
+
+20. **Keyword-based action parsing**: Executor uses simple keyword detection for action classification (EMAIL_SEND, EMAIL_SEARCH, CALENDAR_CREATE, CALENDAR_LIST) keeping the agent lightweight and deterministic.
+
+21. **Three-phase action processing**: All actions follow parse → validate → execute pattern with strict validation before any MCP operations.
+
+22. **Security-first validation**: Executor NEVER sends emails to unverified addresses, NEVER creates events without valid times, and NEVER guesses missing information. Always asks user for clarification.
+
+23. **Clean application lifecycle**: Main.py implements three-phase pattern (initialize → start → shutdown) with proper resource management and signal handling. All agents, clients, and config watchers created once and shared across system.
+
+24. **Graceful degradation**: System continues without Graphiti/Ingestor if OPENAI_API_KEY missing. Graphiti is optional for entity extraction but system remains functional for search and actions.
 
 ---
 
@@ -159,6 +178,9 @@ None currently.
 
 ## Recent Activity
 
+- 2026-01-15: T034 completed - Main.py multi-agent startup with clean lifecycle management (initialize → start → shutdown). All agents, shared resources, signal handlers, and hot-reload wired up for Sprint 2 architecture
+- 2026-01-15: T029 completed - Executor agent with 48 unit tests (syntax validated). Implements secure action execution with parse-validate-execute pattern and never hallucniates missing information
+- 2026-01-15: T028 completed - Google Workspace MCP bridge with 27 passing unit tests. Provides clean interface to Gmail and Calendar via MCP with Pydantic-validated responses
 - 2026-01-15: T027 completed - Google OAuth bootstrap script with interactive credential setup, verification, and secure .env storage
 - 2026-01-15: **Wave 2 COMPLETE** - All core agent and infrastructure tasks completed
 - 2026-01-15: T025 completed - Hybrid search queries with 50+ unit tests. Parametrized Cypher query library with QueryBuilder and QueryResult metadata tracking

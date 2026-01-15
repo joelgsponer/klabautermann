@@ -101,7 +101,7 @@ class BaseAgent(ABC):
                         self.inbox.get(),
                         timeout=1.0,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
 
                 # Process the message
@@ -250,12 +250,8 @@ class BaseAgent(ABC):
         Returns:
             Dictionary with request counts, error counts, and latency stats.
         """
-        avg_latency = (
-            self._total_latency_ms / self._request_count if self._request_count > 0 else 0
-        )
-        success_rate = (
-            self._success_count / self._request_count if self._request_count > 0 else 1.0
-        )
+        avg_latency = self._total_latency_ms / self._request_count if self._request_count > 0 else 0
+        success_rate = self._success_count / self._request_count if self._request_count > 0 else 1.0
 
         return {
             "agent": self.name,

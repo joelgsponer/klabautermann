@@ -27,6 +27,7 @@ from klabautermann.core.models import (
 )
 from klabautermann.utils.retry import retry_on_llm_errors
 
+
 if TYPE_CHECKING:
     from anthropic import Anthropic
 
@@ -245,9 +246,7 @@ Conversation to analyze:
             if len(parts) >= 2:
                 content = parts[1]
                 # Remove language identifier (e.g., "json")
-                if content.startswith("json"):
-                    content = content[4:]
-                elif content.startswith("JSON"):
+                if content.startswith("json") or content.startswith("JSON"):
                     content = content[4:]
             content = content.strip()
 
@@ -271,7 +270,11 @@ Conversation to analyze:
                 except (ValueError, KeyError) as e:
                     logger.warning(
                         f"[SWELL] Invalid entity in extraction: {e}",
-                        extra={"trace_id": trace_id, "agent_name": self.name, "entity": entity_data},
+                        extra={
+                            "trace_id": trace_id,
+                            "agent_name": self.name,
+                            "entity": entity_data,
+                        },
                     )
 
             # Parse relationships
@@ -296,7 +299,11 @@ Conversation to analyze:
                 except (ValueError, KeyError) as e:
                     logger.warning(
                         f"[SWELL] Invalid relationship in extraction: {e}",
-                        extra={"trace_id": trace_id, "agent_name": self.name, "relationship": rel_data},
+                        extra={
+                            "trace_id": trace_id,
+                            "agent_name": self.name,
+                            "relationship": rel_data,
+                        },
                     )
 
             return ExtractionResult(
@@ -309,7 +316,11 @@ Conversation to analyze:
         except json.JSONDecodeError as e:
             logger.warning(
                 f"[SWELL] Failed to parse extraction JSON: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name, "content_preview": content[:200]},
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": self.name,
+                    "content_preview": content[:200],
+                },
             )
             return ExtractionResult(trace_id=trace_id, entities=[], relationships=[], raw_text=text)
 
@@ -362,10 +373,14 @@ Conversation to analyze:
         for rel in extraction.relationships:
             props_str = ""
             if rel.properties:
-                props_str = " (" + ", ".join(f"{k}={v}" for k, v in rel.properties.items() if v) + ")"
+                props_str = (
+                    " (" + ", ".join(f"{k}={v}" for k, v in rel.properties.items() if v) + ")"
+                )
             facts.append(f"{rel.source_name} {rel.relationship_type} {rel.target_name}{props_str}")
 
-        episode_content = "Extracted from conversation:\n" + "\n".join(f"- {fact}" for fact in facts)
+        episode_content = "Extracted from conversation:\n" + "\n".join(
+            f"- {fact}" for fact in facts
+        )
 
         logger.debug(
             f"[WHISPER] Writing to Graphiti: {len(facts)} facts",

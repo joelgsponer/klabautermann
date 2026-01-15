@@ -124,7 +124,7 @@ T003 --> T006 --> T009 --> T017
 
 ## Notes
 
-- **Graphiti Fallback**: If Graphiti proves too complex by Day 3, fall back to manual temporal pattern. Create decision note in `devnotes/graph/graphiti-decision.md`.
+- **Graphiti Fallback**: If Graphiti proves too complex by Day 3, fall back to manual temporal pattern. Create decision note in `devnotes/navigator/graphiti-decision.md`.
 
 - **Testing Strategy**: Unit tests written alongside implementation. E2E test (T019) validates sprint goal.
 

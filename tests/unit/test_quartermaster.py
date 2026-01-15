@@ -6,10 +6,7 @@ statistics tracking, and error handling.
 """
 
 import asyncio
-import tempfile
-import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 import yaml
@@ -286,12 +283,8 @@ async def test_force_reload_invalid_yaml(quartermaster, temp_config_dir):
 async def test_reload_all(quartermaster, temp_config_dir):
     """Test reloading all configs."""
     # Modify both config files
-    (temp_config_dir / "orchestrator.yaml").write_text(
-        yaml.dump({"model": {"temperature": 0.8}})
-    )
-    (temp_config_dir / "ingestor.yaml").write_text(
-        yaml.dump({"model": {"temperature": 0.9}})
-    )
+    (temp_config_dir / "orchestrator.yaml").write_text(yaml.dump({"model": {"temperature": 0.8}}))
+    (temp_config_dir / "ingestor.yaml").write_text(yaml.dump({"model": {"temperature": 0.9}}))
 
     # Reload all
     results = await quartermaster.reload_all()
@@ -350,12 +343,8 @@ def test_get_stats_nonexistent_agent(quartermaster):
 async def test_get_all_stats(quartermaster, temp_config_dir):
     """Test getting all statistics."""
     # Reload multiple agents
-    (temp_config_dir / "orchestrator.yaml").write_text(
-        yaml.dump({"model": {"temperature": 0.8}})
-    )
-    (temp_config_dir / "ingestor.yaml").write_text(
-        yaml.dump({"model": {"temperature": 0.9}})
-    )
+    (temp_config_dir / "orchestrator.yaml").write_text(yaml.dump({"model": {"temperature": 0.8}}))
+    (temp_config_dir / "ingestor.yaml").write_text(yaml.dump({"model": {"temperature": 0.9}}))
 
     await quartermaster.force_reload("orchestrator")
     await quartermaster.force_reload("ingestor")

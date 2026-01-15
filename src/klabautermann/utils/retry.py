@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from klabautermann.core.logger import logger
 
@@ -53,6 +54,7 @@ def with_retry(
         async def call_external_api():
             ...
     """
+
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -63,7 +65,7 @@ def with_retry(
                 try:
                     return await func(*args, **kwargs)
 
-                except no_retry_on as e:
+                except no_retry_on:
                     # Never retry these exceptions - raise immediately
                     raise
 
@@ -103,6 +105,7 @@ def with_retry(
             return None
 
         return wrapper
+
     return decorator
 
 
@@ -164,7 +167,8 @@ def retry_on_llm_errors(max_retries: int = 2) -> Callable[[Callable[..., Any]], 
     retry_exceptions: list[type[Exception]] = [TimeoutError, ConnectionError]
 
     try:
-        from anthropic import RateLimitError, APIStatusError
+        from anthropic import APIStatusError, RateLimitError
+
         retry_exceptions.extend([RateLimitError, APIStatusError])
     except ImportError:
         pass
@@ -178,7 +182,9 @@ def retry_on_llm_errors(max_retries: int = 2) -> Callable[[Callable[..., Any]], 
     )
 
 
-def retry_on_graph_errors(max_retries: int = 3) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+def retry_on_graph_errors(
+    max_retries: int = 3,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """
     Retry decorator for Neo4j/Graphiti operations.
 
@@ -194,7 +200,8 @@ def retry_on_graph_errors(max_retries: int = 3) -> Callable[[Callable[..., Any]]
     retry_exceptions: list[type[Exception]] = [TimeoutError, ConnectionError, OSError]
 
     try:
-        from neo4j.exceptions import TransientError, ServiceUnavailable
+        from neo4j.exceptions import ServiceUnavailable, TransientError
+
         retry_exceptions.extend([TransientError, ServiceUnavailable])
     except ImportError:
         pass

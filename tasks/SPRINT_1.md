@@ -456,7 +456,7 @@ Sprint 1 is complete when:
 
 ## Notes
 
-- **Graphiti Fallback**: If Graphiti proves too complex by Day 3, fall back to manual temporal pattern in Neo4j. Document the decision in `devnotes/graph/graphiti-decision.md`.
+- **Graphiti Fallback**: If Graphiti proves too complex by Day 3, fall back to manual temporal pattern in Neo4j. Document the decision in `devnotes/navigator/graphiti-decision.md`.
 
 - **Simple First**: The Sprint 1 Orchestrator is deliberately simple - no sub-agent delegation. This validates the critical path before adding complexity in Sprint 2.
 

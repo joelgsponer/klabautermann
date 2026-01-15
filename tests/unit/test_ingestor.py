@@ -9,7 +9,7 @@ If tests fail, fix the CODE, not the tests.
 """
 
 import json
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -269,7 +269,12 @@ class TestIngestorAgent:
                 text=json.dumps(
                     {
                         "entities": [
-                            {"name": "John", "label": "Person", "properties": {}, "confidence": 1.0},
+                            {
+                                "name": "John",
+                                "label": "Person",
+                                "properties": {},
+                                "confidence": 1.0,
+                            },
                             {
                                 "name": "Google",
                                 "label": "Organization",
@@ -309,9 +314,7 @@ class TestIngestorAgent:
     # =========================================================================
 
     @pytest.mark.asyncio
-    async def test_empty_text_returns_none(
-        self, ingestor: Ingestor, mock_graphiti: Mock
-    ) -> None:
+    async def test_empty_text_returns_none(self, ingestor: Ingestor, mock_graphiti: Mock) -> None:
         """Empty text should return None without calling LLM."""
         msg = AgentMessage(
             trace_id="test-trace-006",
@@ -346,9 +349,7 @@ class TestIngestorAgent:
         assert len(result.relationships) == 0
 
     @pytest.mark.asyncio
-    async def test_markdown_code_block_parsing(
-        self, ingestor: Ingestor, mock_llm: Mock
-    ) -> None:
+    async def test_markdown_code_block_parsing(self, ingestor: Ingestor, mock_llm: Mock) -> None:
         """LLM response with markdown code blocks should be parsed correctly."""
         # Setup mock LLM response with markdown
         mock_response = Mock()
@@ -367,9 +368,7 @@ class TestIngestorAgent:
         assert result.entities[0].name == "Test"
 
     @pytest.mark.asyncio
-    async def test_invalid_entity_label_skipped(
-        self, ingestor: Ingestor, mock_llm: Mock
-    ) -> None:
+    async def test_invalid_entity_label_skipped(self, ingestor: Ingestor, mock_llm: Mock) -> None:
         """Entities with invalid labels should be skipped, not crash."""
         # Setup mock LLM response with invalid label
         mock_response = Mock()
@@ -494,9 +493,7 @@ class TestIngestorAgent:
         """process_message should always return None (fire-and-forget)."""
         # Setup mock LLM response
         mock_response = Mock()
-        mock_response.content = [
-            Mock(text=json.dumps({"entities": [], "relationships": []}))
-        ]
+        mock_response.content = [Mock(text=json.dumps({"entities": [], "relationships": []}))]
         mock_llm.messages.create.return_value = mock_response
 
         msg = AgentMessage(

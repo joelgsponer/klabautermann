@@ -5,7 +5,7 @@
 - **Priority**: P1
 - **Category**: core
 - **Effort**: M
-- **Status**: pending
+- **Status**: completed
 - **Assignee**: carpenter
 
 ## Specs
@@ -318,3 +318,117 @@ if __name__ == "__main__":
 ```
 
 This replaces the Sprint 1 `main.py` with a full multi-agent setup.
+
+## Development Notes
+
+### Implementation
+
+**Files Modified:**
+- `main.py` - Complete rewrite for multi-agent architecture
+- `src/klabautermann/core/exceptions.py` - Added `StartupError` exception
+
+**Files Created:**
+- None (all dependencies completed in prior tasks)
+
+### Architecture Overview
+
+The new `main.py` implements a clean application lifecycle pattern:
+
+1. **Klabautermann Application Class**
+   - Manages all shared resources (config, clients, agents)
+   - Coordinates initialization, startup, and shutdown
+   - Provides clean separation between phases
+
+2. **Initialization Phase** (`initialize()`)
+   - Loads environment variables via dotenv
+   - Validates required environment variables (ANTHROPIC_API_KEY, NEO4J_PASSWORD)
+   - Initializes ConfigManager and Quartermaster
+   - Connects to Neo4j (required)
+   - Connects to Graphiti (optional - gracefully degrades if OPENAI_API_KEY missing)
+   - Creates all agent instances (Orchestrator, Ingestor, Researcher, Executor)
+   - Wires up agent registry for message routing
+   - Starts Quartermaster for hot-reload
+
+3. **Startup Phase** (`start()`)
+   - Starts agent processing loops as async tasks
+   - Sets up signal handlers (SIGINT/SIGTERM)
+   - Starts CLI driver (blocking until user exits)
+
+4. **Shutdown Phase** (`shutdown()`)
+   - Stops all agents gracefully
+   - Waits for agent tasks to complete
+   - Stops Quartermaster
+   - Disconnects clients (Graphiti, Neo4j)
+   - Logs shutdown completion
+
+### Decisions Made
+
+1. **Lazy Anthropic Client Loading**: The Anthropic client is lazy-loaded via a property to defer initialization until first use. This allows the app to validate environment early without importing anthropic unnecessarily.
+
+2. **Graceful Graphiti Degradation**: If OPENAI_API_KEY is not set or Graphiti initialization fails, the system continues without entity extraction. The Ingestor agent is not created, but Orchestrator, Researcher, and Executor remain functional.
+
+3. **Agent Registry Wiring**: All agents receive a reference to the full agent registry after creation. This enables the dispatch-and-wait and fire-and-forget patterns implemented in T021.
+
+4. **Signal Handling**: SIGINT (Ctrl+C) and SIGTERM are handled via asyncio event loop signal handlers. This triggers graceful shutdown by canceling all agent tasks.
+
+5. **Config Callback Pattern**: The Quartermaster callback system is wired up but the callback is a no-op (`_on_agent_config_change`). Agents will pick up new config on their next request via the ConfigManager reference.
+
+6. **Thread Manager Optional**: The Orchestrator is created with `thread_manager=None` since thread persistence is a Sprint 3 feature. The system works without it.
+
+### Patterns Established
+
+1. **Application Lifecycle Pattern**:
+   ```python
+   app = Klabautermann()
+   await app.initialize()  # Setup phase
+   await app.start()       # Run phase (blocks until exit)
+   await app.shutdown()    # Cleanup phase (always runs via finally)
+   ```
+
+2. **Resource Management**: All resources initialized in `initialize()` are cleaned up in `shutdown()` in reverse order. This ensures proper cleanup even on errors.
+
+3. **Agent Task Tracking**: Agent processing loops are tracked in `self.agent_tasks` list. On shutdown, all tasks are awaited with `return_exceptions=True` to ensure clean completion.
+
+4. **Error Handling Hierarchy**:
+   - `GraphConnectionError` → Neo4j connection failed
+   - `StartupError` → Environment validation or initialization failed
+   - `KeyboardInterrupt` → User requested exit
+   - `Exception` → Unexpected error
+
+### Testing
+
+Syntax validation completed successfully:
+- `main.py` - No syntax errors
+- `src/klabautermann/core/exceptions.py` - No syntax errors
+
+Manual startup testing deferred to integration testing phase (T035) when all agent implementations are complete.
+
+### Issues Encountered
+
+None. Implementation was straightforward given the solid foundation from completed tasks:
+- T020: Orchestrator intent classification
+- T021: Agent delegation patterns
+- T023: Ingestor agent
+- T024: Researcher agent
+- T029: Executor agent
+- T032: Config system
+- T033: Hot-reload (Quartermaster)
+
+### Integration Notes
+
+This main.py is ready for Sprint 2 integration testing. Key integration points:
+1. All agents must implement `BaseAgent.process_message()`
+2. Agents access config via `self.config` (from ConfigManager)
+3. Agents use `self._agent_registry` for delegation
+4. Signal handlers ensure clean Ctrl+C behavior
+
+### Next Steps
+
+1. Run Sprint 2 integration tests (T035)
+2. Test full multi-agent workflow:
+   - User input → Orchestrator
+   - Intent classification
+   - Delegation to Researcher/Executor/Ingestor
+   - Agent-to-agent communication
+   - Hot-reload config changes
+3. Verify graceful shutdown on Ctrl+C

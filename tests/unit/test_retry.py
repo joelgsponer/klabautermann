@@ -10,9 +10,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from klabautermann.utils.retry import (
-    with_retry,
-    retry_on_timeout,
     retry_on_connection,
+    retry_on_timeout,
+    with_retry,
 )
 
 
@@ -129,6 +129,7 @@ class TestWithRetry:
 
         # Patch asyncio.sleep to capture delays
         original_sleep = asyncio.sleep
+
         async def mock_sleep(delay: float) -> None:
             delays.append(delay)
             await original_sleep(0.001)  # Minimal actual delay
@@ -161,6 +162,7 @@ class TestWithRetry:
             raise ConnectionError("Always fails")
 
         original_sleep = asyncio.sleep
+
         async def mock_sleep(delay: float) -> None:
             delays.append(delay)
             await original_sleep(0.001)
@@ -192,6 +194,7 @@ class TestWithRetry:
         async def mock_sleep(capture_list: list[float]) -> AsyncMock:
             async def _sleep(delay: float) -> None:
                 capture_list.append(delay)
+
             return _sleep
 
         # Run twice and capture delays
@@ -252,7 +255,7 @@ class TestRetryOnTimeout:
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise asyncio.TimeoutError("Async timeout")
+                raise TimeoutError("Async timeout")
             return "success"
 
         with patch("klabautermann.utils.retry.asyncio.sleep", AsyncMock()):

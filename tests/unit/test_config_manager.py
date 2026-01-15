@@ -10,16 +10,16 @@ from pathlib import Path
 import pytest
 
 from klabautermann.config.manager import (
-    ConfigManager,
     AgentConfigBase,
+    ConfigManager,
+    ExecutorConfig,
+    IngestorConfig,
+    IntentConfig,
     ModelConfig,
     OrchestratorConfig,
-    IngestorConfig,
     ResearcherConfig,
-    ExecutorConfig,
-    IntentConfig,
-    TimeoutConfig,
     RetryConfig,
+    TimeoutConfig,
 )
 
 
@@ -245,7 +245,7 @@ model:
         """AgentConfigBase allows extra fields."""
         config = AgentConfigBase(
             model=ModelConfig(),
-            custom_field="value"  # Extra field
+            custom_field="value",  # Extra field
         )
         assert config.model.primary == "claude-sonnet-4-20250514"
 

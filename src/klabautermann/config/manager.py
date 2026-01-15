@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,9 +133,7 @@ class ToolsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled_tools: list[str] = Field(
-        default_factory=lambda: ["gmail", "calendar", "filesystem"]
-    )
+    enabled_tools: list[str] = Field(default_factory=lambda: ["gmail", "calendar", "filesystem"])
     require_confirmation: bool = True
     dry_run: bool = False
 

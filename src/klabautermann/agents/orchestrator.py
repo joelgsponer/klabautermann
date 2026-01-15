@@ -54,19 +54,40 @@ class Orchestrator(BaseAgent):
 
     # Intent classification keywords
     SEARCH_KEYWORDS: ClassVar[list[str]] = [
-        "who is", "what is", "when did", "where is", "find",
-        "tell me about", "remind me", "what do you know about",
-        "who was", "what was", "where was", "when was",
+        "who is",
+        "what is",
+        "when did",
+        "where is",
+        "find",
+        "tell me about",
+        "remind me",
+        "what do you know about",
+        "who was",
+        "what was",
+        "where was",
+        "when was",
     ]
 
     ACTION_KEYWORDS: ClassVar[list[str]] = [
-        "send", "email", "schedule", "create", "draft",
-        "book", "set up", "add to calendar", "write an email",
+        "send",
+        "email",
+        "schedule",
+        "create",
+        "draft",
+        "book",
+        "set up",
+        "add to calendar",
+        "write an email",
     ]
 
     INGEST_KEYWORDS: ClassVar[list[str]] = [
-        "i met", "i talked to", "i'm working on", "i learned",
-        "i just", "i spoke with", "i had a meeting with",
+        "i met",
+        "i talked to",
+        "i'm working on",
+        "i learned",
+        "i just",
+        "i spoke with",
+        "i had a meeting with",
     ]
 
     # System prompt with Klabautermann personality and intent classification rules
@@ -288,9 +309,7 @@ Example responses:
 
             # Fire-and-forget ingestion (non-blocking)
             if self.graphiti:
-                task = asyncio.create_task(
-                    self._ingest_conversation(text, response_text, trace_id)
-                )
+                task = asyncio.create_task(self._ingest_conversation(text, response_text, trace_id))
                 # Store reference to prevent garbage collection
                 self._background_tasks.add(task)
                 task.add_done_callback(self._background_tasks.discard)
@@ -342,16 +361,20 @@ Example responses:
         # Add context window if available
         if context and context.messages:
             for msg in context.messages:
-                messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"],
-                })
+                messages.append(
+                    {
+                        "role": msg["role"],
+                        "content": msg["content"],
+                    }
+                )
 
         # Add current user message
-        messages.append({
-            "role": "user",
-            "content": text,
-        })
+        messages.append(
+            {
+                "role": "user",
+                "content": text,
+            }
+        )
 
         return messages
 
@@ -480,7 +503,11 @@ Example responses:
         # Send message to target agent's inbox
         logger.debug(
             f"[WHISPER] Dispatching to {target_agent}",
-            extra={"trace_id": trace_id, "agent_name": self.name, "payload_keys": list(payload.keys())},
+            extra={
+                "trace_id": trace_id,
+                "agent_name": self.name,
+                "payload_keys": list(payload.keys()),
+            },
         )
         await target.inbox.put(msg)
 
@@ -492,7 +519,7 @@ Example responses:
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
             return response
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 f"[SWELL] Timeout waiting for {target_agent}",
                 extra={"trace_id": trace_id, "agent_name": self.name, "timeout": timeout},
@@ -747,7 +774,7 @@ Example responses:
 
         # Fallback: acknowledge but explain limitation
         return (
-            f"I've noted your request: \"{action}\". "
+            f'I\'ve noted your request: "{action}". '
             "Action execution (email, calendar) is coming in the next update. "
             "For now, I've logged this in The Manifest."
         )
