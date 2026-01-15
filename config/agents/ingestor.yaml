@@ -2,7 +2,7 @@
 # Extracts entities and relationships from conversations
 
 model:
-  primary: claude-opus-4-5-20251101
+  primary: claude-3-5-haiku-20241022
   temperature: 0.3
   max_context_tokens: 4000
   max_output_tokens: 1024
