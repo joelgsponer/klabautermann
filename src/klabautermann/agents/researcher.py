@@ -222,14 +222,18 @@ class Researcher(BaseAgent):
 
     async def _semantic_search(self, query: str, trace_id: str) -> SearchResponse:
         """
-        Perform vector search via Graphiti.
+        Perform semantic search via Graphiti.
+
+        Combines two search strategies:
+        1. Entity search - finds matching entity nodes (people, orgs, etc.)
+        2. Edge search - finds matching facts/relationships
 
         Args:
             query: Search query.
             trace_id: Request trace ID.
 
         Returns:
-            SearchResponse with vector search results.
+            SearchResponse with combined search results.
         """
         if not self.graphiti:
             logger.warning(
@@ -238,23 +242,45 @@ class Researcher(BaseAgent):
             )
             return SearchResponse(query=query, search_type=SearchType.SEMANTIC)
 
-        try:
-            results = await self.graphiti.search(query, limit=5)
+        search_results: list[SearchResult] = []
 
-            search_results = [
-                SearchResult(
-                    content=r.fact if hasattr(r, "fact") else r.get("content", ""),
-                    source="graphiti",
-                    source_id=str(r.uuid) if hasattr(r, "uuid") else r.get("uuid"),
-                    confidence=r.score if hasattr(r, "score") else r.get("score", 0.5),
+        try:
+            # 1. Search entity nodes (people, organizations, etc.)
+            entity_results = await self.graphiti.search_entities(query, limit=5, trace_id=trace_id)
+            for r in entity_results:
+                search_results.append(
+                    SearchResult(
+                        content=r.content or "",
+                        source="entity",
+                        source_id=r.uuid,
+                        confidence=r.score,
+                    )
                 )
-                for r in results
-            ]
+
+            # 2. Search edges/facts via Graphiti
+            edge_results = await self.graphiti.search(query, limit=5)
+            for r in edge_results:
+                search_results.append(
+                    SearchResult(
+                        content=r.fact if hasattr(r, "fact") else str(r),
+                        source="graphiti",
+                        source_id=str(r.uuid) if hasattr(r, "uuid") else None,
+                        confidence=r.score if hasattr(r, "score") else 0.5,
+                    )
+                )
+
+            # Sort by confidence/score descending
+            search_results.sort(key=lambda x: x.confidence, reverse=True)
+
+            logger.info(
+                f"[BEACON] Search returned {len(search_results)} results",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
 
             return SearchResponse(
                 query=query,
                 search_type=SearchType.SEMANTIC,
-                results=search_results,
+                results=search_results[:10],  # Limit combined results
             )
 
         except Exception as e:

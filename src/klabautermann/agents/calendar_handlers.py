@@ -143,9 +143,9 @@ class TimeParser:
             return start, end
 
         # Otherwise, parse single time and add default duration
-        start = cls.parse(text, reference, timezone)
-        if start:
-            return start, start + default_duration
+        parsed_start = cls.parse(text, reference, timezone)
+        if parsed_start:
+            return parsed_start, parsed_start + default_duration
 
         return None, None
 

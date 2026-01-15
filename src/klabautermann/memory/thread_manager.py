@@ -358,7 +358,8 @@ class ThreadManager:
             trace_id=trace_id,
         )
 
-        return result[0]["count"] if result else 0
+        count: int = result[0]["count"] if result else 0
+        return count
 
     async def get_recent_threads(
         self,

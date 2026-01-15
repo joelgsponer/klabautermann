@@ -187,7 +187,7 @@ class GoogleWorkspaceBridge:
         self,
         query: str,
         max_results: int = 10,
-        _context: Any = None,  # Kept for interface compatibility
+        context: Any = None,  # noqa: ARG002  # Kept for interface compatibility
     ) -> list[EmailMessage]:
         """
         Search Gmail messages with a query.
@@ -251,7 +251,7 @@ class GoogleWorkspaceBridge:
         body: str,
         cc: str | None = None,
         draft_only: bool = False,
-        _context: Any = None,
+        context: Any = None,  # noqa: ARG002
     ) -> SendEmailResult:
         """
         Send or draft an email via Gmail.
@@ -321,7 +321,7 @@ class GoogleWorkspaceBridge:
     async def get_recent_emails(
         self,
         hours: int = 24,
-        _context: Any = None,
+        context: Any = None,  # noqa: ARG002
     ) -> list[EmailMessage]:
         """Get emails from the last N hours."""
         query = f"newer_than:{hours}h"
@@ -336,7 +336,7 @@ class GoogleWorkspaceBridge:
         start: datetime | None = None,
         end: datetime | None = None,
         max_results: int = 10,
-        _context: Any = None,
+        context: Any = None,  # noqa: ARG002
     ) -> list[CalendarEvent]:
         """
         List calendar events in a time range.
@@ -399,7 +399,7 @@ class GoogleWorkspaceBridge:
         description: str | None = None,
         location: str | None = None,
         attendees: list[str] | None = None,
-        _context: Any = None,
+        context: Any = None,  # noqa: ARG002
     ) -> CreateEventResult:
         """
         Create a new calendar event.
@@ -459,14 +459,20 @@ class GoogleWorkspaceBridge:
             )
             return CreateEventResult(success=False, error=str(e))
 
-    async def get_todays_events(self, _context: Any = None) -> list[CalendarEvent]:
+    async def get_todays_events(
+        self,
+        context: Any = None,  # noqa: ARG002
+    ) -> list[CalendarEvent]:
         """Get all events for today."""
         now = datetime.now()
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now.replace(hour=23, minute=59, second=59, microsecond=999999)
         return await self.list_events(start, end, max_results=50)
 
-    async def get_tomorrows_events(self, _context: Any = None) -> list[CalendarEvent]:
+    async def get_tomorrows_events(
+        self,
+        context: Any = None,  # noqa: ARG002
+    ) -> list[CalendarEvent]:
         """Get all events for tomorrow."""
         tomorrow = datetime.now() + timedelta(days=1)
         start = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)

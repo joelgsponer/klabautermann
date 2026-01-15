@@ -17,12 +17,16 @@ Reference: specs/architecture/MCP.md Section 2
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 from klabautermann.core.exceptions import MCPConnectionError, MCPError, MCPTimeoutError
 from klabautermann.core.logger import logger
@@ -322,10 +326,8 @@ class MCPServerConnection:
         # Cancel reader task
         if self._reader_task and not self._reader_task.done():
             self._reader_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reader_task
-            except asyncio.CancelledError:
-                pass
 
         # Terminate process
         if self._process:
@@ -407,7 +409,8 @@ class MCPServerConnection:
             error_msg = response["error"].get("message", "Unknown error")
             raise MCPError(f"Tool {tool_name} failed: {error_msg}", tool_name=tool_name)
 
-        return response.get("result", {})
+        result: dict[str, Any] = response.get("result", {})
+        return result
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """
@@ -417,7 +420,8 @@ class MCPServerConnection:
             List of tool definitions.
         """
         response = await self._send_request("tools/list", {})
-        return response.get("tools", [])
+        tools: list[dict[str, Any]] = response.get("tools", [])
+        return tools
 
     async def _send_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         """

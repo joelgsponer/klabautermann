@@ -17,7 +17,7 @@ from neo4j import AsyncGraphDatabase
 
 from klabautermann.core.exceptions import GraphConnectionError
 from klabautermann.core.logger import logger
-from klabautermann.core.ontology import NodeLabel, RelationType
+from klabautermann.core.ontology import NodeLabel, RelationType  # noqa: TCH001
 
 
 if TYPE_CHECKING:
@@ -60,10 +60,14 @@ class Neo4jClient:
         """Initialize Neo4j driver and verify connection."""
         logger.info("[CHART] Connecting to Neo4j...", extra={"agent_name": "neo4j_client"})
 
+        # Ensure credentials are available
+        if not self.uri or not self.username:
+            raise GraphConnectionError("Neo4j URI and username are required")
+
         try:
             self._driver = AsyncGraphDatabase.driver(
                 self.uri,
-                auth=(self.username, self.password),
+                auth=(self.username, self.password or ""),
             )
             # Verify connection
             if not await self.health_check():
@@ -150,14 +154,14 @@ class Neo4jClient:
 
         async with self.session() as session:
             result = await session.run(query, parameters)
-            records = await result.data()
+            records: list[dict[str, Any]] = await result.data()
             return records
 
     async def execute_read(
         self,
         query: str,
         parameters: dict[str, Any] | None = None,
-        trace_id: str | None = None,
+        trace_id: str | None = None,  # noqa: ARG002
     ) -> list[dict[str, Any]]:
         """Execute a read-only transaction."""
         if not self._driver:
@@ -166,16 +170,19 @@ class Neo4jClient:
         parameters = parameters or {}
 
         async with self._driver.session(database=self.database) as session:
-            async with session.begin_transaction() as tx:
+            tx = await session.begin_transaction()
+            try:
                 result = await tx.run(query, parameters)
-                records = await result.data()
+                records: list[dict[str, Any]] = await result.data()
                 return records
+            finally:
+                await tx.close()
 
     async def execute_write(
         self,
         query: str,
         parameters: dict[str, Any] | None = None,
-        trace_id: str | None = None,
+        trace_id: str | None = None,  # noqa: ARG002
     ) -> list[dict[str, Any]]:
         """Execute a write transaction with automatic commit/rollback."""
         if not self._driver:
@@ -184,15 +191,15 @@ class Neo4jClient:
         parameters = parameters or {}
 
         async with self._driver.session(database=self.database) as session:
-            async with session.begin_transaction() as tx:
-                try:
-                    result = await tx.run(query, parameters)
-                    records = await result.data()
-                    await tx.commit()
-                    return records
-                except Exception:
-                    await tx.rollback()
-                    raise
+            tx = await session.begin_transaction()
+            try:
+                result = await tx.run(query, parameters)
+                records: list[dict[str, Any]] = await result.data()
+                await tx.commit()
+                return records
+            except Exception:
+                await tx.rollback()
+                raise
 
     # =========================================================================
     # Common Operations
@@ -222,7 +229,8 @@ class Neo4jClient:
             extra={"trace_id": trace_id, "agent_name": "neo4j_client"},
         )
 
-        return result[0]["n"] if result else {}
+        node: dict[str, Any] = result[0]["n"] if result else {}
+        return node
 
     async def get_node_by_uuid(
         self,

@@ -28,6 +28,7 @@ def mock_graphiti() -> MagicMock:
     """Create mock GraphitiClient."""
     graphiti = MagicMock()
     graphiti.search = AsyncMock(return_value=[])
+    graphiti.search_entities = AsyncMock(return_value=[])
     return graphiti
 
 
@@ -318,7 +319,7 @@ class TestStructuralSearch:
         mock_graphiti.search.return_value = []
 
         # Query without clear entity
-        response = await researcher._structural_search("Tell me about the project", "trace-123")
+        await researcher._structural_search("Tell me about the project", "trace-123")
 
         # Should have fallen back to semantic search
         mock_graphiti.search.assert_called_once()

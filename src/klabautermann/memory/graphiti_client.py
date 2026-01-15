@@ -93,7 +93,7 @@ class GraphitiClient:
                 "[STORM] graphiti-core not installed. Install with: pip install graphiti-core",
                 extra={"agent_name": "graphiti"},
             )
-            raise ExternalServiceError("graphiti", "graphiti-core package not installed")
+            raise ExternalServiceError("graphiti", "graphiti-core package not installed") from None
 
         except Exception as e:
             logger.error(
@@ -108,7 +108,9 @@ class GraphitiClient:
             try:
                 await self._client.close()
             except Exception as e:
-                logger.warning(f"[SWELL] Error closing Graphiti: {e}", extra={"agent_name": "graphiti"})
+                logger.warning(
+                    f"[SWELL] Error closing Graphiti: {e}", extra={"agent_name": "graphiti"}
+                )
             finally:
                 self._client = None
                 self._connected = False
@@ -116,7 +118,7 @@ class GraphitiClient:
 
     def _ensure_connected(self) -> None:
         """Raise error if not connected."""
-        if not self.is_connected:
+        if not self.is_connected or self._client is None:
             raise GraphConnectionError("Graphiti client not connected")
 
     async def add_episode(
@@ -144,6 +146,7 @@ class GraphitiClient:
             trace_id: Trace ID for logging
         """
         self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
 
         logger.info(
             "[CHART] Ingesting episode...",
@@ -190,7 +193,7 @@ class GraphitiClient:
         self,
         query: str,
         limit: int = 10,
-        center_node_uuid: str | None = None,
+        _center_node_uuid: str | None = None,  # Reserved for future use
         trace_id: str | None = None,
     ) -> list[SearchResult]:
         """
@@ -210,6 +213,7 @@ class GraphitiClient:
             List of SearchResult objects with facts and metadata
         """
         self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
 
         logger.info(
             f"[CHART] Searching: {query[:50]}...",
@@ -258,6 +262,87 @@ class GraphitiClient:
             )
             raise ExternalServiceError("graphiti", f"Search failed: {e}") from e
 
+    async def search_entities(
+        self,
+        query: str,
+        limit: int = 5,
+        trace_id: str | None = None,
+    ) -> list[SearchResult]:
+        """
+        Search entity nodes via fulltext index.
+
+        Unlike search() which returns edges/facts, this searches entity nodes
+        directly using Neo4j's fulltext index on name and summary.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            trace_id: Trace ID for logging
+
+        Returns:
+            List of SearchResult objects for matching entities
+        """
+        self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
+
+        logger.info(
+            f"[CHART] Searching entities: {query[:50]}...",
+            extra={"trace_id": trace_id, "agent_name": "graphiti"},
+        )
+
+        try:
+            # Access the Neo4j driver from Graphiti client
+            driver = self._client.driver
+
+            # Use fulltext index on entity name and summary
+            cypher = """
+                CALL db.index.fulltext.queryNodes("node_name_and_summary", $query)
+                YIELD node, score
+                RETURN node.uuid as uuid, node.name as name, node.summary as summary,
+                       labels(node) as labels, score
+                LIMIT $limit
+            """
+
+            results = await driver.execute_query(
+                cypher, parameters_={"query": query, "limit": limit}
+            )
+
+            search_results: list[SearchResult] = []
+            for record in results.records:
+                # Format content from entity data
+                name = record.get("name", "Unknown")
+                summary = record.get("summary", "")
+                labels_list = record.get("labels", [])
+                label = labels_list[0] if labels_list else "Entity"
+
+                content = f"{name}: {summary}" if summary else name
+
+                search_results.append(
+                    SearchResult(
+                        uuid=record.get("uuid", ""),
+                        label=label,
+                        name=name,
+                        content=content,
+                        score=float(record.get("score", 1.0)),
+                        metadata={"labels": labels_list},
+                    )
+                )
+
+            logger.info(
+                f"[BEACON] Entity search returned {len(search_results)} results",
+                extra={"trace_id": trace_id, "agent_name": "graphiti"},
+            )
+
+            return search_results
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Entity search failed: {e}",
+                extra={"trace_id": trace_id, "agent_name": "graphiti"},
+            )
+            # Return empty list instead of raising - entity search is supplementary
+            return []
+
     async def get_entity(
         self,
         uuid: str,
@@ -274,6 +359,7 @@ class GraphitiClient:
             Entity data dictionary or None if not found
         """
         self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
 
         try:
             # Use Graphiti's get method if available, otherwise query directly

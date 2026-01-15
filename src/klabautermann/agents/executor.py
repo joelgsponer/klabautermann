@@ -431,12 +431,12 @@ ERROR HANDLING:
         """
         # Check direct email field
         if email := context.get("email"):
-            return email
+            return str(email)
 
         # Check search results
         for result in context.get("results", []):
             if email := result.get("email"):
-                return email
+                return str(email)
 
         # Check content for email pattern
         content = context.get("result", "")
