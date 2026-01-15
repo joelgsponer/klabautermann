@@ -1,0 +1,26 @@
+# Scheduler Configuration for Klabautermann
+#
+# Controls periodic job execution for agents that run on schedules.
+#
+# Reference: T047 - APScheduler Integration
+
+# Archivist Configuration
+# Scans for inactive threads and archives them to reduce graph clutter
+archivist:
+  enabled: true
+  interval_minutes: 15  # Scan every 15 minutes
+
+# Scribe Configuration
+# Generates daily journal reflections from the day's activities
+scribe:
+  enabled: true
+  hour: 0     # Midnight UTC
+  minute: 0
+
+# Scheduler Settings
+timezone: UTC  # All jobs run in UTC
+job_store: memory  # Options: 'memory' or 'sqlite'
+
+# SQLite job store path (if job_store: sqlite)
+# This enables job persistence across restarts
+# sqlite_path: data/jobs.sqlite

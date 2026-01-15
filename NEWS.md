@@ -8,6 +8,7 @@ User-visible changes to Klabautermann.
 
 - **Gmail & Calendar Integration**: Check emails and calendar events via natural language ("any unread emails?", "what's on my calendar today?")
 - **Google OAuth Helper**: `scripts/get_google_token.py` for easy OAuth credential setup
+- **Daily Journal Generation**: Klabautermann generates daily reflections with personality (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING)
 - **CLI Interface**: Interactive command-line REPL for conversations with the knowledge assistant
 - **Knowledge Graph**: Neo4j-based temporal knowledge graph for storing entities and relationships
 - **Entity Extraction**: Automatic extraction of people, organizations, and relationships from conversations

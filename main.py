@@ -43,6 +43,12 @@ from klabautermann.core.exceptions import GraphConnectionError, StartupError  # 
 from klabautermann.core.logger import logger  # noqa: E402
 from klabautermann.memory.graphiti_client import GraphitiClient  # noqa: E402
 from klabautermann.memory.neo4j_client import Neo4jClient  # noqa: E402
+from klabautermann.utils.scheduler import (  # noqa: E402
+    create_scheduler,
+    register_scheduled_jobs,
+    shutdown_scheduler,
+    start_scheduler,
+)
 
 
 if TYPE_CHECKING:
@@ -73,6 +79,9 @@ class Klabautermann:
         # Agents
         self.agents: dict[str, BaseAgent] = {}
         self.agent_tasks: list[asyncio.Task[Any]] = []
+
+        # Scheduler
+        self.scheduler: Any = None
 
         # Shutdown coordination
         self._shutdown_event = asyncio.Event()
@@ -137,6 +146,10 @@ class Klabautermann:
 
         # Wire up agent registry
         self._wire_agent_registry()
+
+        # Initialize scheduler
+        logger.info("[CHART] Setting up scheduler...")
+        self._initialize_scheduler()
 
         # Start hot-reload
         self.quartermaster.start()
@@ -208,6 +221,46 @@ class Klabautermann:
         for name in self.agents:
             self.quartermaster.register_callback(name, lambda n: self._on_agent_config_change(n))
 
+    def _initialize_scheduler(self) -> None:
+        """Initialize and configure the scheduler for periodic jobs."""
+        # Load scheduler configuration
+        scheduler_config = self._load_scheduler_config()
+
+        # Create scheduler
+        job_store = scheduler_config.get("job_store", "memory")
+        timezone = scheduler_config.get("timezone", "UTC")
+        sqlite_path = scheduler_config.get("sqlite_path", "data/jobs.sqlite")
+
+        self.scheduler = create_scheduler(
+            job_store=job_store,
+            timezone=timezone,
+            sqlite_path=sqlite_path,
+        )
+
+        # Register scheduled jobs
+        register_scheduled_jobs(self.scheduler, self.agents, scheduler_config)
+
+        logger.debug("[WHISPER] Scheduler configured and ready")
+
+    def _load_scheduler_config(self) -> dict[str, Any]:
+        """Load scheduler configuration from YAML."""
+        config_file = Path(__file__).parent / "config" / "scheduler.yaml"
+
+        if not config_file.exists():
+            logger.warning("[SWELL] scheduler.yaml not found, using defaults")
+            return {}
+
+        try:
+            import yaml
+
+            with config_file.open() as f:
+                config = yaml.safe_load(f) or {}
+            logger.debug("[WHISPER] Loaded scheduler config")
+            return config
+        except Exception as e:
+            logger.warning(f"[SWELL] Failed to load scheduler config: {e}")
+            return {}
+
     async def _on_agent_config_change(self, agent_name: str) -> None:
         """Handle agent config change."""
         logger.info(f"[BEACON] Config changed for {agent_name}")
@@ -222,6 +275,10 @@ class Klabautermann:
             task = asyncio.create_task(agent.run(), name=f"agent-{name}")
             self.agent_tasks.append(task)
             logger.debug(f"[WHISPER] Started {name} agent loop")
+
+        # Start scheduler for periodic jobs
+        if self.scheduler:
+            await start_scheduler(self.scheduler)
 
         # Set up signal handlers
         loop = asyncio.get_event_loop()
@@ -250,6 +307,10 @@ class Klabautermann:
     async def shutdown(self) -> None:
         """Clean shutdown of all components."""
         logger.info("[CHART] Shutting down Klabautermann...")
+
+        # Stop scheduler (waits for running jobs to complete)
+        if self.scheduler:
+            await shutdown_scheduler(self.scheduler)
 
         # Stop agents
         for name, agent in self.agents.items():

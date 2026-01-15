@@ -37,6 +37,8 @@ dependencies = [
     # API server for Go TUI
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
+    # Scheduling
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]

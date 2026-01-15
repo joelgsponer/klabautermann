@@ -5,7 +5,7 @@
 - **Priority**: P1
 - **Category**: subagent
 - **Effort**: M
-- **Status**: pending
+- **Status**: completed
 - **Assignee**: alchemist
 
 ## Specs
@@ -156,3 +156,101 @@ async def generate_journal(
 - Test with various analytics scenarios (busy day, quiet day, many tasks)
 - Verify all JournalEntry fields populated
 - Check mood classification is sensible
+
+---
+
+## Development Notes
+
+### Implementation
+
+**Files Created:**
+1. `/src/klabautermann/agents/journal_generation.py` - Main journal generation pipeline
+2. `/tests/unit/test_journal_generation.py` - Comprehensive unit tests (12 test cases)
+
+**Files Modified:**
+1. `/src/klabautermann/core/models.py` - Added `JournalEntry` Pydantic model and updated exports
+
+### Decisions Made
+
+1. **System Prompt Design**:
+   - Created comprehensive SCRIBE_SYSTEM_PROMPT capturing Klabautermann personality
+   - Emphasized five-section structure (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING)
+   - Included examples and rules to prevent forced nautical metaphors
+   - Set max length at 300 words to keep journals concise
+
+2. **Structured Output with tool_use**:
+   - Used Anthropic's tool_use pattern for guaranteed JSON schema compliance
+   - Defined explicit tool schema matching JournalEntry model
+   - Enforces required fields at API level, not just validation layer
+
+3. **Analytics Formatting**:
+   - Created `format_analytics_for_prompt()` utility function
+   - Handles edge cases (empty entities, zero counts, missing projects)
+   - Formats data in conversational style matching Klabautermann voice
+
+4. **Error Handling**:
+   - Applied `@retry_on_llm_errors` decorator for resilience
+   - Validates tool_use block presence before parsing
+   - Catches Pydantic validation errors and re-raises with context
+   - All errors logged with trace_id for debugging
+
+5. **Mood Classification**:
+   - Defined six valid moods: productive, challenging, calm, busy, mixed, quiet
+   - Schema enforced via enum in tool definition
+   - Allows LLM to choose appropriate sentiment based on analytics
+
+### Patterns Established
+
+1. **Analytics-to-Narrative Pipeline**:
+   - Separate formatting step (`format_analytics_for_prompt`)
+   - Template-based prompt construction
+   - Structured output parsing with validation
+   - Can be reused for other narrative generation tasks
+
+2. **Async LLM Calls with Retry**:
+   - Pattern: `@retry_on_llm_errors` → `AsyncAnthropic().messages.create` → validate
+   - Consistent error handling and logging
+   - Trace ID propagation for debugging
+
+3. **Test Organization**:
+   - Fixtures for different day scenarios (busy, quiet, challenging)
+   - Mock response fixture for predictable testing
+   - Separate test sections: formatting, generation, error handling, integration
+   - All tests async using `pytest.mark.asyncio`
+
+### Testing
+
+**Test Coverage:**
+- 12 unit tests, all passing
+- Test scenarios:
+  - Analytics formatting (busy day, quiet day, empty entities, zero counts)
+  - Journal generation (busy, quiet, challenging days)
+  - Prompt construction (analytics inclusion verification)
+  - Error handling (missing tool_use, invalid schema)
+  - Mood classification (all six valid values)
+  - Integration (all fields populated, five sections present)
+
+**Full Test Suite:**
+- 604 unit tests passed, 6 skipped, 1 warning
+- No regressions introduced
+
+### Issues Encountered
+
+**None** - Implementation proceeded smoothly following established patterns from:
+- `src/klabautermann/agents/ingestor.py` (agent structure)
+- `src/klabautermann/agents/summarization.py` (LLM with structured output)
+- `src/klabautermann/utils/retry.py` (retry patterns)
+
+### Integration Points
+
+This module is ready to be integrated into the Scribe agent. Next steps:
+1. Scribe agent will import `generate_journal` function
+2. Call after gathering daily analytics via T044 queries
+3. Store resulting JournalEntry in graph as JournalEntryNode linked to Day node
+
+### Notes for Future Tasks
+
+1. **Voice Calibration**: Once journals are generated in production, review samples to ensure personality is consistent but not repetitive
+2. **Context Enhancement**: The `context` parameter is reserved for future use (e.g., upcoming events, pending tasks)
+3. **Personalization**: Consider adding Captain-specific patterns (e.g., "I notice you're most productive in mornings")
+4. **Multi-Day Trends**: Future enhancement could compare today vs. previous days

@@ -11,17 +11,13 @@ Task: T045 - Journal Generation Pipeline
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
 from klabautermann.core.logger import logger
 from klabautermann.core.models import DailyAnalytics, JournalEntry
 from klabautermann.utils.retry import retry_on_llm_errors
-
-
-if TYPE_CHECKING:
-    pass
 
 
 # System prompt captures Klabautermann personality
@@ -238,9 +234,7 @@ Be honest, insightful, and capture Klabautermann's voice."""
     )
 
     # Extract tool_use block
-    tool_use_block = next(
-        (block for block in response.content if block.type == "tool_use"), None
-    )
+    tool_use_block = next((block for block in response.content if block.type == "tool_use"), None)
 
     if not tool_use_block:
         logger.error(
