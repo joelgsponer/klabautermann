@@ -460,6 +460,91 @@ class ChannelConfig(BaseModel):
 
 
 # ===========================================================================
+# Thread Summarization Models
+# ===========================================================================
+
+
+class ActionStatus(str, Enum):
+    """Status of action items extracted from conversation."""
+
+    PENDING = "pending"
+    COMPLETED = "completed"
+    MENTIONED = "mentioned"  # Reference to existing task
+
+
+class ConflictResolution(str, Enum):
+    """Strategy for resolving fact contradictions."""
+
+    EXPIRE_OLD = "expire_old"  # Mark old fact as expired
+    KEEP_BOTH = "keep_both"  # Both might be valid
+    USER_REVIEW = "user_review"  # Flag for human decision
+    IGNORE_NEW = "ignore_new"  # Keep existing, discard new
+
+
+class ActionItem(BaseModel):
+    """Task/action extracted from conversation."""
+
+    action: str
+    assignee: str | None = None
+    status: ActionStatus = ActionStatus.PENDING
+    due_date: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Ensure confidence is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Confidence must be between 0.0 and 1.0")
+        return v
+
+
+class ExtractedFact(BaseModel):
+    """New information to add to graph."""
+
+    entity: str
+    entity_type: str
+    fact: str
+    confidence: float = Field(ge=0.0, le=1.0, default=0.8)
+
+    @field_validator("confidence")
+    @classmethod
+    def validate_confidence(cls, v: float) -> float:
+        """Ensure confidence is between 0 and 1."""
+        if not 0.0 <= v <= 1.0:
+            raise ValueError("Confidence must be between 0.0 and 1.0")
+        return v
+
+
+class FactConflict(BaseModel):
+    """Contradiction with existing data."""
+
+    existing_fact: str
+    new_fact: str
+    entity: str
+    resolution: ConflictResolution = ConflictResolution.USER_REVIEW
+
+
+class ThreadSummary(BaseModel):
+    """
+    Complete summarization output from Archivist.
+
+    Used when archiving conversation threads to extract structured
+    information that can be stored in the knowledge graph.
+
+    Reference: specs/architecture/AGENTS.md Section 1.5
+    """
+
+    summary: str  # 2-3 sentence overview
+    topics: list[str] = Field(default_factory=list)
+    action_items: list[ActionItem] = Field(default_factory=list)
+    new_facts: list[ExtractedFact] = Field(default_factory=list)
+    conflicts: list[FactConflict] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+    sentiment: str = "neutral"  # positive, negative, neutral, mixed
+
+
+# ===========================================================================
 # Action Execution Models
 # ===========================================================================
 
@@ -501,9 +586,11 @@ class ActionResult(BaseModel):
 # ===========================================================================
 
 __all__ = [
+    # Action execution
+    "ActionItem",
     "ActionRequest",
     "ActionResult",
-    # Action execution
+    "ActionStatus",
     "ActionType",
     # Configuration
     "AgentConfig",
@@ -515,13 +602,19 @@ __all__ = [
     "BaseRelation",
     "ChannelConfig",
     "ChannelType",
+    # Thread summarization
+    "ConflictResolution",
     "DayNode",
     "EntityExtraction",
     "EntityLabel",
     "EventNode",
+    # Extraction models
+    "ExtractedFact",
     "ExtractionResult",
+    # Relations
     "FamilyOfRelation",
     "FriendOfRelation",
+    "FactConflict",
     "GoalNode",
     "GoalStatus",
     "IntentClassification",
@@ -548,7 +641,7 @@ __all__ = [
     # System nodes
     "ThreadNode",
     "ThreadStatus",
-    # Relations
+    "ThreadSummary",
     "WorksAtRelation",
     "current_timestamp",
     # Utilities
