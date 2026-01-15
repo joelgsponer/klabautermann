@@ -1,0 +1,155 @@
+[project]
+name = "klabautermann"
+version = "0.1.0"
+description = "Agentic Personal Knowledge Management System with Temporal Knowledge Graph"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Klabautermann Team"}
+]
+keywords = ["pkm", "knowledge-graph", "neo4j", "llm", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Groupware",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "anthropic>=0.40.0",
+    "graphiti-core>=0.5",
+    "neo4j>=5.0",
+    "python-dotenv>=1.0",
+    "tenacity>=8.0",
+    "pyyaml>=6.0",
+    "aiofiles>=23.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "pre-commit>=3.0",
+]
+
+[project.scripts]
+klabautermann = "klabautermann.main:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ===========================================================================
+# Ruff Configuration
+# ===========================================================================
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate (commented code)
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # function call in default argument (needed for FastAPI)
+    "ARG001", # unused function argument (common in abstract methods)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["klabautermann"]
+force-single-line = false
+lines-after-imports = 2
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "S101"]  # Allow asserts and unused args in tests
+
+# ===========================================================================
+# Mypy Configuration
+# ===========================================================================
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+strict_equality = true
+show_error_codes = true
+pretty = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "graphiti_core.*",
+    "neo4j.*",
+]
+ignore_missing_imports = true
+
+# ===========================================================================
+# Pytest Configuration
+# ===========================================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+]
+markers = [
+    "unit: Unit tests (fast, no external deps)",
+    "integration: Integration tests (requires Neo4j)",
+    "e2e: End-to-end tests (full system)",
+    "golden: Golden scenario tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+# ===========================================================================
+# Coverage Configuration
+# ===========================================================================
+[tool.coverage.run]
+source = ["src/klabautermann"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

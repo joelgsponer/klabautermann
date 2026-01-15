@@ -1,0 +1,103 @@
+# Klabautermann .gitignore
+# ========================
+
+# === SECRETS (CRITICAL - NEVER COMMIT) ===
+.env
+*.pem
+*.key
+*.p12
+credentials.json
+.google_token.json
+token.json
+*_credentials.json
+secrets/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# === Virtual Environments ===
+.venv/
+venv/
+ENV/
+env/
+.conda/
+
+# === Testing ===
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# === Type Checking ===
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+
+# === Data & Logs (Mounted as Volumes) ===
+data/
+logs/
+*.log
+
+# === Docker ===
+docker-compose.override.yml
+
+# === OS ===
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# === Jupyter ===
+.ipynb_checkpoints/
+*.ipynb
+
+# === Documentation Build ===
+docs/_build/
+site/
