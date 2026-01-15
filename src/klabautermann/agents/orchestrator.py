@@ -19,11 +19,13 @@ import uuid
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.agents.ingestor import Ingestor
 from klabautermann.core.exceptions import ExternalServiceError
 from klabautermann.core.logger import logger
 from klabautermann.core.models import (
     AgentMessage,
     IntentClassification,
+    IntentClassificationResponse,
     IntentType,
     ThreadContext,
 )
@@ -52,43 +54,31 @@ class Orchestrator(BaseAgent):
     - Fire-and-forget ingestion (non-blocking)
     """
 
-    # Intent classification keywords
-    SEARCH_KEYWORDS: ClassVar[list[str]] = [
-        "who is",
-        "what is",
-        "when did",
-        "where is",
-        "find",
-        "tell me about",
-        "remind me",
-        "what do you know about",
-        "who was",
-        "what was",
-        "where was",
-        "when was",
-    ]
+    # LLM-based intent classification prompt (replaces hardcoded keyword lists)
+    CLASSIFICATION_PROMPT: ClassVar[
+        str
+    ] = """Classify this user message into one of these intent types:
 
-    ACTION_KEYWORDS: ClassVar[list[str]] = [
-        "send",
-        "email",
-        "schedule",
-        "create",
-        "draft",
-        "book",
-        "set up",
-        "add to calendar",
-        "write an email",
-    ]
+SEARCH - User wants to retrieve information from the knowledge graph (things they told you before)
+  Examples: "Who is Sarah?", "What do you know about Project Alpha?", "What did John tell me last week?"
 
-    INGEST_KEYWORDS: ClassVar[list[str]] = [
-        "i met",
-        "i talked to",
-        "i'm working on",
-        "i learned",
-        "i just",
-        "i spoke with",
-        "i had a meeting with",
-    ]
+ACTION - User wants to interact with external services (Gmail, Calendar) or perform tasks
+  Examples: "Send an email to John", "Schedule a meeting tomorrow", "Check my email", "Any unread emails?", "What's on my calendar today?"
+
+INGESTION - User is sharing new information to remember
+  Examples: "I met John today, he works at Acme", "Sarah's email is sarah@example.com", "I'm working on Project Beta"
+
+CONVERSATION - General chat, greetings, acknowledgments, or unclear intent
+  Examples: "Hello!", "Thanks for the help", "How are you?", "Ok sounds good"
+
+User message: {message}
+
+Respond with ONLY valid JSON (no markdown, no explanation):
+{{"intent_type": "search", "confidence": 0.95, "reasoning": "User asking about a person", "extracted_query": "Who is Sarah?", "extracted_action": null}}
+"""
+
+    # Default model for classification (Haiku for speed)
+    CLASSIFICATION_MODEL: ClassVar[str] = "claude-3-5-haiku-20241022"
 
     # System prompt with Klabautermann personality and intent classification rules
     SYSTEM_PROMPT = """You are the Klabautermann Orchestrator - the central navigator of a personal knowledge system.
@@ -311,8 +301,8 @@ Example responses:
                         extra={"trace_id": trace_id, "agent_name": self.name},
                     )
 
-            # Fire-and-forget ingestion (non-blocking)
-            if self.graphiti:
+            # Fire-and-forget ingestion only for INGESTION intent (don't pollute graph with queries)
+            if self.graphiti and intent.type == IntentType.INGESTION:
                 task = asyncio.create_task(self._ingest_conversation(text, response_text, trace_id))
                 # Store reference to prevent garbage collection
                 self._background_tasks.add(task)
@@ -414,32 +404,89 @@ Example responses:
 
         return await loop.run_in_executor(None, _sync_call)
 
+    async def _call_classification_model(
+        self,
+        prompt: str,
+        trace_id: str,
+    ) -> str:
+        """
+        Call Claude Haiku for intent classification.
+
+        Uses Haiku for fast, cheap classification. Returns raw text response.
+
+        Args:
+            prompt: Classification prompt with user message.
+            trace_id: Request trace ID.
+
+        Returns:
+            Raw response text (expected to be JSON).
+        """
+        loop = asyncio.get_event_loop()
+
+        def _sync_call() -> str:
+            response = self.anthropic.messages.create(
+                model=self.CLASSIFICATION_MODEL,
+                max_tokens=256,  # Classification responses are small
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text: str = response.content[0].text
+            return text
+
+        logger.debug(
+            f"[WHISPER] Calling classification model ({self.CLASSIFICATION_MODEL})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return await loop.run_in_executor(None, _sync_call)
+
     async def _ingest_conversation(
         self,
         user_text: str,
-        assistant_text: str,
+        _assistant_text: str,  # Reserved - not ingested to avoid meta-garbage
         trace_id: str,
     ) -> None:
         """
-        Fire-and-forget: ingest conversation into knowledge graph.
+        Fire-and-forget: ingest user message into knowledge graph.
 
         This runs in the background and doesn't block the response.
         Graphiti will extract entities and update the graph.
 
+        IMPORTANT: Only ingests user messages, NOT assistant responses.
+        Ingesting assistant responses creates meta-garbage like "Assistant
+        is searching for X" which pollutes search results.
+
+        Input is cleaned before ingestion to remove:
+        - Role prefixes (User:, Assistant:, etc.)
+        - Roleplay markers (*actions*, **Researcher**: etc.)
+        - System mentions (The Locker, etc.)
+
         Args:
-            user_text: User's message.
-            assistant_text: Assistant's response.
+            user_text: User's message to ingest.
+            _assistant_text: Reserved for future use (currently ignored).
             trace_id: Request trace ID.
         """
         if not self.graphiti:
             return
 
         try:
-            # Combine into episode for Graphiti
-            episode_content = f"User: {user_text}\nAssistant: {assistant_text}"
+            # Clean input before ingestion (removes role prefixes, roleplay, etc.)
+            cleaned_text = Ingestor.clean_input(user_text)
 
+            if not cleaned_text:
+                logger.debug(
+                    "[WHISPER] Text cleaned to empty - skipping ingestion",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                return
+
+            logger.debug(
+                f"[WHISPER] Ingesting: {len(user_text)} -> {len(cleaned_text)} chars",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            # Ingest cleaned user message - Graphiti handles entity extraction
             await self.graphiti.add_episode(
-                content=episode_content,
+                content=cleaned_text,
                 source="conversation",
                 trace_id=trace_id,
             )
@@ -572,81 +619,145 @@ Example responses:
 
     def _has_agent(self, agent_name: str) -> bool:
         """Check if an agent is registered."""
-        return agent_name in self._agent_registry
+        has = agent_name in self._agent_registry
+        if not has:
+            logger.warning(
+                f"[SWELL] Agent '{agent_name}' not in registry. Available: {list(self._agent_registry.keys())}",
+                extra={"agent_name": self.name},
+            )
+        return has
 
     # =========================================================================
-    # Intent Classification (T020)
+    # Intent Classification (T020) - LLM-based with structured output
     # =========================================================================
 
     async def _classify_intent(
         self,
         text: str,
-        _context: ThreadContext | None,
+        context: ThreadContext | None,
         trace_id: str,
     ) -> IntentClassification:
         """
-        Classify user intent using keyword matching.
+        Classify user intent using LLM with structured JSON output.
 
-        Uses fast keyword matching for common patterns. In future iterations,
-        ambiguous cases can fall back to LLM-based classification.
+        Uses Claude Haiku for fast, semantic intent classification. Falls back
+        to simple heuristics if LLM call fails.
 
         Args:
             text: User's message text.
-            _context: Conversation context (reserved for future context-aware classification).
+            context: Conversation context for better classification.
             trace_id: Request trace ID for logging.
 
         Returns:
             IntentClassification with type and confidence score.
         """
-        # Note: _context reserved for future LLM-based classification (T021+)
-        text_lower = text.lower()
+        try:
+            # Build prompt with user message
+            prompt = self.CLASSIFICATION_PROMPT.format(message=text)
 
-        # Quick keyword checks - search intents
-        for keyword in self.SEARCH_KEYWORDS:
-            if keyword in text_lower:
-                logger.debug(
-                    f"[WHISPER] Matched search keyword: {keyword}",
-                    extra={"trace_id": trace_id, "agent_name": self.name},
-                )
-                return IntentClassification(
-                    type=IntentType.SEARCH,
-                    confidence=0.9,
-                    query=text,
-                )
+            # Add conversation context if available (last 2 messages)
+            if context and context.messages:
+                recent = context.messages[-2:]
+                if recent:
+                    context_str = "\n".join(
+                        f"{m.get('role', 'user')}: {m.get('content', '')[:100]}" for m in recent
+                    )
+                    prompt = f"Recent conversation:\n{context_str}\n\n{prompt}"
 
-        # Action intents
-        for keyword in self.ACTION_KEYWORDS:
-            if keyword in text_lower:
-                logger.debug(
-                    f"[WHISPER] Matched action keyword: {keyword}",
-                    extra={"trace_id": trace_id, "agent_name": self.name},
-                )
-                return IntentClassification(
-                    type=IntentType.ACTION,
-                    confidence=0.9,
-                    action=text,
-                )
+            # Call classification model (Haiku)
+            response_text = await self._call_classification_model(prompt, trace_id)
 
-        # Ingestion triggers
-        for keyword in self.INGEST_KEYWORDS:
-            if keyword in text_lower:
-                logger.debug(
-                    f"[WHISPER] Matched ingestion keyword: {keyword}",
-                    extra={"trace_id": trace_id, "agent_name": self.name},
-                )
-                return IntentClassification(
-                    type=IntentType.INGESTION,
-                    confidence=0.8,
-                )
+            # Parse JSON response (handle potential markdown code blocks)
+            json_str = response_text.strip()
+            if json_str.startswith("```"):
+                # Extract JSON from markdown code block
+                lines = json_str.split("\n")
+                json_lines = [line for line in lines if not line.startswith("```")]
+                json_str = "\n".join(json_lines)
+
+            # Normalize intent_type to lowercase (LLM sometimes returns uppercase)
+            import json as json_module
+
+            parsed = json_module.loads(json_str)
+            if "intent_type" in parsed and isinstance(parsed["intent_type"], str):
+                parsed["intent_type"] = parsed["intent_type"].lower()
+            json_str = json_module.dumps(parsed)
+
+            result = IntentClassificationResponse.model_validate_json(json_str)
+
+            logger.debug(
+                f"[WHISPER] LLM classified as {result.intent_type.value}: {result.reasoning}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            return IntentClassification(
+                type=result.intent_type,
+                confidence=result.confidence,
+                query=result.extracted_query,
+                action=result.extracted_action,
+            )
+
+        except Exception as e:
+            # Fallback to simple heuristics if LLM fails
+            logger.warning(
+                f"[SWELL] LLM classification failed, using fallback: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return self._classify_intent_fallback(text, trace_id)
+
+    def _classify_intent_fallback(self, text: str, trace_id: str) -> IntentClassification:
+        """
+        Simple fallback classification when LLM is unavailable.
+
+        Uses basic heuristics - much less accurate than LLM but works offline.
+        """
+        text_lower = text.lower().strip()
+
+        # Question mark -> SEARCH
+        if "?" in text:
+            logger.debug(
+                "[WHISPER] Fallback: question mark -> SEARCH",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return IntentClassification(
+                type=IntentType.SEARCH,
+                confidence=0.6,
+                query=text,
+            )
+
+        # Action keywords
+        action_starts = ("send", "email", "schedule", "create", "draft", "book")
+        if any(text_lower.startswith(kw) for kw in action_starts):
+            logger.debug(
+                "[WHISPER] Fallback: action keyword -> ACTION",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return IntentClassification(
+                type=IntentType.ACTION,
+                confidence=0.6,
+                action=text,
+            )
+
+        # Ingestion keywords
+        ingest_starts = ("i met", "i talked", "i spoke", "i learned", "i just")
+        if any(text_lower.startswith(kw) for kw in ingest_starts):
+            logger.debug(
+                "[WHISPER] Fallback: ingestion keyword -> INGESTION",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return IntentClassification(
+                type=IntentType.INGESTION,
+                confidence=0.6,
+            )
 
         # Default to conversation
         logger.debug(
-            "[WHISPER] No keyword match, defaulting to conversation",
+            "[WHISPER] Fallback: default -> CONVERSATION",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
         return IntentClassification(
             type=IntentType.CONVERSATION,
-            confidence=0.7,
+            confidence=0.5,
         )
 
     # =========================================================================
@@ -694,9 +805,21 @@ Example responses:
             if response:
                 result: str = response.payload.get("result", "")
                 if result:
-                    return result
+                    # Process through Claude for human-readable response
+                    messages = [
+                        {
+                            "role": "user",
+                            "content": f"""Based on these search results from the knowledge graph, provide a helpful natural language response to the question: "{query}"
+
+Search results:
+{result}
+
+If the results are relevant, summarize them conversationally. If not helpful, say you couldn't find anything relevant.""",
+                        }
+                    ]
+                    return await self._call_claude(messages, trace_id)
                 # Empty result from Researcher
-                return "I checked The Locker but couldn't find anything on that. Want me to note it down?"
+                return "I checked The Locker but couldn't find anything on that."
 
             # Timeout or error - fall back to conversation
             logger.warning(

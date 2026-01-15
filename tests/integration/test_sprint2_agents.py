@@ -12,9 +12,10 @@ If tests fail, fix the CODE, not the tests.
 # ruff: noqa: SIM105, B017
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,7 +26,6 @@ from klabautermann.agents.researcher import Researcher, SearchType
 from klabautermann.config.manager import ConfigManager
 from klabautermann.core.models import (
     AgentMessage,
-    EntityLabel,
     IntentType,
 )
 
@@ -137,6 +137,25 @@ model:
 # ====================
 
 
+def _mock_classification_response(
+    intent_type: str,
+    confidence: float = 0.9,
+    reasoning: str = "Test classification",
+    extracted_query: str | None = None,
+    extracted_action: str | None = None,
+) -> str:
+    """Helper to create mock LLM classification response JSON."""
+    return json.dumps(
+        {
+            "intent_type": intent_type.lower(),
+            "confidence": confidence,
+            "reasoning": reasoning,
+            "extracted_query": extracted_query,
+            "extracted_action": extracted_action,
+        }
+    )
+
+
 class TestIntentClassification:
     """Test intent classification in Orchestrator."""
 
@@ -156,46 +175,94 @@ class TestIntentClassification:
     @pytest.mark.asyncio
     async def test_search_intent_who(self, orchestrator: Orchestrator) -> None:
         """'Who is X' triggers search intent."""
-        intent = await orchestrator._classify_intent("Who is Sarah?", None, "test-trace")
-        assert intent.type == IntentType.SEARCH
-        assert intent.confidence == 0.9
+        mock_response = _mock_classification_response(
+            "SEARCH", 0.9, "User asking about a person", "Who is Sarah?"
+        )
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent("Who is Sarah?", None, "test-trace")
+            assert intent.type == IntentType.SEARCH
+            assert intent.confidence == 0.9
 
     @pytest.mark.asyncio
     async def test_search_intent_what(self, orchestrator: Orchestrator) -> None:
         """'What is X' triggers search intent."""
-        intent = await orchestrator._classify_intent("What is the Q1 budget?", None, "test-trace")
-        assert intent.type == IntentType.SEARCH
-        assert intent.confidence == 0.9
+        mock_response = _mock_classification_response(
+            "SEARCH", 0.9, "User asking for information", "What is the Q1 budget?"
+        )
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent(
+                "What is the Q1 budget?", None, "test-trace"
+            )
+            assert intent.type == IntentType.SEARCH
+            assert intent.confidence == 0.9
 
     @pytest.mark.asyncio
     async def test_action_intent_send(self, orchestrator: Orchestrator) -> None:
         """'Send email' triggers action intent."""
-        intent = await orchestrator._classify_intent("Send an email to John", None, "test-trace")
-        assert intent.type == IntentType.ACTION
-        assert intent.confidence == 0.9
+        mock_response = _mock_classification_response(
+            "ACTION", 0.9, "User wants to send email", None, "Send an email to John"
+        )
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent(
+                "Send an email to John", None, "test-trace"
+            )
+            assert intent.type == IntentType.ACTION
+            assert intent.confidence == 0.9
 
     @pytest.mark.asyncio
     async def test_action_intent_schedule(self, orchestrator: Orchestrator) -> None:
         """'Schedule meeting' triggers action intent."""
-        intent = await orchestrator._classify_intent(
-            "Schedule a meeting tomorrow", None, "test-trace"
+        mock_response = _mock_classification_response(
+            "ACTION", 0.9, "User wants to schedule meeting", None, "Schedule a meeting tomorrow"
         )
-        assert intent.type == IntentType.ACTION
-        assert intent.confidence == 0.9
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent(
+                "Schedule a meeting tomorrow", None, "test-trace"
+            )
+            assert intent.type == IntentType.ACTION
+            assert intent.confidence == 0.9
 
     @pytest.mark.asyncio
     async def test_ingestion_intent_i_met(self, orchestrator: Orchestrator) -> None:
         """'I met X' triggers ingestion intent."""
-        intent = await orchestrator._classify_intent("I met Sarah from Acme", None, "test-trace")
-        assert intent.type == IntentType.INGESTION
-        assert intent.confidence == 0.8
+        mock_response = _mock_classification_response(
+            "INGESTION", 0.8, "User sharing information about a person"
+        )
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent(
+                "I met Sarah from Acme", None, "test-trace"
+            )
+            assert intent.type == IntentType.INGESTION
+            assert intent.confidence == 0.8
 
     @pytest.mark.asyncio
     async def test_conversation_default(self, orchestrator: Orchestrator) -> None:
         """Generic input defaults to conversation."""
-        intent = await orchestrator._classify_intent("Hello, how are you?", None, "test-trace")
-        assert intent.type == IntentType.CONVERSATION
-        assert intent.confidence == 0.7
+        mock_response = _mock_classification_response(
+            "CONVERSATION", 0.7, "Greeting/social interaction"
+        )
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            mock_llm.return_value = mock_response
+            intent = await orchestrator._classify_intent("Hello, how are you?", None, "test-trace")
+            assert intent.type == IntentType.CONVERSATION
+            assert intent.confidence == 0.7
 
 
 # ====================
@@ -293,74 +360,80 @@ class TestAgentDelegation:
 
 
 class TestEntityExtraction:
-    """Test entity extraction in Ingestor."""
+    """Test entity extraction in Ingestor.
+
+    NOTE: Entity extraction is delegated to Graphiti's internal LLM.
+    The Ingestor cleans input and passes to Graphiti - it doesn't extract directly.
+    These tests validate that the Ingestor correctly passes data to Graphiti.
+    """
 
     @pytest.fixture
-    def ingestor_with_extraction(self, mock_graphiti_client: MagicMock) -> Ingestor:
-        """Ingestor with mock extraction response."""
-        mock_llm = MagicMock()
-        response = MagicMock()
-        response.content = [
-            MagicMock(
-                text="""
-{
-  "entities": [
-    {"name": "Sarah", "label": "Person", "properties": {"email": "sarah@acme.com"}, "confidence": 1.0},
-    {"name": "Acme Corp", "label": "Organization", "properties": {}, "confidence": 1.0}
-  ],
-  "relationships": [
-    {"source_name": "Sarah", "source_label": "Person", "relationship_type": "WORKS_AT", "target_name": "Acme Corp", "target_label": "Organization", "properties": {}, "confidence": 1.0}
-  ]
-}
-"""
-            )
-        ]
-        # Make messages.create an async mock
-        mock_llm.messages.create = AsyncMock(return_value=response)
-
+    def ingestor(self, mock_graphiti_client: MagicMock) -> Ingestor:
+        """Ingestor with mock Graphiti client."""
         return Ingestor(
             graphiti_client=mock_graphiti_client,
-            llm_client=mock_llm,
             config={"model": "claude-3-haiku-20240307"},
         )
 
     @pytest.mark.asyncio
-    async def test_person_extraction(self, ingestor_with_extraction: Ingestor) -> None:
-        """Extracts Person entities."""
-        result = await ingestor_with_extraction._extract(
-            "I met Sarah from Acme Corp",
-            "test-trace",
+    async def test_ingestor_passes_cleaned_text_to_graphiti(
+        self, ingestor: Ingestor, mock_graphiti_client: MagicMock
+    ) -> None:
+        """Ingestor cleans input and passes to Graphiti add_episode."""
+        mock_graphiti_client.is_connected = True
+        mock_graphiti_client.add_episode = AsyncMock()
+
+        from klabautermann.core.models import AgentMessage
+
+        msg = AgentMessage(
+            trace_id="test-trace",
+            source_agent="orchestrator",
+            target_agent="ingestor",
+            intent="ingest",
+            payload={"text": "User: I met Sarah from Acme Corp"},
         )
 
-        assert len(result.entities) == 2
-        person = next(e for e in result.entities if e.label == EntityLabel.PERSON)
-        assert person.name == "Sarah"
+        await ingestor.process_message(msg)
+
+        # Verify Graphiti was called with cleaned text
+        mock_graphiti_client.add_episode.assert_called_once()
+        call_kwargs = mock_graphiti_client.add_episode.call_args.kwargs
+        # "User: " prefix should be stripped
+        assert "User:" not in call_kwargs["content"]
+        assert "Sarah" in call_kwargs["content"]
+        assert "Acme Corp" in call_kwargs["content"]
 
     @pytest.mark.asyncio
-    async def test_organization_extraction(self, ingestor_with_extraction: Ingestor) -> None:
-        """Extracts Organization entities."""
-        result = await ingestor_with_extraction._extract(
-            "I met Sarah from Acme Corp",
-            "test-trace",
-        )
+    async def test_ingestor_cleans_role_prefixes(self, ingestor: Ingestor) -> None:
+        """Ingestor strips role prefixes from input."""
+        text = "User: I met Sarah from Acme\nAssistant: Nice!"
+        cleaned = ingestor.clean_input(text)
 
-        assert len(result.entities) == 2
-        org = next(e for e in result.entities if e.label == EntityLabel.ORGANIZATION)
-        assert org.name == "Acme Corp"
+        assert "User:" not in cleaned
+        assert "Assistant:" not in cleaned
+        assert "Sarah" in cleaned
 
     @pytest.mark.asyncio
-    async def test_relationship_extraction(self, ingestor_with_extraction: Ingestor) -> None:
-        """Extracts relationships between entities."""
-        result = await ingestor_with_extraction._extract(
-            "I met Sarah from Acme Corp",
-            "test-trace",
+    async def test_ingestor_handles_empty_input(
+        self, ingestor: Ingestor, mock_graphiti_client: MagicMock
+    ) -> None:
+        """Ingestor skips empty input."""
+        mock_graphiti_client.add_episode = AsyncMock()
+
+        from klabautermann.core.models import AgentMessage
+
+        msg = AgentMessage(
+            trace_id="test-trace",
+            source_agent="orchestrator",
+            target_agent="ingestor",
+            intent="ingest",
+            payload={"text": ""},
         )
 
-        assert len(result.relationships) == 1
-        rel = result.relationships[0]
-        assert rel.source_name == "Sarah"
-        assert rel.relationship_type == "WORKS_AT"
-        assert rel.target_name == "Acme Corp"
+        result = await ingestor.process_message(msg)
+
+        assert result is None
+        mock_graphiti_client.add_episode.assert_not_called()
 
 
 # ====================

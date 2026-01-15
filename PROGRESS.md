@@ -186,6 +186,7 @@ None currently.
 
 ## Recent Activity
 
+- 2026-01-15: Post-Sprint 2 bugfixes: entity search parameter conflict, intent classification for external services, Claude post-processing for search results, Google OAuth token helper script. 398 tests passing.
 - 2026-01-15: Added README.md, headless OAuth support, contract tests, and golden scenario E2E tests
 - 2026-01-15: **Sprint 2 COMPLETE** - All 391 tests passing. Fixed test suite issues: Ingestor signature mismatch (graphiti_client), query parameter bindings (FIND_BLOCKED_TASKS), executor assertions, and integration test mock fixtures. Ready for Sprint 3
 - 2026-01-15: T035 completed - Sprint 2 integration tests with 23 comprehensive tests covering all agent interactions, delegation patterns, extraction, search types, MCP integration (mocked), and config hot-reload. Tests follow established pytest-asyncio patterns and complete in <60s

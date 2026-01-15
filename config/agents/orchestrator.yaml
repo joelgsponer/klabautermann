@@ -12,38 +12,11 @@ personality:
   name: klabautermann
   wit_level: 0.3  # 0.0 = terse, 1.0 = very witty
 
+# Intent classification uses LLM (Haiku) for semantic understanding
+# No hardcoded keyword lists - the LLM handles classification
 intent_classification:
-  search_keywords:
-    - "who is"
-    - "what is"
-    - "when did"
-    - "where is"
-    - "find"
-    - "tell me about"
-    - "remind me"
-    - "what do you know about"
-    - "who was"
-    - "what was"
-    - "where was"
-    - "when was"
-  action_keywords:
-    - "send"
-    - "email"
-    - "schedule"
-    - "create"
-    - "draft"
-    - "book"
-    - "set up"
-    - "add to calendar"
-    - "write an email"
-  ingestion_keywords:
-    - "i met"
-    - "i talked to"
-    - "i'm working on"
-    - "i learned"
-    - "i just"
-    - "i spoke with"
-    - "i had a meeting with"
+  model: claude-3-5-haiku-20241022  # Fast model for classification
+  timeout: 5.0  # Seconds before fallback to heuristics
 
 delegation:
   search: researcher

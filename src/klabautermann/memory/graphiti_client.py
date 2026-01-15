@@ -305,12 +305,13 @@ class GraphitiClient:
                 LIMIT $limit
             """
 
-            results = await driver.execute_query(
-                cypher, parameters_={"query": query, "limit": limit}
-            )
+            # Use session.run() with parameters dict to avoid keyword conflicts
+            async with driver.session() as session:
+                result = await session.run(cypher, parameters={"query": query, "limit": limit})
+                records = await result.data()
 
             search_results: list[SearchResult] = []
-            for record in results.records:
+            for record in records:
                 # Format content from entity data
                 name = record.get("name", "Unknown")
                 summary = record.get("summary", "")

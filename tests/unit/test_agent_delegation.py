@@ -202,7 +202,7 @@ class TestIntentHandlerDelegation:
     @pytest.mark.asyncio
     async def test_handle_search_delegates_to_researcher(self, orchestrator: Orchestrator) -> None:
         """_handle_search delegates to Researcher when available."""
-        mock_researcher = MockSubAgent("researcher", {"result": "Found in The Locker: ..."})
+        mock_researcher = MockSubAgent("researcher", {"result": "John works at Acme Corp"})
         orchestrator.agent_registry = {"researcher": mock_researcher}
 
         # Start mock researcher
@@ -215,10 +215,18 @@ class TestIntentHandlerDelegation:
                 query="who is John?",
             )
 
-            result = await orchestrator._handle_search(intent, None, "trace-123")
+            # Mock _call_claude since search results are now processed through Claude
+            with patch.object(orchestrator, "_call_claude", new_callable=AsyncMock) as mock_claude:
+                mock_claude.return_value = "John works at Acme Corp as a software engineer."
 
-            assert result == "Found in The Locker: ..."
-            assert len(mock_researcher.received_messages) == 1
+                result = await orchestrator._handle_search(intent, None, "trace-123")
+
+                assert result == "John works at Acme Corp as a software engineer."
+                assert len(mock_researcher.received_messages) == 1
+                # Verify Claude was called with search results
+                mock_claude.assert_called_once()
+                call_args = mock_claude.call_args[0][0]
+                assert "John works at Acme Corp" in call_args[0]["content"]
 
         finally:
             await mock_researcher.stop()

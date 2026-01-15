@@ -9,50 +9,70 @@ Reference: specs/architecture/ONTOLOGY.md
 
 from enum import Enum
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ===========================================================================
 # Entity Type Models for Graphiti
 # ===========================================================================
 # These Pydantic models define entity types for Graphiti's extraction.
-# The docstrings are used by Graphiti's LLM to understand each type.
+# The docstrings and field descriptions guide Graphiti's LLM to extract
+# structured attributes from conversations.
+#
+# Per Zep/Graphiti docs: Custom entity types REQUIRE at least one field
+# with a description to guide extraction effectively.
 
 
 class PersonType(BaseModel):
     """A human individual - employee, contact, family member, friend, or acquaintance."""
 
-    pass
+    email: str | None = Field(description="Email address of the person", default=None)
+    title: str | None = Field(description="Job title, role, or position", default=None)
+    phone: str | None = Field(description="Phone number", default=None)
 
 
 class OrganizationType(BaseModel):
     """A company, institution, team, government body, or organized group."""
 
-    pass
+    industry: str | None = Field(
+        description="Industry or sector (tech, finance, healthcare, etc.)", default=None
+    )
+    domain: str | None = Field(description="Website domain (e.g., acme.com)", default=None)
 
 
 class ProjectType(BaseModel):
     """A work project, initiative, product, or collaborative effort."""
 
-    pass
+    status: str | None = Field(
+        description="Project status: active, on_hold, completed, cancelled", default=None
+    )
+    deadline: str | None = Field(description="Project deadline or due date", default=None)
 
 
 class LocationType(BaseModel):
     """A physical place - city, country, building, venue, neighborhood, or address."""
 
-    pass
+    address: str | None = Field(description="Street address or full address", default=None)
+    location_type: str | None = Field(
+        description="Type of location: city, office, venue, home, restaurant", default=None
+    )
 
 
 class EventType(BaseModel):
     """A meeting, conference, appointment, deadline, or scheduled occurrence."""
 
-    pass
+    start_time: str | None = Field(description="When the event starts (date/time)", default=None)
+    event_location: str | None = Field(description="Where the event takes place", default=None)
 
 
 class TaskType(BaseModel):
     """An action item, to-do, assignment, or work task."""
 
-    pass
+    status: str | None = Field(
+        description="Task status: todo, in_progress, done, cancelled", default=None
+    )
+    priority: str | None = Field(description="Task priority: high, medium, low", default=None)
+    due_date: str | None = Field(description="When the task is due", default=None)
 
 
 # Entity types dict for Graphiti's add_episode()

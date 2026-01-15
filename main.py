@@ -170,13 +170,12 @@ class Klabautermann:
             config=get_config_dict("orchestrator"),
         )
 
-        # Create Ingestor - uses Opus model
+        # Create Ingestor - passes cleaned text to Graphiti for extraction
         if self.graphiti:
             self.agents["ingestor"] = Ingestor(
                 name="ingestor",
                 config=get_config_dict("ingestor"),
                 graphiti_client=self.graphiti,
-                llm_client=self.anthropic,
             )
         else:
             logger.warning("[SWELL] Ingestor not created - Graphiti unavailable")

@@ -108,9 +108,8 @@ personality:
   wit_level: 0.8
 
 intent_classification:
-  search_keywords:
-    - "find"
-    - "search"
+  model: claude-3-5-haiku-20241022
+  timeout: 5.0
 """)
 
             # Write test ingestor config
@@ -287,4 +286,5 @@ class TestIntegrationWithRealConfigs:
         orchestrator = manager.get_typed("orchestrator", OrchestratorConfig)
         if orchestrator:
             assert orchestrator.model.primary is not None
-            assert len(orchestrator.intent_classification.search_keywords) > 0
+            assert orchestrator.intent_classification.model is not None
+            assert orchestrator.intent_classification.timeout > 0

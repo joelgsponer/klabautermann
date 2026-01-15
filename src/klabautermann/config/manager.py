@@ -46,13 +46,12 @@ class PersonalityConfig(BaseModel):
 
 
 class IntentConfig(BaseModel):
-    """Intent classification keyword configuration."""
+    """Intent classification configuration for LLM-based classification."""
 
     model_config = ConfigDict(extra="forbid")
 
-    search_keywords: list[str] = Field(default_factory=list)
-    action_keywords: list[str] = Field(default_factory=list)
-    ingestion_keywords: list[str] = Field(default_factory=list)
+    model: str = "claude-3-5-haiku-20241022"  # Fast model for classification
+    timeout: float = Field(default=5.0, gt=0.0)  # Seconds before fallback to heuristics
 
 
 class DelegationConfig(BaseModel):
@@ -196,7 +195,7 @@ class ConfigManager:
     Usage:
         config_manager = ConfigManager(Path("config/agents"))
         orchestrator_config = config_manager.get_typed("orchestrator", OrchestratorConfig)
-        print(orchestrator_config.intent_classification.search_keywords)
+        print(orchestrator_config.intent_classification.model)
     """
 
     CONFIG_CLASSES: ClassVar[dict[str, type[AgentConfigBase]]] = {

@@ -9,7 +9,15 @@
       "Bash(uv pip install:*)",
       "Bash(uv run python:*)",
       "Bash(uv run pytest:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(go mod init:*)",
+      "Bash(go get:*)",
+      "Bash(tar:*)",
+      "Bash(~/go-local/go/bin/go version:*)",
+      "Bash(~/go-local/go/bin/go mod:*)",
+      "Bash(~/go-local/go/bin/go get:*)",
+      "Bash(~/go-local/go/bin/go build:*)",
+      "Bash(make:*)"
     ]
   },
   "hooks": {

@@ -352,6 +352,21 @@ class IntentClassification(BaseModel):
         return v
 
 
+class IntentClassificationResponse(BaseModel):
+    """
+    LLM response for intent classification.
+
+    This model validates the structured JSON output from Claude when
+    classifying user intent. It includes reasoning for debugging.
+    """
+
+    intent_type: IntentType
+    confidence: float = Field(ge=0.0, le=1.0)
+    reasoning: str  # Brief explanation for debugging/logging
+    extracted_query: str | None = None  # For SEARCH: the search query
+    extracted_action: str | None = None  # For ACTION: what to do
+
+
 class ThreadContext(BaseModel):
     """Rolling context window for conversation."""
 
@@ -510,6 +525,7 @@ __all__ = [
     "GoalNode",
     "GoalStatus",
     "IntentClassification",
+    "IntentClassificationResponse",
     # Intent classification
     "IntentType",
     "JournalEntryNode",
