@@ -19,6 +19,10 @@ python-dotenv>=1.0
 pyyaml>=6.0
 watchdog>=3.0.0
 
+# === CLI Interface ===
+rich>=13.0
+prompt-toolkit>=3.0
+
 # === Google OAuth (for MCP integration) ===
 google-auth>=2.0.0
 google-auth-oauthlib>=1.0.0

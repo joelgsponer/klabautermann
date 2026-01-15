@@ -4,6 +4,12 @@ CLI driver for Klabautermann.
 Provides command-line REPL interface for interacting with the assistant.
 Primary development interface for Sprint 1.
 
+Features:
+- Rich markdown rendering for responses
+- Progress spinners during LLM processing
+- Command history with up/down arrow navigation
+- Styled prompts and output
+
 Reference: specs/architecture/CHANNELS.md
 """
 
@@ -11,14 +17,24 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+
 from klabautermann.channels.base_channel import BaseChannel
+from klabautermann.channels.cli_renderer import CLIRenderer
 from klabautermann.core.logger import logger
 
 
 if TYPE_CHECKING:
     from klabautermann.agents.orchestrator import Orchestrator
+
+
+# History file location
+HISTORY_DIR = Path.home() / ".klabautermann"
+HISTORY_FILE = HISTORY_DIR / "cli_history"
 
 
 class CLIDriver(BaseChannel):
@@ -27,6 +43,12 @@ class CLIDriver(BaseChannel):
 
     Provides an async REPL (Read-Eval-Print Loop) for development
     and direct interaction with the assistant.
+
+    Features:
+    - Rich markdown rendering for AI responses
+    - Progress spinners during processing
+    - Command history (up/down arrows)
+    - Styled nautical-themed output
     """
 
     def __init__(
@@ -44,6 +66,8 @@ class CLIDriver(BaseChannel):
         super().__init__(orchestrator, config)
         self.session_id = str(uuid.uuid4())
         self._running = False
+        self.renderer = CLIRenderer()
+        self._prompt_session: PromptSession[str] | None = None
 
     @property
     def channel_type(self) -> str:
@@ -59,6 +83,17 @@ class CLIDriver(BaseChannel):
         """
         return f"cli-{self.session_id}"
 
+    def _ensure_history_dir(self) -> None:
+        """Ensure history directory exists."""
+        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _create_prompt_session(self) -> PromptSession[str]:
+        """Create prompt session with history support."""
+        self._ensure_history_dir()
+        return PromptSession(
+            history=FileHistory(str(HISTORY_FILE)),
+        )
+
     async def start(self) -> None:
         """
         Start the CLI REPL loop.
@@ -66,7 +101,10 @@ class CLIDriver(BaseChannel):
         Runs until user exits or Ctrl+C is pressed.
         """
         self._running = True
-        self._print_welcome()
+        self._prompt_session = self._create_prompt_session()
+
+        # Display welcome banner
+        self.renderer.render_banner()
 
         logger.info(
             "[CHART] CLI session started",
@@ -75,7 +113,7 @@ class CLIDriver(BaseChannel):
 
         while self._running:
             try:
-                # Get user input asynchronously
+                # Get user input with history support
                 user_input = await self._async_input("> ")
 
                 # Skip empty input
@@ -89,23 +127,28 @@ class CLIDriver(BaseChannel):
 
                 # Check for help command
                 if user_input.lower() in ("help", "/help", "?"):
-                    self._print_help()
+                    self.renderer.render_help()
                     continue
 
-                # Process the message
+                # Check for clear command
+                if user_input.lower() in ("/clear", "clear"):
+                    self.renderer.clear()
+                    self.renderer.render_banner()
+                    continue
+
+                # Process the message with spinner
                 response = await self.receive_message(
                     thread_id=self.get_thread_id(),
                     content=user_input,
                 )
 
-                # Display the response
+                # Display the response with markdown rendering
                 await self.send_message(
                     thread_id=self.get_thread_id(),
                     content=response,
                 )
 
             except KeyboardInterrupt:
-                print()  # New line after ^C
                 await self.stop()
                 break
             except EOFError:
@@ -117,12 +160,12 @@ class CLIDriver(BaseChannel):
                     extra={"agent_name": "cli"},
                     exc_info=True,
                 )
-                print(f"\n[Error] {e}\n")
+                self.renderer.render_error(str(e))
 
     async def stop(self) -> None:
         """Stop the CLI gracefully."""
         self._running = False
-        print("\nFair winds and following seas, Captain.\n")
+        self.renderer.render_farewell()
         logger.info(
             "[CHART] CLI session ended",
             extra={"agent_name": "cli", "session_id": self.session_id[:8]},
@@ -135,14 +178,14 @@ class CLIDriver(BaseChannel):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         """
-        Display message to user.
+        Display message to user with markdown rendering.
 
         Args:
             thread_id: Thread identifier (not used in CLI display).
-            content: Message content to display.
+            content: Message content to display (may contain markdown).
             metadata: Optional metadata (not used in CLI).
         """
-        print(f"\n{content}\n")
+        self.renderer.render_response(content)
 
     async def receive_message(
         self,
@@ -153,7 +196,7 @@ class CLIDriver(BaseChannel):
         """
         Process incoming message from user.
 
-        Forwards to orchestrator and returns response.
+        Forwards to orchestrator with progress spinner and returns response.
 
         Args:
             thread_id: Thread identifier.
@@ -167,10 +210,12 @@ class CLIDriver(BaseChannel):
             return "[Error] Orchestrator not initialized."
 
         try:
-            response = await self._orchestrator.handle_user_input(
-                thread_id=thread_id,
-                text=content,
-            )
+            # Show spinner during processing
+            with self.renderer.spinner("Charting course..."):
+                response = await self._orchestrator.handle_user_input(
+                    thread_id=thread_id,
+                    text=content,
+                )
             return response
         except Exception as e:
             logger.error(
@@ -179,47 +224,9 @@ class CLIDriver(BaseChannel):
             )
             return f"I've hit some rough waters: {e}"
 
-    def _print_welcome(self) -> None:
-        """Display welcome message."""
-        welcome = """
-================================================================================
-                         KLABAUTERMANN v0.1.0
-                        Your Personal Navigator
-================================================================================
-
-  Ahoy, Captain! Your ship spirit is ready to assist.
-
-  Commands:
-    Type your message and press Enter to chat
-    'help'  - Show available commands
-    'exit'  - Leave the ship
-
-================================================================================
-"""
-        print(welcome)
-
-    def _print_help(self) -> None:
-        """Display help message."""
-        help_text = """
-  Available Commands:
-  -------------------
-  [message]  - Chat with Klabautermann
-  help       - Show this help
-  exit/quit  - End the session
-
-  Tips:
-  -----
-  - Tell me about people you meet: "I met Sarah from Acme Corp"
-  - Share your projects: "I'm working on Project Lighthouse"
-  - Ask questions: "What do I know about Sarah?"
-
-  Note: Full memory search and action execution coming in Sprint 2!
-"""
-        print(help_text)
-
     async def _async_input(self, prompt: str) -> str:
         """
-        Async wrapper for blocking input().
+        Async wrapper for prompt_toolkit input with history support.
 
         Uses run_in_executor to avoid blocking the event loop.
 
@@ -229,8 +236,14 @@ class CLIDriver(BaseChannel):
         Returns:
             User input string, stripped of whitespace.
         """
+        if self._prompt_session is None:
+            self._prompt_session = self._create_prompt_session()
+
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, lambda: input(prompt).strip())
+        return await loop.run_in_executor(
+            None,
+            lambda: self._prompt_session.prompt(prompt).strip(),  # type: ignore[union-attr]
+        )
 
 
 # ===========================================================================

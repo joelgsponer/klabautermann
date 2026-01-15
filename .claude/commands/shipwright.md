@@ -134,7 +134,7 @@ Add a `## Development Notes` section to the completed task file:
 - tests/test_agents.py - Unit tests
 
 **Decisions Made**:
-- Used ABC for agent interface (see devnotes/backend/agent-patterns.md)
+- Used ABC for agent interface (see devnotes/carpenter/agent-patterns.md)
 
 **Patterns Established**:
 - All agents inherit from Agent base class

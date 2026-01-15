@@ -2,20 +2,11 @@
 
 Current sprint: **Sprint 2 - Multi-Agent Architecture**
 
-## Sprint 2 Status: IN PROGRESS (Wave 2)
+## Sprint 2 Status: COMPLETE ✓
 
 **Goal:** Decompose orchestrator into specialized sub-agents with MCP integration
 
-### Current Focus (Wave 2 - COMPLETE)
-
-Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
-
-| Task | Description | Status | Assignee |
-|------|-------------|--------|----------|
-| T023 | Ingestor agent | **completed** | carpenter |
-| T024 | Researcher agent | **completed** | carpenter |
-| T026 | MCP client wrapper | **completed** | purser |
-| T033 | Config hot-reload | **completed** | carpenter |
+All 16 Sprint 2 tasks completed with 391 tests passing (8 skipped, 2 warnings).
 
 ### Task Status
 
@@ -31,19 +22,12 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 | T027 | OAuth bootstrap | **completed** | purser |
 | T028 | Google Workspace bridge | **completed** | purser |
 | T029 | Executor agent | **completed** | carpenter |
-| T030 | Gmail handlers | pending | purser |
-| T031 | Calendar handlers | pending | purser |
+| T030 | Gmail handlers | **completed** | purser |
+| T031 | Calendar handlers | **completed** | purser |
 | T032 | Agent config system | **completed** | carpenter |
 | T033 | Config hot-reload | **completed** | carpenter |
 | T034 | Main.py multi-agent | **completed** | carpenter |
-| T035 | Integration tests | pending | inspector |
-
-### Next Up (Wave 3 - After Wave 2 Completes)
-
-| Task | Assignee | Blocked By |
-|------|----------|------------|
-| T027 | purser | T026 |
-| T029 | carpenter | T021 (done), T028 |
+| T035 | Integration tests | **completed** | inspector |
 
 ### Sprint 2 Completed Tasks
 
@@ -59,9 +43,12 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 | T027 | Google OAuth bootstrap | 2026-01-15 |
 | T028 | Google Workspace MCP bridge | 2026-01-15 |
 | T029 | Executor agent | 2026-01-15 |
+| T030 | Gmail tool handlers | 2026-01-15 |
+| T031 | Calendar tool handlers | 2026-01-15 |
 | T032 | Agent config system | 2026-01-15 |
 | T033 | Config hot-reload (Quartermaster) | 2026-01-15 |
 | T034 | Main.py multi-agent startup | 2026-01-15 |
+| T035 | Sprint 2 integration tests | 2026-01-15 |
 
 ### Key Decisions (Sprint 2)
 
@@ -109,9 +96,25 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 
 22. **Security-first validation**: Executor NEVER sends emails to unverified addresses, NEVER creates events without valid times, and NEVER guesses missing information. Always asks user for clarification.
 
-23. **Clean application lifecycle**: Main.py implements three-phase pattern (initialize → start → shutdown) with proper resource management and signal handling. All agents, clients, and config watchers created once and shared across system.
+23. **Natural language time parsing**: TimeParser handles common patterns ("tomorrow at 2pm", "next Monday", "in 30 minutes") with proper timezone support. "next X" interpretation: means X of the following week, not the upcoming occurrence.
+
+24. **Calendar conflict detection**: ConflictChecker validates time overlap before event creation and suggests up to 3 free time slots when conflicts detected. Free slot finding respects configurable work hours (default 9am-5pm).
+
+25. **Rich calendar formatting**: CalendarFormatter provides date-grouped event lists with duration formatting and schedule summaries. Events display with location information when available.
+
+26. **Clean application lifecycle**: Main.py implements three-phase pattern (initialize → start → shutdown) with proper resource management and signal handling. All agents, clients, and config watchers created once and shared across system.
 
 24. **Graceful degradation**: System continues without Graphiti/Ingestor if OPENAI_API_KEY missing. Graphiti is optional for entity extraction but system remains functional for search and actions.
+
+25. **Draft-first email safety**: All email sends create drafts first with confirmation prompts. Prevents accidental sends and allows user review before actual transmission.
+
+26. **Regex pattern ordering**: Query builder patterns must be ordered from most specific to least specific. Time patterns like "last week" must precede general "from" patterns to avoid incorrect matches.
+
+27. **Handler utility classes**: Gmail/calendar handlers are stateless utility classes with @classmethod methods, making them reusable, testable, and easy to compose.
+
+28. **Confirmation propagation**: ActionResult includes needs_confirmation and confirmation_prompt fields that propagate through response payload, enabling UI-level confirmation flows.
+
+29. **Comprehensive integration test suite**: Created 23 integration tests covering all Sprint 2 agent interactions (intent classification, delegation, extraction, search, MCP, config hot-reload). All tests use mocks for fast execution without external dependencies.
 
 ---
 
@@ -165,18 +168,20 @@ Wave 2 completed all core foundation tasks. Ready for Wave 3 (MCP integrations).
 - Intent classification keywords as `ClassVar[list[str]]` class attributes
 - Handler methods prefixed with `_handle_` for intent dispatch
 
-### Next Steps (Wave 3 - MCP Integration)
+### Next Steps
 
-1. **T027**: OAuth2 bootstrap script for Google Workspace
-2. **T028**: Google Workspace MCP bridge (Gmail + Calendar)
-3. **T029**: Executor agent with MCP tool invocation
-4. **T030/T031**: Gmail and Calendar tool handlers
+Sprint 2 complete. Ready for Sprint 3 planning.
 
 ## Blockers
 
 None currently.
 
 ## Recent Activity
+
+- 2026-01-15: **Sprint 2 COMPLETE** - All 391 tests passing. Fixed test suite issues: Ingestor signature mismatch (graphiti_client), query parameter bindings (FIND_BLOCKED_TASKS), executor assertions, and integration test mock fixtures. Ready for Sprint 3
+- 2026-01-15: T035 completed - Sprint 2 integration tests with 23 comprehensive tests covering all agent interactions, delegation patterns, extraction, search types, MCP integration (mocked), and config hot-reload. Tests follow established pytest-asyncio patterns and complete in <60s
+- 2026-01-15: T031 completed - Calendar tool handlers with 48 unit tests (all passing). Natural language time parsing ("tomorrow at 2pm", "next Monday"), conflict detection with free slot suggestions, and rich event formatting. Integrated into Executor with 2 new handler methods
+- 2026-01-15: T030 completed - Gmail tool handlers with 50 unit tests, all passing. Sophisticated email composition, natural language query building, and formatting. Draft-first safety with confirmation flows
 
 - 2026-01-15: T034 completed - Main.py multi-agent startup with clean lifecycle management (initialize → start → shutdown). All agents, shared resources, signal handlers, and hot-reload wired up for Sprint 2 architecture
 - 2026-01-15: T029 completed - Executor agent with 48 unit tests (syntax validated). Implements secure action execution with parse-validate-execute pattern and never hallucniates missing information

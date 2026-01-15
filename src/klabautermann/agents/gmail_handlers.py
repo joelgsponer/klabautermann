@@ -122,17 +122,24 @@ class EmailComposer:
             return subject_match.group(1).strip()
 
         # Look for "about X" pattern
-        about_match = re.search(r"about\s+(?:the\s+)?(.+?)(?:\s+to|\s*$)", intent, re.IGNORECASE)
+        about_match = re.search(r"about\s+((?:the\s+)?(.+?))(?:\s+to|\s*$)", intent, re.IGNORECASE)
         if about_match:
             subject = about_match.group(1).strip()
             # Capitalize appropriately
             return cls._capitalize_subject(subject)
 
-        # Generate from common keywords
-        keywords = ["meeting", "update", "question", "request", "follow-up", "followup"]
-        for kw in keywords:
+        # Generate from common keywords (more specific first)
+        keywords = [
+            ("follow-up", "Follow-Up"),
+            ("followup", "Follow-Up"),
+            ("meeting", "Meeting"),
+            ("update", "Update"),
+            ("question", "Question"),
+            ("request", "Request"),
+        ]
+        for kw, title in keywords:
             if kw in intent.lower():
-                return kw.replace("-", " ").title()
+                return title
 
         # Default fallback
         return "Message"
@@ -142,8 +149,7 @@ class EmailComposer:
         """
         Capitalize subject line appropriately.
 
-        Uses title case for short subjects, preserves existing
-        capitalization for longer subjects.
+        Uses title case for short subjects, sentence case for longer ones.
 
         Args:
             subject: Raw subject text
@@ -151,12 +157,19 @@ class EmailComposer:
         Returns:
             Properly capitalized subject
         """
+        if not subject:
+            return ""
+
         # If already capitalized, keep it
-        if subject and subject[0].isupper():
+        if subject[0].isupper():
             return subject
 
-        # Title case for all subjects (preserves "the", "a", etc.)
-        return subject.title() if subject else ""
+        # Title case for short subjects (3 words or fewer)
+        if len(subject.split()) <= 3:
+            return subject.title()
+
+        # Sentence case for longer subjects
+        return subject.capitalize()
 
     @classmethod
     def format_reply(
@@ -254,19 +267,20 @@ class GmailQueryBuilder:
 
     # Pattern matching rules: (pattern, template)
     # {0}, {1}, etc. are group captures from the pattern
+    # Order matters: more specific patterns should come first
     PATTERNS = [
-        # From patterns
-        (r"(?:emails?|messages?)\s+from\s+(\S+)", "from:{0}"),
-        (r"from\s+(\S+)", "from:{0}"),
-        # To patterns
-        (r"(?:emails?|messages?)\s+to\s+(\S+)", "to:{0}"),
-        (r"to\s+(\S+)", "to:{0}"),
-        # Time patterns
+        # Time patterns (must come before general "from" pattern)
         (r"(?:from\s+)?(?:this|last)\s+week", "newer_than:7d"),
         (r"(?:from\s+)?today", "newer_than:1d"),
         (r"(?:from\s+)?yesterday", "newer_than:2d older_than:1d"),
         (r"(?:from\s+)?last\s+month", "newer_than:30d"),
         (r"(?:from\s+)?last\s+(\d+)\s+days?", "newer_than:{0}d"),
+        # From patterns (after time patterns to avoid matching "from last week")
+        (r"(?:emails?|messages?)\s+from\s+([^\s]+)(?:\s|$)", "from:{0}"),
+        (r"\bfrom\s+([^\s]+)(?:\s|$)", "from:{0}"),
+        # To patterns
+        (r"(?:emails?|messages?)\s+to\s+(\S+)", "to:{0}"),
+        (r"\bto\s+(\S+)", "to:{0}"),
         # Status patterns
         (r"\bunread\b", "is:unread"),
         (r"\bstarred\b", "is:starred"),

@@ -14,6 +14,11 @@ from datetime import datetime
 from typing import Any
 
 from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.agents.calendar_handlers import (
+    CalendarFormatter,
+    ConflictChecker,
+    TimeParser,
+)
 from klabautermann.agents.gmail_handlers import EmailComposer, EmailFormatter, GmailQueryBuilder
 from klabautermann.core.logger import logger
 from klabautermann.core.models import ActionRequest, ActionResult, ActionType, AgentMessage
@@ -245,45 +250,10 @@ ERROR HANDLING:
                 return await self._handle_gmail_search(request, trace_id, ctx)
 
             elif request.type == ActionType.CALENDAR_CREATE:
-                start = datetime.fromisoformat(
-                    request.start_time.replace("Z", "") if request.start_time else ""
-                )
-                end = datetime.fromisoformat(
-                    request.end_time.replace("Z", "") if request.end_time else ""
-                )
-
-                result = await self.google.create_event(
-                    title=request.subject or "New Event",
-                    start=start,
-                    end=end,
-                    description=request.body,
-                    context=ctx,
-                )
-                if result.success:
-                    return ActionResult(
-                        success=True,
-                        message=f"Created event: {request.subject}",
-                        details={
-                            "event_id": result.event_id,
-                            "link": result.event_link,
-                        },
-                    )
-                else:
-                    return ActionResult(
-                        success=False, message=f"Failed to create event: {result.error}"
-                    )
+                return await self._handle_calendar_create(request, context, trace_id, ctx)
 
             elif request.type == ActionType.CALENDAR_LIST:
-                events = await self.google.get_todays_events(context=ctx)
-                if events:
-                    summaries = [f"- {e.start.strftime('%H:%M')}: {e.title}" for e in events]
-                    return ActionResult(
-                        success=True,
-                        message="Today's schedule:\n" + "\n".join(summaries),
-                        details={"count": len(events)},
-                    )
-                else:
-                    return ActionResult(success=True, message="No events scheduled for today.")
+                return await self._handle_calendar_list(request, trace_id, ctx)
 
             return ActionResult(success=False, message="Unknown action type.")
 
@@ -484,17 +454,238 @@ ERROR HANDLING:
         Returns:
             Response AgentMessage
         """
+        payload = {
+            "result": result.message,
+            "success": result.success,
+            "details": result.details,
+        }
+
+        # Include confirmation fields if present
+        if result.needs_confirmation:
+            payload["needs_confirmation"] = result.needs_confirmation
+        if result.confirmation_prompt:
+            payload["confirmation_prompt"] = result.confirmation_prompt
+
         return AgentMessage(
             trace_id=original_msg.trace_id,
             source_agent=self.name,
             target_agent=original_msg.source_agent,
             intent="action_response",
-            payload={
-                "result": result.message,
-                "success": result.success,
-                "details": result.details,
-            },
+            payload=payload,
         )
+
+    async def _handle_calendar_create(
+        self,
+        request: ActionRequest,
+        context: dict[str, Any],
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle calendar event creation with natural language time parsing and conflict detection.
+
+        Features:
+        1. Parse natural language times (e.g., "tomorrow at 2pm", "next Monday")
+        2. Check for scheduling conflicts
+        3. Suggest alternative times if conflicts found
+        4. Extract event title from action text
+
+        Args:
+            request: Validated calendar create request
+            context: Context from Researcher (for additional context)
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with event creation status or conflict warnings
+        """
+        # Parse times from the action text if not already provided
+        if not request.start_time or not request.end_time:
+            # Extract action text from context
+            action_text = context.get("action", "")
+            start, end = TimeParser.parse_range(action_text, timezone="UTC")
+
+            if not start or not end:
+                return ActionResult(
+                    success=False,
+                    message="I couldn't understand the time. Please specify when, like 'tomorrow at 2pm' or '3pm to 4pm'.",
+                )
+
+            # Convert to ISO format for the request
+            request.start_time = start.isoformat()
+            request.end_time = end.isoformat()
+
+        # Parse the times
+        start = datetime.fromisoformat(request.start_time.replace("Z", ""))
+        end = datetime.fromisoformat(request.end_time.replace("Z", ""))
+
+        # Check for conflicts
+        existing_events = await self.google.list_events(
+            start=start.replace(hour=0, minute=0, second=0),
+            end=start.replace(hour=23, minute=59, second=59),
+            context=invocation_ctx,
+        )
+
+        conflicts = ConflictChecker.check_conflicts(start, end, existing_events)
+
+        if conflicts:
+            # Format conflict warning
+            conflict_names = ", ".join(c.title for c in conflicts)
+
+            # Find free slots
+            free_slots = ConflictChecker.find_free_slots(
+                date=start,
+                duration=end - start,
+                existing_events=existing_events,
+            )
+
+            message = f"That time conflicts with: {conflict_names}."
+            if free_slots:
+                slot_suggestions = [
+                    f"{s[0].strftime('%H:%M')} - {s[1].strftime('%H:%M')}" for s in free_slots[:3]
+                ]
+                message += "\n\nSuggested free times:\n- " + "\n- ".join(slot_suggestions)
+
+            return ActionResult(
+                success=False,
+                message=message,
+                needs_confirmation=True,
+                details={
+                    "conflicts": [c.title for c in conflicts],
+                    "free_slots": [
+                        {
+                            "start": s[0].isoformat(),
+                            "end": s[1].isoformat(),
+                        }
+                        for s in free_slots[:3]
+                    ],
+                },
+            )
+
+        # Extract title from action text if not provided
+        title = request.subject or self._extract_event_title(context.get("action", ""))
+
+        # Create the event
+        result = await self.google.create_event(
+            title=title,
+            start=start,
+            end=end,
+            description=request.body,
+            context=invocation_ctx,
+        )
+
+        if result.success:
+            logger.info(
+                f"[BEACON] Created calendar event: {title}",
+                extra={"trace_id": trace_id, "event_id": result.event_id},
+            )
+
+            return ActionResult(
+                success=True,
+                message=f"Created '{title}' on {start.strftime('%A, %B %d at %H:%M')}.",
+                details={
+                    "event_id": result.event_id,
+                    "link": result.event_link,
+                },
+            )
+        else:
+            return ActionResult(
+                success=False,
+                message=f"Failed to create event: {result.error}",
+            )
+
+    async def _handle_calendar_list(
+        self,
+        request: ActionRequest,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle calendar event listing with formatted output.
+
+        Provides rich formatting of calendar events including:
+        1. Date-grouped display
+        2. Duration formatting
+        3. Location information
+        4. Schedule summaries
+
+        Args:
+            request: Calendar list request
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with formatted event list
+        """
+        try:
+            # Get today's events
+            events = await self.google.get_todays_events(context=invocation_ctx)
+
+            if not events:
+                return ActionResult(
+                    success=True,
+                    message="No events scheduled for today.",
+                )
+
+            # Format events using CalendarFormatter
+            formatted_list = CalendarFormatter.format_event_list(events, max_display=10)
+            summary = CalendarFormatter.format_schedule_summary(events)
+
+            logger.info(
+                f"[BEACON] Listed {len(events)} events for today",
+                extra={"trace_id": trace_id, "count": len(events)},
+            )
+
+            return ActionResult(
+                success=True,
+                message=f"Today's schedule:\n{formatted_list}\n\n{summary}",
+                details={"count": len(events)},
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Calendar list failed: {e}",
+                extra={"trace_id": trace_id},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to list events: {e!s}",
+            )
+
+    def _extract_event_title(self, action_text: str) -> str:
+        """
+        Extract event title from action text.
+
+        Uses simple heuristics to extract a title from text like:
+        - "Schedule meeting with Sarah"
+        - "Book dentist appointment tomorrow"
+        - "Add team standup to calendar"
+
+        Args:
+            action_text: Raw action text from user
+
+        Returns:
+            Extracted title or "New Event" as fallback
+        """
+        # Remove common action verbs
+        text = action_text.lower()
+        for verb in ["schedule", "book", "add", "create", "set up", "arrange"]:
+            text = text.replace(verb, "").strip()
+
+        # Remove calendar-related words
+        for word in ["meeting", "appointment", "event", "to calendar", "on calendar"]:
+            text = text.replace(word, "").strip()
+
+        # Remove time-related phrases
+        text = re.sub(r"\b(tomorrow|today|next \w+|at \d+|in \d+)\b.*", "", text).strip()
+
+        # Capitalize first letter
+        if text:
+            title = text[0].upper() + text[1:] if len(text) > 1 else text.upper()
+            return title or "New Event"
+
+        return "New Event"
 
 
 # ===========================================================================

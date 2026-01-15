@@ -133,6 +133,7 @@ class CypherQueries:
            blocker.status as blocker_status,
            blocked.action as blocked_task, blocked.uuid as blocked_uuid,
            blocked.status as blocked_status, r.reason as reason
+    LIMIT $limit
     """
 
     FIND_PROJECT_TASKS = """
@@ -548,12 +549,14 @@ class QueryBuilder:
 
     async def find_blocked_tasks(
         self,
+        limit: int = 100,
         trace_id: str | None = None,
     ) -> QueryResult:
         """
         Find all tasks that are blocking other tasks.
 
         Args:
+            limit: Maximum number of results
             trace_id: Optional trace ID for logging
 
         Returns:
@@ -561,7 +564,7 @@ class QueryBuilder:
         """
         return await self._execute_with_timing(
             CypherQueries.FIND_BLOCKED_TASKS,
-            {},
+            {"limit": limit},
             "blocked_tasks",
             trace_id,
         )

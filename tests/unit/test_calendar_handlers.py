@@ -29,7 +29,7 @@ class TestTimeParser:
 
     @pytest.fixture
     def reference_time(self) -> datetime:
-        """Reference time for testing: 2026-01-15 14:00:00 UTC (Wednesday)."""
+        """Reference time for testing: 2026-01-15 14:00:00 UTC (Thursday)."""
         return datetime(2026, 1, 15, 14, 0, 0, tzinfo=ZoneInfo("UTC"))
 
     def test_parse_tomorrow_at_time(self, reference_time):
@@ -55,18 +55,19 @@ class TestTimeParser:
         assert result.hour == 9  # Default to 9am
 
     def test_parse_next_monday(self, reference_time):
-        """Test parsing 'next Monday' from Wednesday."""
+        """Test parsing 'next Monday' from Thursday."""
         result = TimeParser.parse("next Monday", reference_time)
         assert result is not None
-        # From Wednesday Jan 15, next Monday is Jan 20
-        assert result.date() == datetime(2026, 1, 20).date()
+        # From Thursday Jan 15: this coming Monday is Jan 19
+        # "Next Monday" means the Monday after that = Jan 26
+        assert result.date() == datetime(2026, 1, 26).date()
         assert result.hour == 9  # Default to 9am
 
     def test_parse_next_monday_with_time(self, reference_time):
         """Test parsing 'next Monday at 3pm'."""
         result = TimeParser.parse("next Monday at 3pm", reference_time)
         assert result is not None
-        assert result.date() == datetime(2026, 1, 20).date()
+        assert result.date() == datetime(2026, 1, 26).date()
         assert result.hour == 15
 
     def test_parse_in_30_minutes(self, reference_time):
@@ -194,17 +195,17 @@ class TestTimeParser:
 
     def test_parse_day_name_without_next(self, reference_time):
         """Test parsing day name without 'next' keyword."""
-        # From Wednesday, "Monday" should be next Monday
+        # From Thursday Jan 15, "Monday" (without "next") means this coming Monday = Jan 19
         result = TimeParser.parse("Monday", reference_time)
         assert result is not None
-        assert result.date() == datetime(2026, 1, 20).date()
+        assert result.date() == datetime(2026, 1, 19).date()
 
     def test_parse_day_abbreviation(self, reference_time):
         """Test parsing day abbreviation 'fri'."""
         result = TimeParser.parse("fri at 3pm", reference_time)
         assert result is not None
-        # From Wednesday Jan 15, next Friday is Jan 17
-        assert result.date() == datetime(2026, 1, 17).date()
+        # From Thursday Jan 15, next Friday is Jan 16
+        assert result.date() == datetime(2026, 1, 16).date()
         assert result.hour == 15
 
 
@@ -257,9 +258,9 @@ class TestCalendarFormatter:
         """Test formatting list of events."""
         result = CalendarFormatter.format_event_list(sample_events)
 
-        # Check for date headers
-        assert "Wednesday, January 15:" in result
-        assert "Thursday, January 16:" in result
+        # Check for date headers (Jan 15 is Thursday, Jan 16 is Friday)
+        assert "Thursday, January 15:" in result
+        assert "Friday, January 16:" in result
 
         # Check for event details
         assert "09:00 - Team Meeting (1h)" in result

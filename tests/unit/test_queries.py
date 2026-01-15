@@ -358,7 +358,7 @@ async def test_find_blocked_tasks(query_builder: QueryBuilder, mock_neo4j_client
 
     call_args = mock_neo4j_client.execute_query.call_args
     assert call_args[0][0] == CypherQueries.FIND_BLOCKED_TASKS
-    assert call_args[0][1] == {}
+    assert call_args[0][1] == {"limit": 100}
 
     assert result.query_type == "blocked_tasks"
     assert result.records[0]["blocker_task"] == "Get approval from legal"

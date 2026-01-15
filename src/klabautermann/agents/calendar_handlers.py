@@ -169,18 +169,13 @@ class TimeParser:
             if day_name in text:
                 days_ahead = day_num - now.weekday()
 
-                # Handle "next" keyword explicitly
+                # Without "next", use the next occurrence (this week or next)
+                if days_ahead <= 0:
+                    days_ahead += 7
+
+                # With "next" keyword, skip to the following week's occurrence
                 if "next" in text:
-                    # "next Monday" means the Monday of next week, not this week
-                    if days_ahead <= 0:
-                        days_ahead += 7
-                    else:
-                        # Even if Monday is ahead this week, "next Monday" means next week's Monday
-                        days_ahead += 7
-                else:
-                    # Without "next", use the next occurrence (could be this week or next)
-                    if days_ahead <= 0:
-                        days_ahead += 7
+                    days_ahead += 7
 
                 target_date = now + timedelta(days=days_ahead)
                 # Extract time if present

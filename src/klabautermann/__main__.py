@@ -1,17 +1,11 @@
 #!/usr/bin/env python3
 """
-Klabautermann - Personal Knowledge Navigator
-
-A multi-agent system with a temporal knowledge graph for personal knowledge management.
-Named after the helpful ship spirit from Germanic folklore.
+Klabautermann entry point for `python -m klabautermann`.
 
 Usage:
-    python main.py                    # Start CLI interface
-    python main.py --help             # Show help
-    python main.py --session <id>     # Resume specific session
-
-Environment:
-    Copy .env.example to .env and configure before running.
+    python -m klabautermann              # Start CLI interface
+    python -m klabautermann --help       # Show help
+    python -m klabautermann --session id # Resume specific session
 """
 
 from __future__ import annotations
@@ -24,25 +18,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dotenv import load_dotenv
 
-# Set up path before imports
-src_path = Path(__file__).parent / "src"
-if str(src_path) not in sys.path:
-    sys.path.insert(0, str(src_path))
-
-from dotenv import load_dotenv  # noqa: E402
-
-from klabautermann.agents.executor import Executor  # noqa: E402
-from klabautermann.agents.ingestor import Ingestor  # noqa: E402
-from klabautermann.agents.orchestrator import Orchestrator  # noqa: E402
-from klabautermann.agents.researcher import Researcher  # noqa: E402
-from klabautermann.channels.cli_driver import CLIDriver  # noqa: E402
-from klabautermann.config.manager import ConfigManager  # noqa: E402
-from klabautermann.config.quartermaster import Quartermaster  # noqa: E402
-from klabautermann.core.exceptions import GraphConnectionError, StartupError  # noqa: E402
-from klabautermann.core.logger import logger  # noqa: E402
-from klabautermann.memory.graphiti_client import GraphitiClient  # noqa: E402
-from klabautermann.memory.neo4j_client import Neo4jClient  # noqa: E402
+from klabautermann.agents.executor import Executor
+from klabautermann.agents.ingestor import Ingestor
+from klabautermann.agents.orchestrator import Orchestrator
+from klabautermann.agents.researcher import Researcher
+from klabautermann.channels.cli_driver import CLIDriver
+from klabautermann.config.manager import ConfigManager
+from klabautermann.config.quartermaster import Quartermaster
+from klabautermann.core.exceptions import GraphConnectionError, StartupError
+from klabautermann.core.logger import logger
+from klabautermann.memory.graphiti_client import GraphitiClient
+from klabautermann.memory.neo4j_client import Neo4jClient
 
 
 if TYPE_CHECKING:
@@ -100,7 +88,11 @@ class Klabautermann:
 
         # Initialize configuration
         logger.info("[CHART] Loading configuration...")
-        config_dir = Path(__file__).parent / "config" / "agents"
+        # Find config dir - check both package location and project root
+        config_dir = Path(__file__).parent.parent.parent / "config" / "agents"
+        if not config_dir.exists():
+            # Fallback to relative path from working directory
+            config_dir = Path.cwd() / "config" / "agents"
         self.config_manager = ConfigManager(config_dir)
         self.quartermaster = Quartermaster(self.config_manager)
 
@@ -299,8 +291,8 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python main.py                    Start new CLI session
-  python main.py --session abc123   Resume session abc123
+  python -m klabautermann                    Start new CLI session
+  python -m klabautermann --session abc123   Resume session abc123
 
 Environment Variables:
   ANTHROPIC_API_KEY    Required - Claude API key

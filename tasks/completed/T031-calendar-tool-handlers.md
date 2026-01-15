@@ -5,7 +5,7 @@
 - **Priority**: P1
 - **Category**: subagent
 - **Effort**: M
-- **Status**: pending
+- **Status**: completed
 - **Assignee**: purser
 
 ## Specs
@@ -433,3 +433,76 @@ async def handle_calendar_create(
 ```
 
 These helpers are integrated into the Executor agent to provide sophisticated calendar handling with natural language time parsing and conflict detection.
+
+## Development Notes
+
+### Implementation
+
+**Files Created:**
+- `src/klabautermann/agents/calendar_handlers.py` - Calendar handling utilities (400 lines)
+- `tests/unit/test_calendar_handlers.py` - Comprehensive unit tests (500+ lines, 48 tests)
+
+**Files Modified:**
+- `src/klabautermann/agents/executor.py` - Integrated calendar handlers with 2 new methods:
+  - `_handle_calendar_create()` - Natural language time parsing, conflict detection, free slot suggestions
+  - `_handle_calendar_list()` - Rich formatting of calendar events
+
+### Decisions Made
+
+1. **Ordered RELATIVE_DAYS dict by length**: Prevents "day after tomorrow" from matching "tomorrow" substring first.
+
+2. **"next Monday" interpretation**: From Thursday, "next Monday" means the Monday after this coming Monday (11 days ahead), not the immediate upcoming Monday. This follows the interpretation that "next X" means X of the following week.
+
+3. **Default timezone UTC**: All time parsing defaults to UTC unless explicitly specified. User timezone support can be added later.
+
+4. **Default meeting duration**: 1 hour if only start time is specified.
+
+5. **Work hours**: Default 9am-5pm for free slot finding, customizable via parameters.
+
+6. **Conflict detection**: Uses simple time overlap logic (new_start < existing_end AND new_end > existing_start).
+
+7. **Event title extraction**: Uses simple heuristic string manipulation to extract titles from natural language (e.g., "Schedule meeting with Sarah tomorrow" -> "With Sarah").
+
+### Patterns Established
+
+1. **TimeParser as utility class**: All methods are classmethods, no state needed. Easily testable and reusable.
+
+2. **Comprehensive test coverage**: 48 tests covering:
+   - All time parsing patterns (relative days, day names, time ranges, durations)
+   - Edge cases (12am/12pm, timezone handling, invalid inputs)
+   - Formatting (event lists, durations, summaries)
+   - Conflict detection (overlaps, adjacent events, free slots)
+   - Integration scenarios
+
+3. **Handler methods in Executor**: Calendar operations delegated to dedicated handler methods (`_handle_calendar_create`, `_handle_calendar_list`) following the same pattern as Gmail handlers.
+
+4. **Graceful error messages**: User-friendly error messages for unparseable times instead of exceptions.
+
+5. **Free slot suggestions**: When conflicts detected, automatically suggest up to 3 alternative time slots.
+
+### Testing
+
+All 48 unit tests pass:
+- 24 TimeParser tests (natural language parsing, ranges, edge cases)
+- 9 CalendarFormatter tests (event lists, summaries, durations)
+- 13 ConflictChecker tests (conflict detection, free slots, work hours)
+- 2 Integration tests (combined parsing + conflict detection + formatting)
+
+Test execution time: ~0.19s
+
+### Issues Encountered
+
+1. **Calendar date confusion**: Initial tests assumed Jan 15, 2026 was Wednesday, but it's actually Thursday. Updated test expectations to match reality.
+
+2. **Day name parsing logic**: Initial logic for "next Monday" was ambiguous. Clarified: without "next" keyword, use next occurrence; with "next", skip to following week's occurrence.
+
+3. **Substring matching in RELATIVE_DAYS**: "day after tomorrow" was matching "tomorrow" first. Fixed by ordering dict entries by length (longest first).
+
+### Next Steps
+
+Future enhancements could include:
+- User-specific timezone configuration
+- More sophisticated title extraction (using LLM)
+- Support for recurring events
+- Integration with attendee information from knowledge graph
+- Location suggestions based on context

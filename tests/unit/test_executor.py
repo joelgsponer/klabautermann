@@ -241,11 +241,11 @@ class TestEmailExecution:
 
     @pytest.mark.asyncio
     async def test_send_email_success(self, executor, mock_google_bridge):
-        """Test successful email sending."""
+        """Test successful email drafting (new behavior: always draft first)."""
         from klabautermann.core.models import ActionRequest
 
         mock_google_bridge.send_email.return_value = SendEmailResult(
-            success=True, message_id="msg-123", is_draft=False
+            success=True, message_id="msg-123", is_draft=True
         )
 
         request = ActionRequest(
@@ -255,11 +255,13 @@ class TestEmailExecution:
             body="Test body",
         )
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "sent to sarah@example.com" in result.message
-        assert result.details["message_id"] == "msg-123"
+        # New behavior: always drafts first for safety
+        assert "drafted" in result.message.lower()
+        assert result.needs_confirmation is True
+        assert result.details["draft_id"] == "msg-123"
 
     @pytest.mark.asyncio
     async def test_draft_email_success(self, executor, mock_google_bridge):
@@ -278,7 +280,7 @@ class TestEmailExecution:
             draft_only=True,
         )
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
         assert "drafted" in result.message
@@ -299,17 +301,18 @@ class TestEmailExecution:
             body="Test",
         )
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is False
         assert "Rate limit exceeded" in result.message
 
     @pytest.mark.asyncio
     async def test_search_emails_found(self, executor, mock_google_bridge):
-        """Test email search with results."""
+        """Test email search with results (uses new handlers)."""
         from klabautermann.core.models import ActionRequest
 
-        mock_google_bridge.get_recent_emails.return_value = [
+        # New handler uses search_emails instead of get_recent_emails
+        mock_google_bridge.search_emails.return_value = [
             EmailMessage(
                 id="1",
                 thread_id="t1",
@@ -330,26 +333,27 @@ class TestEmailExecution:
 
         request = ActionRequest(type=ActionType.EMAIL_SEARCH, query="recent emails")
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "Found 2 recent emails" in result.message
+        assert "Found 2 email(s)" in result.message
         assert "sarah@example.com" in result.message
         assert "Meeting tomorrow" in result.message
 
     @pytest.mark.asyncio
     async def test_search_emails_none_found(self, executor, mock_google_bridge):
-        """Test email search with no results."""
+        """Test email search with no results (uses new handlers)."""
         from klabautermann.core.models import ActionRequest
 
-        mock_google_bridge.get_recent_emails.return_value = []
+        # New handler uses search_emails instead of get_recent_emails
+        mock_google_bridge.search_emails.return_value = []
 
         request = ActionRequest(type=ActionType.EMAIL_SEARCH, query="old emails")
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "No recent emails found" in result.message
+        assert "No emails found" in result.message
 
 
 # ===========================================================================
@@ -379,10 +383,10 @@ class TestCalendarExecution:
             end_time="2026-01-15T15:00:00",
         )
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "Created event: Team Meeting" in result.message
+        assert "Team Meeting" in result.message
         assert result.details["event_id"] == "event-123"
         assert "calendar.google.com" in result.details["link"]
 
@@ -402,7 +406,7 @@ class TestCalendarExecution:
             end_time="2026-01-15T15:00:00",
         )
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is False
         assert "Calendar not found" in result.message
@@ -429,12 +433,12 @@ class TestCalendarExecution:
 
         request = ActionRequest(type=ActionType.CALENDAR_LIST)
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "Today's schedule" in result.message
-        assert "09:00: Morning standup" in result.message
-        assert "14:00: Team meeting" in result.message
+        assert "schedule" in result.message.lower()
+        assert "Morning standup" in result.message
+        assert "Team meeting" in result.message
 
     @pytest.mark.asyncio
     async def test_list_events_none_found(self, executor, mock_google_bridge):
@@ -445,7 +449,7 @@ class TestCalendarExecution:
 
         request = ActionRequest(type=ActionType.CALENDAR_LIST)
 
-        result = await executor._execute_action(request, "trace-123")
+        result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
         assert "No events scheduled" in result.message
@@ -461,9 +465,9 @@ class TestMessageProcessing:
 
     @pytest.mark.asyncio
     async def test_process_email_send_complete(self, executor, mock_google_bridge, sample_message):
-        """Test complete email sending flow."""
+        """Test complete email sending flow (now creates draft first)."""
         mock_google_bridge.send_email.return_value = SendEmailResult(
-            success=True, message_id="msg-123"
+            success=True, message_id="msg-123", is_draft=True
         )
 
         response = await executor.process_message(sample_message)
@@ -473,7 +477,9 @@ class TestMessageProcessing:
         assert response.target_agent == "orchestrator"
         assert response.intent == "action_response"
         assert response.payload["success"] is True
-        assert "sent" in response.payload["result"]
+        # New behavior: always drafts first for safety
+        assert "drafted" in response.payload["result"].lower()
+        assert response.payload.get("needs_confirmation") is True
 
     @pytest.mark.asyncio
     async def test_process_missing_action(self, executor):

@@ -2,23 +2,125 @@
   "permissions": {
     "allow": [
       "Bash(xargs:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(source .venv/bin/activate)",
+      "Bash(uv pip install:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pytest:*)"
     ]
   },
   "hooks": {
     "SubagentStart": [
-      { "matcher": "shipwright", "hooks": [{ "type": "command", "command": "echo '⚓ The Shipwright takes the helm...'" }] },
-      { "matcher": "lookout", "hooks": [{ "type": "command", "command": "echo '🔭 Lookout climbing to the crows nest...'" }] },
-      { "matcher": "carpenter", "hooks": [{ "type": "command", "command": "echo '🪚 The Carpenter measures twice...'" }] },
-      { "matcher": "navigator", "hooks": [{ "type": "command", "command": "echo '🧭 The Navigator charts the course...'" }] },
-      { "matcher": "alchemist", "hooks": [{ "type": "command", "command": "echo '⚗️ The Alchemist stirs the cauldron...'" }] },
-      { "matcher": "engineer", "hooks": [{ "type": "command", "command": "echo '⚙️ The Engineer fires up the engines...'" }] },
-      { "matcher": "helmsman", "hooks": [{ "type": "command", "command": "echo '🎡 The Helmsman grips the wheel...'" }] },
-      { "matcher": "scout", "hooks": [{ "type": "command", "command": "echo '🏃 The Scout ranges ahead...'" }] },
-      { "matcher": "purser", "hooks": [{ "type": "command", "command": "echo '📜 The Purser opens the ledger...'" }] },
-      { "matcher": "inspector", "hooks": [{ "type": "command", "command": "echo '🔍 The Inspector sharpens his eye...'" }] },
-      { "matcher": "watchman", "hooks": [{ "type": "command", "command": "echo '🛡️ The Watchman scans the horizon...'" }] },
-      { "matcher": "chronicler", "hooks": [{ "type": "command", "command": "echo '📖 The Chronicler uncaps his quill...'" }] }
+      {
+        "matcher": "shipwright",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '⚓ The Shipwright takes the helm...'"
+          }
+        ]
+      },
+      {
+        "matcher": "lookout",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🔭 Lookout climbing to the crows nest...'"
+          }
+        ]
+      },
+      {
+        "matcher": "carpenter",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🪚 The Carpenter measures twice...'"
+          }
+        ]
+      },
+      {
+        "matcher": "navigator",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🧭 The Navigator charts the course...'"
+          }
+        ]
+      },
+      {
+        "matcher": "alchemist",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '⚗️ The Alchemist stirs the cauldron...'"
+          }
+        ]
+      },
+      {
+        "matcher": "engineer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '⚙️ The Engineer fires up the engines...'"
+          }
+        ]
+      },
+      {
+        "matcher": "helmsman",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🎡 The Helmsman grips the wheel...'"
+          }
+        ]
+      },
+      {
+        "matcher": "scout",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🏃 The Scout ranges ahead...'"
+          }
+        ]
+      },
+      {
+        "matcher": "purser",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📜 The Purser opens the ledger...'"
+          }
+        ]
+      },
+      {
+        "matcher": "inspector",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🔍 The Inspector sharpens his eye...'"
+          }
+        ]
+      },
+      {
+        "matcher": "watchman",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '🛡️ The Watchman scans the horizon...'"
+          }
+        ]
+      },
+      {
+        "matcher": "chronicler",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '📖 The Chronicler uncaps his quill...'"
+          }
+        ]
+      }
     ]
   }
 }
