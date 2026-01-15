@@ -1,0 +1,8 @@
+name: archivist
+model:
+  primary: claude-3-5-haiku-20241022
+cooldown_minutes: 60
+max_threads_per_scan: 10
+summarization:
+  max_message_length: 1000
+  include_timestamps: true
