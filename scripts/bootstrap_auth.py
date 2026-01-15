@@ -97,6 +97,10 @@ def run_oauth_flow(headless: bool = False):
     # For headless mode, we use a redirect URI that the user will manually handle
     redirect_uri = "http://localhost:8080/" if headless else None
 
+    # Allow HTTP for localhost (required for headless mode)
+    if headless:
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+
     flow = InstalledAppFlow.from_client_secrets_file(
         str(CREDENTIALS_FILE),
         SCOPES,
