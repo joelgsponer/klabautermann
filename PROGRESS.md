@@ -2,42 +2,63 @@
 
 Current sprint: **Sprint 3 - Thread Archival & Daily Journal**
 
-## Sprint 3 Status: IN PROGRESS
+## Sprint 3 Status: COMPLETE ✓
 
 **Goal:** Implement Archivist (thread summarization/pruning) and Scribe (daily journal) agents
+
+All 15 Sprint 3 tasks completed with 698 tests passing (44 skipped, 1 warning).
 
 ### Task Status
 
 | Task | Description | Status | Assignee |
 |------|-------------|--------|----------|
 | T036 | Cooldown detection query | **completed** | navigator |
-| T037 | Thread status lifecycle | pending | carpenter |
-| T038 | Thread summary models | pending | carpenter |
-| T039 | LLM summarization pipeline | pending | carpenter |
-| T040 | Archivist agent skeleton | pending | carpenter |
-| T041 | Note node creation | pending | navigator |
-| T042 | Day node management | pending | navigator |
-| T043 | Message pruning | pending | navigator |
-| T044 | Scribe analytics queries | pending | navigator |
+| T037 | Thread status lifecycle | **completed** | carpenter |
+| T038 | Thread summary models | **completed** | carpenter |
+| T039 | LLM summarization pipeline | **completed** | carpenter |
+| T040 | Archivist agent skeleton | **completed** | carpenter |
+| T041 | Note node creation | **completed** | navigator |
+| T042 | Day node management | **completed** | navigator |
+| T043 | Message pruning | **completed** | navigator |
+| T044 | Scribe analytics queries | **completed** | navigator |
 | T045 | Journal generation pipeline | **completed** | alchemist |
-| T046 | Scribe agent implementation | pending | carpenter |
-| T047 | APScheduler integration | pending | engineer |
-| T048 | Conflict detection summaries | pending | alchemist |
-| T049 | Entity deduplication | pending | navigator |
-| T050 | Sprint 3 integration tests | pending | inspector |
+| T046 | Scribe agent implementation | **completed** | carpenter |
+| T047 | APScheduler integration | **completed** | engineer |
+| T048 | Conflict detection summaries | **completed** | alchemist |
+| T049 | Entity deduplication | **completed** | navigator |
+| T050 | Sprint 3 integration tests | **completed** | inspector |
 
 ### Sprint 3 Completed Tasks
 
 | Task | Description | Completed |
 |------|-------------|-----------|
 | T036 | Cooldown detection query | 2026-01-15 |
+| T037 | Thread status lifecycle | 2026-01-15 |
+| T038 | Thread summary models | 2026-01-15 |
+| T039 | LLM summarization pipeline | 2026-01-15 |
+| T040 | Archivist agent skeleton | 2026-01-15 |
+| T041 | Note node creation | 2026-01-15 |
+| T042 | Day node management | 2026-01-15 |
+| T043 | Message pruning | 2026-01-15 |
+| T044 | Scribe analytics queries | 2026-01-15 |
 | T045 | Journal generation pipeline | 2026-01-15 |
+| T046 | Scribe agent implementation | 2026-01-15 |
+| T047 | APScheduler integration | 2026-01-15 |
+| T048 | Conflict detection summaries | 2026-01-15 |
+| T049 | Entity deduplication | 2026-01-15 |
+| T050 | Sprint 3 integration tests | 2026-01-15 |
 
 ### Key Decisions (Sprint 3)
 
 1. **Cooldown query pattern**: Uses parameterized Cypher with $cutoff_timestamp and $limit. Orders by oldest first (ASC) to ensure fair processing. Default 60 minutes cooldown, 10 thread batch limit.
 
-2. **Journal generation with tool_use**: T045 uses Anthropic's tool_use pattern for structured output. System prompt defines five-section journal structure (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING). Temperature 0.7 for creative variation. Six mood classifications: productive, challenging, calm, busy, mixed, quiet.
+2. **Journal generation with tool_use**: Uses Anthropic's tool_use pattern for structured output. System prompt defines five-section journal structure (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING). Temperature 0.7 for creative variation. Six mood classifications: productive, challenging, calm, busy, mixed, quiet.
+
+3. **Thread lifecycle state machine**: Four states (active, archiving, archived, failed) with validated transitions. Prevents double-archiving and enables recovery from failures.
+
+4. **APScheduler integration**: AsyncIOScheduler with memory job store. Archivist runs every 15 minutes, Scribe at midnight UTC. Config-driven job enabling/disabling.
+
+5. **Entity deduplication**: Uses rapidfuzz for fuzzy name matching. Auto-merge at similarity >= 0.9, flag for review at 0.7-0.9. APOC-free implementation for portability.
 
 ---
 
