@@ -2,7 +2,7 @@
 # ======================
 # Common development commands
 
-.PHONY: help venv install dev run test lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db
+.PHONY: help venv install dev run test lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
 
 # Default target
 help:
@@ -28,6 +28,12 @@ help:
 	@echo "  make docker-up    Start Docker services"
 	@echo "  make docker-down  Stop Docker services"
 	@echo "  make docker-logs  Follow Docker logs"
+	@echo ""
+	@echo "Test Infrastructure:"
+	@echo "  make test-docker-up    Start test Neo4j (port 7688)"
+	@echo "  make test-docker-down  Stop test Neo4j"
+	@echo "  make test-contracts    Run contract tests"
+	@echo "  make test-golden       Run golden scenario E2E tests"
 	@echo ""
 	@echo "Database:"
 	@echo "  make init-db      Initialize Neo4j schema"
@@ -111,6 +117,35 @@ wipe-db:
 
 reset-db: wipe-db init-db
 	@echo "Database reset complete."
+
+# === Test Infrastructure ===
+
+test-docker-up:
+	docker-compose -f docker-compose.test.yml up -d
+	@echo "Test Neo4j starting on port 7688..."
+	@echo "Wait for healthy status before running tests"
+	@echo "Check status: docker-compose -f docker-compose.test.yml ps"
+
+test-docker-down:
+	docker-compose -f docker-compose.test.yml down -v
+	@echo "Test infrastructure stopped and volumes removed"
+
+test-docker-logs:
+	docker-compose -f docker-compose.test.yml logs -f
+
+test-contracts:
+	pytest tests/integration/test_neo4j_contract.py tests/integration/test_graphiti_contract.py -v
+
+test-golden:
+	pytest tests/e2e/test_golden_scenarios.py -v -m golden
+
+test-all-services:
+	@echo "Starting test infrastructure..."
+	docker-compose -f docker-compose.test.yml up -d
+	@echo "Waiting for Neo4j to be healthy..."
+	@sleep 15
+	pytest tests/ -v -m "requires_neo4j or e2e"
+	docker-compose -f docker-compose.test.yml down -v
 
 # === Utility ===
 

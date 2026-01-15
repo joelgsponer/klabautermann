@@ -132,9 +132,13 @@ addopts = [
 ]
 markers = [
     "unit: Unit tests (fast, no external deps)",
-    "integration: Integration tests (requires Neo4j)",
+    "integration: Integration tests (may require Neo4j)",
     "e2e: End-to-end tests (full system)",
-    "golden: Golden scenario tests",
+    "golden: Golden scenario tests (mandatory for release)",
+    "requires_neo4j: Test requires Neo4j database connection",
+    "requires_openai: Test requires OPENAI_API_KEY",
+    "requires_anthropic: Test requires ANTHROPIC_API_KEY",
+    "requires_services: Test requires all external services",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
