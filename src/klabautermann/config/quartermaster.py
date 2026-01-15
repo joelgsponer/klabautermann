@@ -14,12 +14,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from klabautermann.config.manager import ConfigManager
 from klabautermann.core.logger import logger
+
+
+if TYPE_CHECKING:
+    from klabautermann.config.manager import ConfigManager
 
 
 # ===========================================================================

@@ -107,7 +107,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that threads can be created and retrieved."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -141,7 +141,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that messages are persisted to the graph."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -186,7 +186,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that context window returns messages in order."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -233,7 +233,7 @@ class TestSprint1Foundation:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that context window respects limit parameter."""
         from klabautermann.memory.thread_manager import ThreadManager
@@ -280,7 +280,7 @@ class TestOrchestratorIntegration:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that orchestrator generates responses."""
         from klabautermann.agents.orchestrator import Orchestrator
@@ -316,7 +316,7 @@ class TestOrchestratorIntegration:
         self,
         neo4j_client,
         test_thread_id,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test that response time is under 10 seconds."""
         from klabautermann.agents.orchestrator import Orchestrator
@@ -355,7 +355,7 @@ class TestGraphOperations:
     async def test_create_and_retrieve_node(
         self,
         neo4j_client,
-        cleanup_test_thread,  # noqa: ARG002
+        cleanup_test_thread,
     ):
         """Test basic node creation and retrieval."""
         from klabautermann.core.ontology import NodeLabel

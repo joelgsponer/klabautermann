@@ -8,7 +8,8 @@
       "Bash(source .venv/bin/activate)",
       "Bash(uv pip install:*)",
       "Bash(uv run python:*)",
-      "Bash(uv run pytest:*)"
+      "Bash(uv run pytest:*)",
+      "Bash(grep:*)"
     ]
   },
   "hooks": {

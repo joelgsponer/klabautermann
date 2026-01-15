@@ -18,6 +18,7 @@ import os
 import sys
 from pathlib import Path
 
+
 # Add src to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
@@ -46,7 +47,9 @@ async def get_db_version(driver: AsyncGraphDatabase.driver) -> str:
     """Get Neo4j database version."""
     try:
         async with driver.session() as session:
-            result = await session.run("CALL dbms.components() YIELD name, versions RETURN versions[0] as version")
+            result = await session.run(
+                "CALL dbms.components() YIELD name, versions RETURN versions[0] as version"
+            )
             record = await result.single()
             return record["version"] if record else "unknown"
     except Exception:
@@ -103,7 +106,9 @@ async def create_enterprise_constraints(driver: AsyncGraphDatabase.driver) -> tu
                     # Community Edition - skip all remaining enterprise constraints
                     is_enterprise = False
                     skipped = len(ENTERPRISE_CONSTRAINTS)
-                    logger.info("[CHART] Neo4j Community Edition detected - skipping property existence constraints")
+                    logger.info(
+                        "[CHART] Neo4j Community Edition detected - skipping property existence constraints"
+                    )
                     break
                 else:
                     logger.warning(f"[SWELL] Could not create constraint: {e}")
@@ -176,7 +181,9 @@ async def show_schema_summary(driver: AsyncGraphDatabase.driver) -> None:
         indexes = await result.data()
         index_count = len(indexes)
 
-        logger.info(f"[BEACON] Schema summary: {constraint_count} constraints, {index_count} indexes")
+        logger.info(
+            f"[BEACON] Schema summary: {constraint_count} constraints, {index_count} indexes"
+        )
 
 
 async def main() -> int:
@@ -218,7 +225,9 @@ async def main() -> int:
         if is_enterprise:
             logger.info(f"[BEACON] Enterprise constraints: {e_created} created")
         else:
-            logger.info(f"[BEACON] Enterprise constraints: skipped ({e_skipped} require Enterprise Edition)")
+            logger.info(
+                f"[BEACON] Enterprise constraints: skipped ({e_skipped} require Enterprise Edition)"
+            )
 
         # Create indexes
         logger.info("[CHART] Creating indexes...")

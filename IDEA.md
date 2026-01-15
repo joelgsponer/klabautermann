@@ -350,7 +350,7 @@ async def main():
     )
 
     print("Knowledge Graph updated successfully!")
-    
+
     # 6. Hybrid Search Example
     results = await graphiti.search("What is our current marketing goal?")
     for r in results:
@@ -657,14 +657,14 @@ async def init_system():
     # 1. Initialize Temporal Memory
     graph = Graphiti(uri=os.getenv("NEO4J_URI"), ...)
     await graph.build_indices_and_constraints()
-    
+
     # 2. Initialize Orchestrator
     client = ClaudeAgentSDK.Client(api_key=os.getenv("ANTHROPIC_API_KEY"))
-    
+
     # 3. Connect MCP Tools
     await client.connect_mcp("google-workspace", "npx @modelcontextprotocol/server-google-workspace")
     await client.connect_mcp("graphiti-memory", "python -m graphiti_mcp_server")
-    
+
     return client, graph
 6. Prompt Engineering Standards (The "System Instruction")
 The Orchestrator will be initialized with the following Task Context:
@@ -753,9 +753,9 @@ class HeadlessGmailIngestor:
         # Load the refresh token from the mounted Docker secret
         with open(token_path, 'r') as f:
             creds_data = json.load(f)
-        
+
         self.creds = Credentials.from_authorized_user_info(creds_data)
-        
+
         # Automatic Refresh Logic
         if self.creds.expired and self.creds.refresh_token:
             from google.auth.transport.requests import Request
@@ -766,8 +766,8 @@ class HeadlessGmailIngestor:
         # Headless fetch logic here...
         pass
 
-# PROMPT FOR AGENT: 
-# "You are the Headless Ingestor. Your 'Hands' are the Google Refresh Tokens. 
+# PROMPT FOR AGENT:
+# "You are the Headless Ingestor. Your 'Hands' are the Google Refresh Tokens.
 # If a token expires, log a 'CRITICAL_AUTH_FAILURE' to the Daily Note."
 5. Proper Credential Rotation Policy
 Neo4j: Use RBAC (Role Based Access Control). The Ingestor sub-agent gets a WRITE_ONLY role. The Researcher sub-agent gets a READ_ONLY role.
@@ -859,7 +859,7 @@ class MemoryAgent:
     """The Archivist: Responsible for state-aware ingestion."""
     def __init__(self, config: IngestorConfig):
         self.graph = Graphiti(config.neo4j_uri, ...)
-        
+
     async def process_event(self, raw_text: str):
         # 1. Logic to turn text into a Graphiti Episode
         # 2. Extract Entities (Person, Location, Goal)
@@ -1429,7 +1429,7 @@ async def run_mcp_tool(server_config, tool_name, arguments):
         args=server_config[1:],
         env={**os.environ}
     )
-    
+
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -1915,7 +1915,7 @@ Create a image encompassing the branding
 
 Here is the full branding visualization for Klabautermann:
 
-Image of 
+Image of
 
 As your Lead PM, I have consolidated the entire vision—from the nautical-inspired branding and modular communication architecture to the rigorous engineering standards and MCP integration—into a definitive set of project files. This repository structure is designed to be handed directly to your development team to begin the first sprint.
 
@@ -2111,10 +2111,10 @@ Klabautermann Bridge
 
 Code snippet
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Anchor, Compass, Wind, AlertTriangle, ScrollText, 
-  Terminal, Activity, Map, MessageSquare, Ship, 
-  Settings, User, ChevronRight, Search, Zap 
+import {
+  Anchor, Compass, Wind, AlertTriangle, ScrollText,
+  Terminal, Activity, Map, MessageSquare, Ship,
+  Settings, User, ChevronRight, Search, Zap
 } from 'lucide-react';
 
 const COLORS = {
@@ -2175,7 +2175,7 @@ const App = () => {
             <h1 className="text-2xl font-serif text-[#B68D40] tracking-wider uppercase italic">Klabautermann</h1>
             <span className="ml-4 px-2 py-0.5 border border-[#D1E8E2]/30 text-xs rounded text-[#D1E8E2]/60">VOYAGE 001</span>
           </div>
-          
+
           <div className="flex space-x-6">
             <AgentBadge name="ORCH" status={agentStatus.orchestrator} />
             <AgentBadge name="RESE" status={agentStatus.researcher} />
@@ -2190,7 +2190,7 @@ const App = () => {
 
         {/* CONTENT AREA */}
         <div className="flex-1 p-6 grid grid-cols-12 gap-6 overflow-hidden">
-          
+
           {/* LEFT: THE VIEWPORT */}
           <section className="col-span-8 bg-[#0F171B]/50 rounded-lg border border-[#B68D40]/20 flex flex-col overflow-hidden relative">
              {activeTab === 'horizon' && (
@@ -2204,8 +2204,8 @@ const App = () => {
                  ))}
                  <div className="mt-auto pt-4">
                     <div className="relative">
-                      <input 
-                        className="w-full bg-black/40 border border-[#B68D40]/40 rounded-full px-6 py-3 outline-none focus:border-[#B68D40]" 
+                      <input
+                        className="w-full bg-black/40 border border-[#B68D40]/40 rounded-full px-6 py-3 outline-none focus:border-[#B68D40]"
                         placeholder="Steer the ship..."
                       />
                       <button className="absolute right-4 top-2.5 text-[#B68D40]">
@@ -2294,7 +2294,7 @@ const App = () => {
 };
 
 const NavItem = ({ icon, active, onClick }) => (
-  <button 
+  <button
     onClick={onClick}
     className={`p-3 rounded-xl transition-all ${active ? 'bg-[#B68D40] text-[#1B262C]' : 'text-[#D1E8E2]/60 hover:bg-[#B68D40]/10 hover:text-[#B68D40]'}`}
   >
@@ -2306,8 +2306,8 @@ const AgentBadge = ({ name, status }) => (
   <div className="flex flex-col items-center">
     <div className="text-[10px] text-[#B68D40] font-bold mb-1 tracking-tighter">{name}</div>
     <div className={`text-[10px] px-2 py-0.5 rounded-full border ${
-      status === 'READY' ? 'border-green-500/50 text-green-500' : 
-      status === 'SCOUTING' ? 'border-[#B68D40]/50 text-[#B68D40] animate-pulse' : 
+      status === 'READY' ? 'border-green-500/50 text-green-500' :
+      status === 'SCOUTING' ? 'border-[#B68D40]/50 text-[#B68D40] animate-pulse' :
       'border-[#D1E8E2]/30 text-[#D1E8E2]/50'
     }`}>
       {status}
@@ -2981,7 +2981,7 @@ class TheSieve:
     The Sieve: A specialized logic gate for the Purser.
     Filters out noise (newsletters, spam) and checks for 'Boarding Parties' (injections).
     """
-    
+
     # Patterns for transactional noise and common newsletters
     NOISE_PATTERNS = [
         r"(?i)unsubscribe",
@@ -3006,7 +3006,7 @@ class TheSieve:
         subject = email_data.get("subject", "")
         sender = email_data.get("from", "")
         body = email_data.get("body", "")
-        
+
         # 1. Security Check (Galleon Guard logic)
         for pattern in cls.INJECTION_PATTERNS:
             if re.search(pattern, body):
@@ -3090,7 +3090,7 @@ Code snippet
 graph TD
     %% Users and Input
     User((The Captain))
-    
+
     subgraph Rigging [The Rigging: Communication Layer]
         CLI[CLI Driver]
         TG[Telegram Driver]
@@ -3132,21 +3132,21 @@ graph TD
     User --> CLI & TG
     TG --> VOICE
     CLI & TG & VOICE --> Sieve
-    
+
     Sieve --> Security --> Filter
     Filter -- "High Signal" --> Orch
-    
+
     Quarter -.-> Orch & Crew
-    
+
     Orch --> Res & Ing & Exe
-    
+
     Res <--> Graphiti <--> Neo4j
     Ing --> Graphiti
     Exe --> Google & Files
     Pur <--> Google & Neo4j
     Scribe --> Neo4j
     Bard -- "Sequential Lore" --> Orch
-    
+
     Ing -.-> Cargo
     Neo4j <--> Cargo
 2. The Message Lifecycle (Sequence Diagram)
@@ -3203,7 +3203,7 @@ I've generated a Telegram avatar for Klabautermann that captures his essence as 
 
 The image depicts him with a beard made of flowing seafoam data streams, wearing a captain’s hat of mahogany and brass. His design reflects the "Galleon Guard" aesthetic—merging the craftsmanship of an old-world ship with the glowing circuits of a modern agentic system.
 
-Image of 
+Image of
 
 Please note that this image was generated using the gemini-2.5-flash-image-preview model, as the advanced gemini-3-pro-image-preview-11-2025 is currently unavailable in the Canvas environment.
 
@@ -3219,7 +3219,7 @@ I have generated a new avatar for Klabautermann that leans into the "Salty Sage"
 
 This version captures the rugged, comic-book aesthetic: a weathered, confident, yet evasive spirit working the dark wooden decks. He looks less like a high-tech AI and more like a mythical navigator who has survived centuries of digital and literal storms.
 
-Image of 
+Image of
 
 Note: This response utilized the gemini-2.5-flash-image-preview model.
 
@@ -3247,19 +3247,19 @@ He is now a truly mystical figure: a weathered, gnome-like spirit of the ship, h
 
 create the image
 
-Image of 
+Image of
 
 more 17th century sailor, more orange glow. darker
 
-Image of 
+Image of
 
 A mysterious small spirit figure perched in ship rigging during a storm at night. The figure wears an oversized weathered captain's coat, salt-stained and wind-blown. A wide-brimmed hat casts deep shadow where the face should be - no features visible, only darkness. The figure has a subtle bioluminescent glow at its edges, cyan-teal light (#4affec) bleeding into the storm. One hand grips the rigging, the other holds a small wooden hammer. The spirit is silhouetted against lightning-illuminated storm clouds. Churning dark sea below (#0a0e14). Rain streaks diagonally across the frame. The figure is small in the composition - the storm dominates, but the spirit is unmistakably present and steady. Digital art, dark atmospheric fantasy, dramatic lighting, high contrast, painterly style with sharp details.  but the characters conveys, nevertheless some cuteness with strong confidence (think of dwars like character) ---   Key rules:   - Faceless (shadow, not features)   - Small in frame (spirit, not hero)   - Hammer in hand (the tool)   - Cyan edge glow (#4affec)   - Storm dominates, spirit endures  Negative prompts: cute, cartoon, anime eyes, visible face, bright colors, daylight, horror, skeleton, disney, chibi  The file also includes simplified icon versions, a dawn variant, and technical specs for different platforms.
 
-Image of 
+Image of
 
 show him relaxing in the sunrise
 
-Image of 
+Image of
 
 how to turn the whole project into a product to sell.
 
@@ -3387,11 +3387,11 @@ Would you like me to draft a "User Journey" for the first 5 minutes of someone u
 
 create the icon
 
-Image of 
+Image of
 
 no beard
 
-Image of 
+Image of
 
 can you provide me all files created as zip
 
@@ -3423,13 +3423,13 @@ project_files = {
 - **Optimizations:** Community detection (Knowledge Islands) and Barnacle Scraping (Pruning).""",
 
     "docs/lore.md": """# The Legend of Klabautermann
-He is a digital spirit, migrated from 17th-century masts to silicon cables. 
-He views data as cargo, barnacles as duplicates, and fog as context loss. 
+He is a digital spirit, migrated from 17th-century masts to silicon cables.
+He views data as cargo, barnacles as duplicates, and fog as context loss.
 He respects the Captain (User) but is wary of 'Boarding Parties' (Prompt Injections).""",
 
     "docs/personality.md": """# Personality: The Salty Sage
 - **Traits:** Pragmatically Witty, Grudgingly Loyal, Groundedly Mystical.
-- **Voice:** Nautical metaphors for digital tasks. 
+- **Voice:** Nautical metaphors for digital tasks.
 - **Modes:** Standard (Witty) vs. Storm (Efficient/Directive).""",
 
     "docs/architecture.md": """# Architecture Overview
@@ -3479,20 +3479,20 @@ class TheSieve:
 def create_project():
     base_dir = "klabautermann_project"
     os.makedirs(base_dir, exist_ok=True)
-    
+
     for file_path, content in project_files.items():
         full_path = os.path.join(base_dir, file_path)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(content)
-            
+
     # Create the zip
     with zipfile.ZipFile("klabautermann_complete.zip", 'w') as zipf:
         for root, _, files in os.walk(base_dir):
             for file in files:
-                zipf.write(os.path.join(root, file), 
+                zipf.write(os.path.join(root, file),
                            os.path.relpath(os.path.join(root, file), base_dir))
-    
+
     print("⚓ [CHART] Project manifested! 'klabautermann_complete.zip' is ready.")
 
 if __name__ == "__main__":
@@ -3508,5 +3508,3 @@ Google Privacy PolicyOpens in a new window
 Google Terms of ServiceOpens in a new window
 Your privacy and Gemini AppsOpens in a new window
 Gemini may display inaccurate info, including about people, so double-check its responses. This content was created by another person. It may be inaccurate or unsafe.
-
-

@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from klabautermann.core.logger import logger
 
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from klabautermann.memory.neo4j_client import Neo4jClient
 
 

@@ -9,6 +9,7 @@ Reference: specs/quality/TESTING.md Section 3, specs/architecture/AGENTS.md
 IMPORTANT: Tests define what code SHOULD do according to specs.
 If tests fail, fix the CODE, not the tests.
 """
+# ruff: noqa: SIM105, B017
 
 import asyncio
 from pathlib import Path

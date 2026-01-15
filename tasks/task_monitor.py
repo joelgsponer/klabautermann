@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: PTH123, C416, SIM117
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
@@ -14,10 +15,10 @@ import sys
 import termios
 import time
 import tty
+from collections.abc import Iterable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Tuple
 
 from rich.console import Console, Group
 from rich.layout import Layout
@@ -26,10 +27,11 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
+
 console = Console()
 
 # Configuration
-TASKS_DIR = Path(".")
+TASKS_DIR = Path()
 PENDING_DIR = TASKS_DIR / "pending"
 IN_PROGRESS_DIR = TASKS_DIR / "in-progress"
 BLOCKED_DIR = TASKS_DIR / "blocked"
@@ -42,28 +44,24 @@ PRIORITY_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 class TaskInfo:
     title: str
     content: str
-    metadata: Dict[str, str]
+    metadata: dict[str, str]
     path: Path
 
 
-def parse_metadata(lines: Iterable[str]) -> Dict[str, str]:
+def parse_metadata(lines: Iterable[str]) -> dict[str, str]:
     """
     Extracts a shallow metadata map (ID, Priority) from the markdown task file.
     """
-    meta: Dict[str, str] = {}
+    meta: dict[str, str] = {}
     for line in lines:
         line = line.strip()
         if not line.startswith("- **"):
             continue
         if "**ID**" in line:
-            meta["id"] = (
-                line.split("**ID**", maxsplit=1)[-1].split(":", maxsplit=1)[-1].strip()
-            )
+            meta["id"] = line.split("**ID**", maxsplit=1)[-1].split(":", maxsplit=1)[-1].strip()
         elif "**Priority**" in line:
             meta["priority"] = (
-                line.split("**Priority**", maxsplit=1)[-1]
-                .split(":", maxsplit=1)[-1]
-                .strip()
+                line.split("**Priority**", maxsplit=1)[-1].split(":", maxsplit=1)[-1].strip()
             )
     return meta
 
@@ -73,7 +71,7 @@ def get_task_info(file_path: Path) -> TaskInfo:
     Reads a markdown task file and returns a TaskInfo object.
     """
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             lines = f.readlines()
     except Exception:
         return TaskInfo(
@@ -84,7 +82,7 @@ def get_task_info(file_path: Path) -> TaskInfo:
         )
 
     title = file_path.name
-    content_lines: List[str] = []
+    content_lines: list[str] = []
 
     if lines:
         # Try to extract title from the first header
@@ -95,12 +93,10 @@ def get_task_info(file_path: Path) -> TaskInfo:
             content_lines = lines
 
     metadata = parse_metadata(lines)
-    return TaskInfo(
-        title=title, content="".join(content_lines), metadata=metadata, path=file_path
-    )
+    return TaskInfo(title=title, content="".join(content_lines), metadata=metadata, path=file_path)
 
 
-def get_tasks_from_dir(directory: Path) -> List[TaskInfo]:
+def get_tasks_from_dir(directory: Path) -> list[TaskInfo]:
     """
     Returns a list of TaskInfo objects for all .md files in the directory.
     Sorted by filename to keep order stable.
@@ -131,8 +127,8 @@ def make_layout(include_blocked: bool = True) -> Layout:
     return layout
 
 
-def sort_by_priority(tasks: List[TaskInfo]) -> List[TaskInfo]:
-    def key(task: TaskInfo) -> Tuple[int, str, str]:
+def sort_by_priority(tasks: list[TaskInfo]) -> list[TaskInfo]:
+    def key(task: TaskInfo) -> tuple[int, str, str]:
         priority = task.metadata.get("priority", "P3").upper()
         task_id = task.metadata.get("id", task.title)
         return (PRIORITY_ORDER.get(priority, 99), task_id, task.title)
@@ -205,7 +201,7 @@ def generate_summary_panel(
 
 
 def generate_list_panel(
-    tasks: List[TaskInfo],
+    tasks: list[TaskInfo],
     offset: int,
     page_size: int,
     title: str,
@@ -220,7 +216,7 @@ def generate_list_panel(
 
     start = clamp_offset(offset, len(tasks), page_size)
     subset = tasks[start : start + page_size]
-    lines: List[Text] = []
+    lines: list[Text] = []
     for idx, task in enumerate(subset, start=start):
         label = format_task_label(task, done=done)
         if selected_index is not None and idx == selected_index:
@@ -231,13 +227,11 @@ def generate_list_panel(
         lines.append(line)
     subtitle = f"{start + 1}-{start + len(subset)} of {len(tasks)}"
     style = f"bold {border_style}" if focused else border_style
-    return Panel(
-        Text("\n").join(lines), title=title, border_style=style, subtitle=subtitle
-    )
+    return Panel(Text("\n").join(lines), title=title, border_style=style, subtitle=subtitle)
 
 
 def generate_inprogress_panel(
-    tasks: List[TaskInfo],
+    tasks: list[TaskInfo],
     offset: int,
     page_size: int,
     focused: bool,
@@ -262,11 +256,7 @@ def generate_inprogress_panel(
         extra = " • ".join(filter(None, [priority, task_id]))
         if extra:
             title_bits.append(f"[dim]{extra}[/dim]")
-        border = (
-            "bright_cyan"
-            if selected_index is not None and idx == selected_index
-            else "blue"
-        )
+        border = "bright_cyan" if selected_index is not None and idx == selected_index else "blue"
         p = Panel(
             task_content,
             title=" — ".join(title_bits),
@@ -355,9 +345,7 @@ def poll_key(timeout: float, enabled: bool) -> str | None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Monitor task status files.")
-    parser.add_argument(
-        "--interval", type=float, default=1.0, help="Refresh interval in seconds."
-    )
+    parser.add_argument("--interval", type=float, default=1.0, help="Refresh interval in seconds.")
     parser.add_argument("--once", action="store_true", help="Render once then exit.")
     parser.add_argument(
         "--list-page-size",
@@ -406,9 +394,7 @@ def run_monitor(args: argparse.Namespace) -> None:
                     configure_body(layout, include_blocked=blocked_visible)
 
                 visible_focus_order = (
-                    ["pending", "inprogress"]
-                    + (["blocked"] if blocked_visible else [])
-                    + ["done"]
+                    ["pending", "inprogress"] + (["blocked"] if blocked_visible else []) + ["done"]
                 )
                 if focus_idx >= len(visible_focus_order):
                     focus_idx = len(visible_focus_order) - 1
@@ -430,9 +416,7 @@ def run_monitor(args: argparse.Namespace) -> None:
                 for key, tasks in tasks_by_focus.items():
                     total = len(tasks)
                     selections[key] = (
-                        0
-                        if total == 0
-                        else min(max(selections.get(key, 0), 0), total - 1)
+                        0 if total == 0 else min(max(selections.get(key, 0), 0), total - 1)
                     )
                     page_size = page_sizes[key]
                     current_offset = offsets.get(key, 0)
@@ -527,11 +511,7 @@ def run_monitor(args: argparse.Namespace) -> None:
                     task = tasks[selection]
                     live.stop()
                     with suspend_raw_mode(raw_state):
-                        editor = (
-                            os.environ.get("VISUAL")
-                            or os.environ.get("EDITOR")
-                            or "nano"
-                        )
+                        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "nano"
                         try:
                             subprocess.run([editor, str(task.path)], check=False)
                         except FileNotFoundError:

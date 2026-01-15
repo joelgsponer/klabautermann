@@ -52,7 +52,7 @@ Golden Scenarios (mandatory E2E tests):
 5. Multi-Channel Threading: CLI + Telegram → separate threads, no context bleed
 
 ## Keep project root client
-Utility scripts should go in scripts/. Migrations ins migrations/. 
+Utility scripts should go in scripts/. Migrations ins migrations/.
 
-## On startup 
+## On startup
 Orient yourself. Run `tree` to understand project structure.

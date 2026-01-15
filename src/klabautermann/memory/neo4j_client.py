@@ -17,13 +17,14 @@ from neo4j import AsyncGraphDatabase
 
 from klabautermann.core.exceptions import GraphConnectionError
 from klabautermann.core.logger import logger
-from klabautermann.core.ontology import NodeLabel, RelationType  # noqa: TCH001
 
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from neo4j import AsyncDriver, AsyncSession
+
+    from klabautermann.core.ontology import NodeLabel, RelationType
 
 
 class Neo4jClient:

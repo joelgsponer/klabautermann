@@ -3,6 +3,7 @@ Unit tests for the Agent Configuration Manager (T032).
 
 Tests YAML loading, validation, typed access, and hot-reload.
 """
+# ruff: noqa: B017
 
 import tempfile
 from pathlib import Path

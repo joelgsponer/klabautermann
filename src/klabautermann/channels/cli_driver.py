@@ -173,9 +173,9 @@ class CLIDriver(BaseChannel):
 
     async def send_message(
         self,
-        thread_id: str,
+        thread_id: str,  # noqa: ARG002
         content: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,  # noqa: ARG002
     ) -> None:
         """
         Display message to user with markdown rendering.
@@ -191,7 +191,7 @@ class CLIDriver(BaseChannel):
         self,
         thread_id: str,
         content: str,
-        metadata: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,  # noqa: ARG002
     ) -> str:
         """
         Process incoming message from user.

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import TypeVar
+from typing import ClassVar, TypeVar
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -199,7 +199,7 @@ class ConfigManager:
         print(orchestrator_config.intent_classification.search_keywords)
     """
 
-    CONFIG_CLASSES: dict[str, type[AgentConfigBase]] = {
+    CONFIG_CLASSES: ClassVar[dict[str, type[AgentConfigBase]]] = {
         "orchestrator": OrchestratorConfig,
         "ingestor": IngestorConfig,
         "researcher": ResearcherConfig,

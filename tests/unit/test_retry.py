@@ -3,6 +3,7 @@ Unit tests for the retry utility.
 
 Tests exponential backoff, jitter, exception filtering, and convenience decorators.
 """
+# ruff: noqa: SIM117
 
 import asyncio
 from unittest.mock import AsyncMock, patch

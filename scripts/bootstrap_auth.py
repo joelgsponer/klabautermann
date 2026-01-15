@@ -6,7 +6,8 @@ This script guides you through Google OAuth2 authentication
 to obtain a refresh token for Gmail and Calendar access.
 
 Usage:
-    python scripts/bootstrap_auth.py
+    python scripts/bootstrap_auth.py              # Interactive (opens browser)
+    python scripts/bootstrap_auth.py --headless   # Headless (copy/paste auth code)
 
 Prerequisites:
     1. Create a Google Cloud Project at https://console.cloud.google.com
@@ -29,9 +30,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 # Google OAuth libraries - imports needed at runtime for script
-from google.oauth2.credentials import Credentials  # noqa: TCH002
+from typing import TYPE_CHECKING
+
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+
+
+if TYPE_CHECKING:
+    from google.oauth2.credentials import Credentials
 
 
 # Scopes required for Klabautermann
@@ -84,24 +90,55 @@ def check_prerequisites():
     print()
 
 
-def run_oauth_flow():
+def run_oauth_flow(headless: bool = False):
     """Run the OAuth2 flow."""
     print("[2/5] Starting OAuth flow...")
-    print("  - Opening browser for Google authorization")
-    print("  - Please log in and grant access to Gmail and Calendar")
-    print()
 
     flow = InstalledAppFlow.from_client_secrets_file(
         str(CREDENTIALS_FILE),
         SCOPES,
     )
 
-    # Run local server for OAuth callback
-    credentials = flow.run_local_server(
-        port=8080,
-        prompt="consent",  # Force consent to get refresh token
-        access_type="offline",  # Required for refresh token
-    )
+    if headless:
+        # Headless mode: manual copy/paste of auth code
+        print("  - Running in HEADLESS mode")
+        print()
+
+        # Generate authorization URL
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            prompt="consent",
+        )
+
+        print("  1. Open this URL in any browser:")
+        print()
+        print(f"     {auth_url}")
+        print()
+        print("  2. Log in and grant access to Gmail and Calendar")
+        print("  3. Copy the authorization code from the redirect URL")
+        print("     (Look for 'code=' in the URL or the code shown on screen)")
+        print()
+
+        auth_code = input("  Enter authorization code: ").strip()
+
+        if not auth_code:
+            print("\n  ERROR: No authorization code provided!")
+            sys.exit(1)
+
+        # Exchange code for credentials
+        flow.fetch_token(code=auth_code)
+        credentials = flow.credentials
+    else:
+        # Interactive mode: local server
+        print("  - Opening browser for Google authorization")
+        print("  - Please log in and grant access to Gmail and Calendar")
+        print()
+
+        credentials = flow.run_local_server(
+            port=8080,
+            prompt="consent",  # Force consent to get refresh token
+            access_type="offline",  # Required for refresh token
+        )
 
     print("  - Authorization successful!")
     print()
@@ -261,9 +298,19 @@ def print_summary():
 
 def main():
     """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Google OAuth Bootstrap for Klabautermann")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run in headless mode (no browser, copy/paste auth code)",
+    )
+    args = parser.parse_args()
+
     print_header()
     check_prerequisites()
-    credentials = run_oauth_flow()
+    credentials = run_oauth_flow(headless=args.headless)
     verify_credentials(credentials)
     save_credentials(credentials)
     print_summary()

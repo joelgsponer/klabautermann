@@ -9,14 +9,19 @@ Reference: specs/architecture/CHANNELS.md, specs/branding/PERSONALITY.md
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.status import Status
 from rich.theme import Theme
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from rich.status import Status
 
 
 # Nautical color theme

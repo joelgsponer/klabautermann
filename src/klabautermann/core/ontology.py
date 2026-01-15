@@ -9,6 +9,67 @@ Reference: specs/architecture/ONTOLOGY.md
 
 from enum import Enum
 
+from pydantic import BaseModel
+
+
+# ===========================================================================
+# Entity Type Models for Graphiti
+# ===========================================================================
+# These Pydantic models define entity types for Graphiti's extraction.
+# The docstrings are used by Graphiti's LLM to understand each type.
+
+
+class PersonType(BaseModel):
+    """A human individual - employee, contact, family member, friend, or acquaintance."""
+
+    pass
+
+
+class OrganizationType(BaseModel):
+    """A company, institution, team, government body, or organized group."""
+
+    pass
+
+
+class ProjectType(BaseModel):
+    """A work project, initiative, product, or collaborative effort."""
+
+    pass
+
+
+class LocationType(BaseModel):
+    """A physical place - city, country, building, venue, neighborhood, or address."""
+
+    pass
+
+
+class EventType(BaseModel):
+    """A meeting, conference, appointment, deadline, or scheduled occurrence."""
+
+    pass
+
+
+class TaskType(BaseModel):
+    """An action item, to-do, assignment, or work task."""
+
+    pass
+
+
+# Entity types dict for Graphiti's add_episode()
+ENTITY_TYPES: dict[str, type[BaseModel]] = {
+    "Person": PersonType,
+    "Organization": OrganizationType,
+    "Project": ProjectType,
+    "Location": LocationType,
+    "Event": EventType,
+    "Task": TaskType,
+}
+
+
+# ===========================================================================
+# Node Labels Enum
+# ===========================================================================
+
 
 class NodeLabel(str, Enum):
     """Valid node labels for the knowledge graph."""
@@ -274,6 +335,14 @@ VECTOR_INDEXES: list[str] = [
 # ===========================================================================
 
 __all__ = [
+    # Entity type models for Graphiti
+    "ENTITY_TYPES",
+    "PersonType",
+    "OrganizationType",
+    "ProjectType",
+    "LocationType",
+    "EventType",
+    "TaskType",
     # Enums
     "NodeLabel",
     "RelationType",

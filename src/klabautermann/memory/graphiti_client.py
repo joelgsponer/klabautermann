@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from klabautermann.core.exceptions import ExternalServiceError, GraphConnectionError
 from klabautermann.core.logger import logger
 from klabautermann.core.models import SearchResult
+from klabautermann.core.ontology import ENTITY_TYPES
 
 
 if TYPE_CHECKING:
@@ -175,6 +176,7 @@ class GraphitiClient:
                 source_description=f"Klabautermann {source} channel",
                 reference_time=ref_time,
                 group_id=group_id or "default",
+                entity_types=ENTITY_TYPES,
             )
 
             logger.info(

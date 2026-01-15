@@ -170,7 +170,7 @@ class Klabautermann:
             config=get_config_dict("orchestrator"),
         )
 
-        # Create Ingestor - uses Haiku model
+        # Create Ingestor - uses Opus model
         if self.graphiti:
             self.agents["ingestor"] = Ingestor(
                 name="ingestor",

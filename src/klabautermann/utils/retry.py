@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Callable
 from functools import wraps
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from klabautermann.core.logger import logger
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 # Type variable for decorated function return type

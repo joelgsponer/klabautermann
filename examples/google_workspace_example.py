@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# ruff: noqa: ERA001
 """
 Example: Using the Google Workspace Bridge
 

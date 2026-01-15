@@ -283,28 +283,28 @@ class ChannelError(KlabautermannError):
 # ===========================================================================
 
 __all__ = [
-    # Base
-    "KlabautermannError",
+    # Agent
+    "AgentError",
+    "ChannelError",
+    # Operational
+    "CircuitOpenError",
+    "DelegationError",
+    "ExternalServiceError",
     # Connection
     "GraphConnectionError",
-    "ExternalServiceError",
+    # Base
+    "KlabautermannError",
+    "LLMOutputValidationError",
     "MCPConnectionError",
     "MCPError",
     "MCPTimeoutError",
-    # Validation
-    "ValidationError",
-    "LLMOutputValidationError",
-    "SchemaValidationError",
-    # Operational
-    "CircuitOpenError",
     "OperationTimeoutError",
     "RateLimitError",
+    "SchemaValidationError",
     # Startup
     "StartupError",
-    # Agent
-    "AgentError",
-    "DelegationError",
     # Thread/Channel
     "ThreadNotFoundError",
-    "ChannelError",
+    # Validation
+    "ValidationError",
 ]

@@ -404,7 +404,8 @@ Example responses:
                 system=self.SYSTEM_PROMPT,
                 messages=messages,
             )
-            return response.content[0].text
+            text: str = response.content[0].text
+            return text
 
         logger.debug(
             f"[WHISPER] Calling Claude ({self.model})",
@@ -691,7 +692,7 @@ Example responses:
                 trace_id,
             )
             if response:
-                result = response.payload.get("result", "")
+                result: str = response.payload.get("result", "")
                 if result:
                     return result
                 # Empty result from Researcher
@@ -705,12 +706,12 @@ Example responses:
 
         # Fallback: use conversation handler
         messages = self._build_messages(query, context)
-        response = await asyncio.wait_for(
+        claude_response: str = await asyncio.wait_for(
             self._call_claude(messages, trace_id),
             timeout=30.0,
         )
 
-        return response
+        return claude_response
 
     async def _handle_action(
         self,
@@ -763,12 +764,15 @@ Example responses:
                 trace_id,
             )
             if response:
-                result = response.payload.get("result", "")
-                if result:
-                    return result
+                action_result: str = response.payload.get("result", "")
+                if action_result:
+                    return action_result
                 # Check for specific errors
                 if not response.payload.get("success", True):
-                    return response.payload.get("message", "I couldn't complete that action.")
+                    error_msg: str = response.payload.get(
+                        "message", "I couldn't complete that action."
+                    )
+                    return error_msg
 
             # Timeout or error
             logger.warning(

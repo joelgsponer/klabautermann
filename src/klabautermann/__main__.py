@@ -162,7 +162,7 @@ class Klabautermann:
             config=get_config_dict("orchestrator"),
         )
 
-        # Create Ingestor - uses Haiku model
+        # Create Ingestor - uses Opus model
         if self.graphiti:
             self.agents["ingestor"] = Ingestor(
                 name="ingestor",
@@ -198,8 +198,11 @@ class Klabautermann:
             agent.agent_registry = self.agents
 
         # Register config change callbacks
-        for name in self.agents:
-            self.quartermaster.register_callback(name, lambda n: self._on_agent_config_change(n))
+        if self.quartermaster:
+            for name in self.agents:
+                self.quartermaster.register_callback(
+                    name, lambda n: self._on_agent_config_change(n)
+                )
 
     async def _on_agent_config_change(self, agent_name: str) -> None:
         """Handle agent config change."""
@@ -223,7 +226,10 @@ class Klabautermann:
 
         # Start CLI
         logger.info("[BEACON] Klabautermann ready. Starting CLI...")
-        cli = CLIDriver(self.agents["orchestrator"])
+        orchestrator = self.agents["orchestrator"]
+        if not isinstance(orchestrator, Orchestrator):
+            raise StartupError("orchestrator agent must be an Orchestrator instance")
+        cli = CLIDriver(orchestrator)
 
         try:
             # Run CLI in the main task

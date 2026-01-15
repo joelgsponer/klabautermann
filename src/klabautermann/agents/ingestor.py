@@ -332,7 +332,7 @@ Conversation to analyze:
         self,
         extraction: ExtractionResult,
         thread_id: str | None,  # noqa: ARG002
-        captain_uuid: str | None,  # noqa: ARG002
+        captain_uuid: str | None,
         trace_id: str,
     ) -> None:
         """

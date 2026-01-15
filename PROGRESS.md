@@ -176,8 +176,17 @@ Sprint 2 complete. Ready for Sprint 3 planning.
 
 None currently.
 
+### Post-Sprint 2 Additions
+
+- **Contract Tests**: `tests/integration/test_neo4j_contract.py` and `test_graphiti_contract.py` verify actual service return types. Would have caught the entity search bug.
+- **Golden Scenario E2E Tests**: `tests/e2e/test_golden_scenarios.py` implements all 5 mandatory scenarios from CLAUDE.md.
+- **Test Infrastructure**: `docker-compose.test.yml` runs isolated Neo4j on port 7688.
+- **Headless OAuth**: `scripts/bootstrap_auth.py --headless` for server environments.
+- **README.md**: Project documentation with quick start, architecture, and testing guides.
+
 ## Recent Activity
 
+- 2026-01-15: Added README.md, headless OAuth support, contract tests, and golden scenario E2E tests
 - 2026-01-15: **Sprint 2 COMPLETE** - All 391 tests passing. Fixed test suite issues: Ingestor signature mismatch (graphiti_client), query parameter bindings (FIND_BLOCKED_TASKS), executor assertions, and integration test mock fixtures. Ready for Sprint 3
 - 2026-01-15: T035 completed - Sprint 2 integration tests with 23 comprehensive tests covering all agent interactions, delegation patterns, extraction, search types, MCP integration (mocked), and config hot-reload. Tests follow established pytest-asyncio patterns and complete in <60s
 - 2026-01-15: T031 completed - Calendar tool handlers with 48 unit tests (all passing). Natural language time parsing ("tomorrow at 2pm", "next Monday"), conflict detection with free slot suggestions, and rich event formatting. Integrated into Executor with 2 new handler methods
