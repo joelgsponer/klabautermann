@@ -19,7 +19,9 @@ import uuid
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.agents.executor import Executor
 from klabautermann.agents.ingestor import Ingestor
+from klabautermann.agents.researcher import Researcher
 from klabautermann.core.exceptions import ExternalServiceError
 from klabautermann.core.logger import logger
 from klabautermann.core.models import (
@@ -29,6 +31,7 @@ from klabautermann.core.models import (
     IntentType,
     ThreadContext,
 )
+from klabautermann.mcp.google_workspace import GoogleWorkspaceBridge
 
 
 if TYPE_CHECKING:
@@ -139,6 +142,25 @@ Example responses:
 
         # Background tasks set to prevent garbage collection of fire-and-forget tasks
         self._background_tasks: set[asyncio.Task[Any]] = set()
+
+        # Initialize Google Workspace bridge for calendar/email
+        self._google_bridge = GoogleWorkspaceBridge()
+
+        # Create and register Executor agent for action handling
+        executor = Executor(
+            name="executor",
+            config=config,
+            google_bridge=self._google_bridge,
+        )
+        self._agent_registry["executor"] = executor
+
+        # Create and register Researcher agent for search queries
+        researcher = Researcher(
+            name="researcher",
+            config=config,
+            graphiti=graphiti,
+        )
+        self._agent_registry["researcher"] = researcher
 
     @property
     def anthropic(self) -> Any:

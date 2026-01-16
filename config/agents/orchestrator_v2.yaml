@@ -1,0 +1,49 @@
+# Orchestrator v2 Configuration
+# Think-Dispatch-Synthesize pattern for multi-task parallel execution
+# Reference: specs/MAINAGENT.md Section 7
+
+# Main model for planning and synthesis (both use Opus for complex reasoning)
+model: claude-opus-4-5-20251101
+synthesis_model: claude-opus-4-5-20251101
+
+# Context gathering configuration
+context:
+  # Number of recent messages to include from current thread
+  message_window: 20
+
+  # Hours back to retrieve thread summaries (Note nodes)
+  summary_hours: 12
+
+  # Include pending tasks in context
+  include_pending_tasks: true
+
+  # Include recently created/updated entities
+  include_recent_entities: true
+
+  # Hours back to retrieve recent entities
+  recent_entity_hours: 24
+
+  # Include Knowledge Island summaries for broad context
+  include_islands: true
+
+# Execution control
+execution:
+  # Maximum rounds of iterative research deepening
+  max_research_depth: 2
+
+  # Timeout for parallel subagent execution (seconds)
+  parallel_timeout_seconds: 30
+
+  # Timeout for fire-and-forget tasks like ingestion (seconds)
+  fire_and_forget_timeout_seconds: 60
+
+# Proactive behavior settings
+proactive_behavior:
+  # Suggest creating calendar events when appropriate
+  suggest_calendar_events: true
+
+  # Offer to follow up on incomplete tasks
+  suggest_follow_ups: true
+
+  # Ask for clarification when information is ambiguous
+  ask_clarifications: true

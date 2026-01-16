@@ -178,6 +178,54 @@ class ExecutorConfig(AgentConfigBase):
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
 
 
+class ContextConfig(BaseModel):
+    """Context gathering configuration for Orchestrator v2."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message_window: int = Field(default=20, gt=0)
+    summary_hours: int = Field(default=12, gt=0)
+    include_pending_tasks: bool = True
+    include_recent_entities: bool = True
+    recent_entity_hours: int = Field(default=24, gt=0)
+    include_islands: bool = True
+
+
+class ExecutionConfig(BaseModel):
+    """Execution control configuration for Orchestrator v2."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_research_depth: int = Field(default=2, ge=1, le=5)
+    parallel_timeout_seconds: float = Field(default=30.0, gt=0.0)
+    fire_and_forget_timeout_seconds: float = Field(default=60.0, gt=0.0)
+
+
+class ProactiveBehaviorConfig(BaseModel):
+    """Proactive behavior settings for Orchestrator v2."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    suggest_calendar_events: bool = True
+    suggest_follow_ups: bool = True
+    ask_clarifications: bool = True
+
+
+class OrchestratorV2Config(BaseModel):
+    """Orchestrator v2 configuration - Think-Dispatch-Synthesize pattern."""
+
+    model_config = ConfigDict(extra="allow")
+
+    # Model configuration (plain strings instead of ModelConfig object)
+    model: str = "claude-opus-4-5-20251101"
+    synthesis_model: str = "claude-opus-4-5-20251101"
+
+    # Orchestrator v2 specific configs
+    context: ContextConfig = Field(default_factory=ContextConfig)
+    execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
+    proactive_behavior: ProactiveBehaviorConfig = Field(default_factory=ProactiveBehaviorConfig)
+
+
 # ===========================================================================
 # Configuration Manager
 # ===========================================================================
@@ -198,8 +246,9 @@ class ConfigManager:
         print(orchestrator_config.intent_classification.model)
     """
 
-    CONFIG_CLASSES: ClassVar[dict[str, type[AgentConfigBase]]] = {
+    CONFIG_CLASSES: ClassVar[dict[str, type[AgentConfigBase] | type[BaseModel]]] = {
         "orchestrator": OrchestratorConfig,
+        "orchestrator_v2": OrchestratorV2Config,
         "ingestor": IngestorConfig,
         "researcher": ResearcherConfig,
         "executor": ExecutorConfig,
@@ -217,7 +266,7 @@ class ConfigManager:
             # Default to project root config/agents
             config_dir = Path(__file__).parent.parent.parent.parent / "config" / "agents"
         self.config_dir = Path(config_dir)
-        self._configs: dict[str, AgentConfigBase] = {}
+        self._configs: dict[str, AgentConfigBase | BaseModel] = {}
         self._checksums: dict[str, str] = {}
         self._load_all()
 
@@ -274,7 +323,7 @@ class ConfigManager:
             extra={"agent_name": agent_name, "checksum": checksum[:8]},
         )
 
-    def get(self, agent_name: str) -> AgentConfigBase | None:
+    def get(self, agent_name: str) -> AgentConfigBase | BaseModel | None:
         """
         Get configuration for an agent.
 
@@ -372,14 +421,18 @@ class ConfigManager:
 __all__ = [
     "AgentConfigBase",
     "ConfigManager",
+    "ContextConfig",
     "DelegationConfig",
+    "ExecutionConfig",
     "ExecutorConfig",
     "ExtractionConfig",
     "IngestorConfig",
     "IntentConfig",
     "ModelConfig",
     "OrchestratorConfig",
+    "OrchestratorV2Config",
     "PersonalityConfig",
+    "ProactiveBehaviorConfig",
     "ResearcherConfig",
     "RetryConfig",
     "SearchConfig",
