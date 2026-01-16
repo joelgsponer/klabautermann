@@ -1,6 +1,6 @@
 # Progress
 
-Current sprint: **Sprint 3 - Thread Archival & Daily Journal**
+Current sprint: **Sprint 4 - Orchestrator v2 (Think-Dispatch-Synthesize)**
 
 ## Recent Activity
 
@@ -9,6 +9,54 @@ Current sprint: **Sprint 3 - Thread Archival & Daily Journal**
 - Tests cover individual query methods, parallel execution, partial failures, and edge cases
 - All 42 context-related tests passing (test_v2_context.py + test_context_queries.py + test_orchestrator_context_building.py)
 - Established testing patterns for mocking context building methods
+
+## Sprint 4 Status: IN PROGRESS
+
+**Goal:** Migrate orchestrator from single-intent classification to multi-task parallel execution (v2 architecture)
+
+### Completed Tasks
+
+| Task | Description | Status | Assignee |
+|------|-------------|--------|----------|
+| T060 | Migrate to v2 orchestrator | **completed** | carpenter |
+| T061 | Context building with memory layers | **completed** | navigator |
+| T062 | Task planning with Opus | **completed** | carpenter |
+| T063 | Parallel subagent dispatch | **completed** | carpenter |
+| T064 | Response synthesis | **completed** | carpenter |
+| T065 | Unit tests for v2 orchestrator | **completed** | inspector |
+| T066 | Integration tests for v2 flow | **completed** | inspector |
+| T067 | Update documentation for v2 | **in progress** | chronicler |
+
+### Key Changes (Sprint 4)
+
+1. **Think-Dispatch-Synthesize Pattern**: Replaced rigid intent classification with flexible multi-task planning. Orchestrator now identifies ALL tasks in a message (ingestion, research, actions) rather than forcing a single-intent classification.
+
+2. **Multi-Intent Support**: Messages like "Learned X. What about Y?" now correctly trigger both ingestion and research tasks in parallel.
+
+3. **Rich Context Injection**: Orchestrator builds context from four memory layers: current thread messages (Short-Term), recent thread summaries (Mid-Term), recent entities (Long-Term), and Knowledge Islands (Community).
+
+4. **Parallel Execution**: Independent tasks execute concurrently via asyncio.gather(), reducing response latency.
+
+5. **Proactive Behavior**: Orchestrator suggests follow-ups, confirmations, and related actions based on gathered context.
+
+6. **Model Upgrade to Opus**: Orchestrator now uses Claude Opus 4.5 for complex task planning and synthesis, while specialized agents remain on Haiku/Sonnet for cost efficiency.
+
+### Architecture Evolution
+
+**v1 (Sprint 2)**:
+```
+User Message → Classify Intent → Route to Single Agent → Response
+```
+
+**v2 (Sprint 4)**:
+```
+User Message → Build Rich Context → Plan All Tasks → Dispatch Parallel
+→ Wait for Results → Synthesize Coherent Response with Suggestions
+```
+
+See [MAINAGENT.md](specs/MAINAGENT.md) for detailed specification.
+
+---
 
 ## Sprint 3 Status: COMPLETE ✓
 

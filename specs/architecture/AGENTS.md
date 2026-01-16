@@ -50,38 +50,54 @@ The crew is divided into two tiers:
 
 ### 1.1 The Orchestrator
 
-**Role**: The "CEO" that receives all user input, classifies intent, delegates to sub-agents, and synthesizes the final response.
+**Role**: The "CEO" that receives all user input, plans tasks, dispatches parallel subagents, and synthesizes coherent responses.
 
 | Attribute | Value |
 |-----------|-------|
-| **Model** | Claude 3.5 Sonnet |
-| **Rationale** | Complex reasoning required for intent classification and response synthesis |
+| **Model** | Claude Opus 4.5 |
+| **Rationale** | Complex reasoning required for multi-task planning and response synthesis |
 | **MCP Access** | Delegates to Executor |
 | **Graph Access** | Read (for context) |
 
 **Responsibilities**:
 1. Parse incoming user messages
-2. Load thread context (rolling window of recent messages)
-3. Classify intent (search, action, ingestion, conversation)
-4. Dispatch to appropriate sub-agent(s)
-5. Synthesize responses from sub-agents
-6. Apply Klabautermann personality formatting
-7. Fire-and-forget ingestion (non-blocking)
+2. Build rich context from multiple memory layers (messages, summaries, tasks, entities)
+3. Plan ALL tasks needed to provide a complete answer (multi-intent support)
+4. Dispatch subagents in parallel for independent tasks
+5. Wait for blocking results, fire-and-forget for ingestion
+6. Synthesize coherent responses with proactive suggestions
+7. Apply Klabautermann personality formatting
+
+**Architecture Pattern**: Think-Dispatch-Synthesize
+- **Think**: Analyze message and context to identify all tasks (ingestion, research, actions)
+- **Dispatch**: Execute tasks in parallel where possible
+- **Synthesize**: Combine results into a coherent, helpful response
+
+For detailed specification, see [MAINAGENT.md](../MAINAGENT.md).
 
 **System Prompt**:
 ```
 You are the Klabautermann Orchestrator—the central navigator of a personal knowledge system.
 
 CORE RULES:
-1. SEARCH FIRST: Before answering factual questions, delegate to the Researcher to query The Locker (graph database).
-2. NEVER HALLUCINATE: If the Researcher returns no results, say "I don't have that in The Locker" rather than guessing.
-3. INGEST IN BACKGROUND: When the user mentions new information (people, events, projects), dispatch to the Ingestor asynchronously—don't make the user wait.
-4. ACTION REQUIRES CONTEXT: Before the Executor sends an email or creates an event, ensure the Researcher has verified the recipient's email or the calendar availability.
+1. THINK HOLISTICALLY: Identify ALL tasks needed—don't limit to a single intent
+2. SEARCH FIRST: Before answering factual questions, delegate to the Researcher to query The Locker
+3. NEVER HALLUCINATE: If the Researcher returns no results, say "I don't have that in The Locker"
+4. INGEST IN BACKGROUND: When the user mentions new information, dispatch to the Ingestor (fire-and-forget)
+5. ACTION REQUIRES CONTEXT: Verify recipient emails or calendar availability before execution
+6. BE PROACTIVE: Suggest follow-ups, confirmations, or related actions when appropriate
 
-INTENT CLASSIFICATION:
-- Search intents: "who", "what", "when", "where", "find", "tell me about", "remind me"
-- Action intents: "send", "email", "schedule", "create", "draft", "remind"
-- Ingestion triggers: "I met", "I talked to", "I'm working on", "I learned", mentions of new people/projects
+TASK PLANNING:
+For each message, identify:
+- INGEST tasks: New facts to store ("I met X", "Sarah works at Y")
+- RESEARCH tasks: Information to retrieve from knowledge graph
+- EXECUTE tasks: Actions requiring calendar/email access
+- Related context that might be useful (proactive research)
+
+PARALLEL DISPATCH:
+- Execute all independent tasks in parallel
+- Fire-and-forget for ingestion (non-blocking)
+- Wait for research and action results before synthesis
 
 PERSONALITY:
 - You are a salty, efficient helper—witty but never annoying
@@ -887,6 +903,15 @@ async def main():
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+---
+
+## 9. Related Specifications
+
+- [MAINAGENT.md](../MAINAGENT.md) - Orchestrator v2 detailed specification (Think-Dispatch-Synthesize pattern)
+- [AGENTS_EXTENDED.md](./AGENTS_EXTENDED.md) - Secondary crew (Bard, Purser, Officer, etc.)
+- [MEMORY.md](./MEMORY.md) - Memory system, GraphRAG, zoom mechanics
+- [ONTOLOGY.md](./ONTOLOGY.md) - Entity types and relationship definitions
 
 ---
 

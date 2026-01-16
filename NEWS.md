@@ -18,6 +18,10 @@ User-visible changes to Klabautermann.
 
 ### Improved
 
+- **Multi-Intent Message Handling**: Orchestrator now identifies and handles multiple intents in a single message (e.g., "Learned that Sarah works at Acme. What's her email?")
+- **Parallel Subagent Execution**: Independent tasks (search, ingestion, actions) execute concurrently for faster responses
+- **Richer Context Awareness**: Cross-thread summaries and Knowledge Island context inform responses, enabling more intelligent suggestions
+- **Proactive Suggestions**: System now offers follow-ups and confirmations based on conversation context (e.g., "Should I follow up with her to confirm?")
 - **Search Results**: Knowledge graph search results now displayed in natural language instead of raw data
 - **Intent Classification**: Better distinction between knowledge graph queries and external service actions
 
