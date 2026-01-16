@@ -42,6 +42,7 @@ from klabautermann.memory.context_queries import (
     get_recent_summaries,
     get_relevant_islands,
 )
+from klabautermann.skills.planner import SkillAwarePlanner
 
 
 if TYPE_CHECKING:
@@ -241,6 +242,17 @@ Example responses:
             graphiti=graphiti,
         )
         self._agent_registry["researcher"] = researcher
+
+        # Create and register Ingestor agent for entity extraction
+        ingestor = Ingestor(
+            name="ingestor",
+            config=config,
+            graphiti_client=graphiti,
+        )
+        self._agent_registry["ingestor"] = ingestor
+
+        # Initialize skill-aware planner for Claude Code skill integration
+        self._skill_planner = SkillAwarePlanner()
 
     @property
     def anthropic(self) -> Any:
@@ -1474,6 +1486,20 @@ Example responses:
             TaskPlan with reasoning, tasks, and optional direct_response
         """
         logger.info("[CHART] Planning tasks for user message", extra={"trace_id": trace_id})
+
+        # Check for skill matches before LLM planning
+        skill_match = self._skill_planner.match_and_plan(text, trace_id)
+        if skill_match:
+            skill, planned_task = skill_match
+            logger.info(
+                f"[BEACON] Skill matched, bypassing LLM planning: {skill.name}",
+                extra={"trace_id": trace_id, "skill": skill.name},
+            )
+            return TaskPlan(
+                reasoning=f"Matched skill: {skill.name}",
+                tasks=[planned_task],
+                direct_response=None,
+            )
 
         # Format context for the prompt
         formatted_context = self._format_context_for_planning(context)
