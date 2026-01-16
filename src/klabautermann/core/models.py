@@ -138,6 +138,7 @@ class TaskNode(BaseNode):
     action: str
     status: TaskStatus = TaskStatus.TODO
     priority: str | None = None
+    assignee: str | None = None
     due_date: float | None = None
     completed_at: float | None = None
 
@@ -563,20 +564,32 @@ class FactConflict(BaseModel):
 
 class ThreadSummary(BaseModel):
     """
-    Complete summarization output from Archivist.
+    Thread summary model with dual purposes:
 
-    Used when archiving conversation threads to extract structured
-    information that can be stored in the knowledge graph.
+    1. V2 Context Queries: Lightweight summaries from Note nodes for
+       EnrichedContext (uses: uuid, title, summary, topics, channel, participants, created_at)
 
-    Reference: specs/architecture/AGENTS.md Section 1.5
+    2. Archivist Output: Full summarization with extracted facts, conflicts,
+       and action items (uses all fields)
+
+    Reference: specs/MAINAGENT.md Section 4.2, specs/architecture/AGENTS.md Section 1.5
     """
 
+    # Core fields (used in both contexts)
     summary: str  # 2-3 sentence overview
     topics: list[str] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+
+    # V2 Context fields (from Note nodes via Cypher query)
+    uuid: str | None = None
+    title: str | None = None
+    channel: str | None = None
+    created_at: float | None = None
+
+    # Archivist-specific fields (full summarization output)
     action_items: list[ActionItem] = Field(default_factory=list)
     new_facts: list[ExtractedFact] = Field(default_factory=list)
     conflicts: list[FactConflict] = Field(default_factory=list)
-    participants: list[str] = Field(default_factory=list)
     sentiment: str = "neutral"  # positive, negative, neutral, mixed
 
 
