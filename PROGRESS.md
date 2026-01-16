@@ -2,6 +2,14 @@
 
 Current sprint: **Sprint 3 - Thread Archival & Daily Journal**
 
+## Recent Activity
+
+**2026-01-16**: Completed T079 - Unit Tests for Context Building
+- Created `tests/unit/test_v2_context.py` with 16 comprehensive tests
+- Tests cover individual query methods, parallel execution, partial failures, and edge cases
+- All 42 context-related tests passing (test_v2_context.py + test_context_queries.py + test_orchestrator_context_building.py)
+- Established testing patterns for mocking context building methods
+
 ## Sprint 3 Status: COMPLETE ✓
 
 **Goal:** Implement Archivist (thread summarization/pruning) and Scribe (daily journal) agents

@@ -24,20 +24,36 @@ if TYPE_CHECKING:
     from rich.status import Status
 
 
-# Nautical color theme
+# Nautical color theme (deeper palette matching Go TUI)
 NAUTICAL_THEME = Theme(
     {
-        "info": "cyan",
-        "success": "green",
-        "warning": "yellow",
-        "error": "red bold",
-        "dim": "dim white",
-        "prompt": "bold cyan",
-        "banner.title": "bold cyan",
-        "banner.subtitle": "dim white",
-        "banner.border": "cyan",
+        "info": "#3498db",  # WaveBlue
+        "success": "#1abc9c",  # Seafoam
+        "warning": "#f39c12",  # Amber
+        "error": "#e74c3c bold",  # Coral
+        "dim": "#95a5a6",  # Fog
+        "prompt": "bold #3498db",
+        "banner.title": "bold #3498db",
+        "banner.subtitle": "#95a5a6",
+        "banner.border": "#3498db",
+        "entity.title": "bold cyan",
+        "entity.name": "#f5f5dc",  # Sand
+        "entity.label": "#95a5a6",  # Fog
     }
 )
+
+# Entity type icons
+ENTITY_ICONS: dict[str, str] = {
+    "Person": "👤",
+    "Organization": "🏢",
+    "Project": "📋",
+    "Task": "✓",
+    "Event": "📅",
+    "Goal": "🎯",
+    "Note": "📝",
+    "Location": "📍",
+    "Document": "📄",
+}
 
 
 class CLIRenderer:
@@ -138,6 +154,35 @@ class CLIRenderer:
         """
         self.console.print(f"[info]{message}[/]")
 
+    def render_entities(self, entities: list[dict]) -> None:
+        """
+        Render entity panel showing recently mentioned entities.
+
+        Displays up to 5 entities with their type icons in a styled panel.
+        Matches the entity display pattern from the Go TUI.
+
+        Args:
+            entities: List of entity dicts with 'name' and 'labels' keys.
+        """
+        if not entities:
+            return
+
+        items: list[str] = []
+        for entity in entities[:5]:
+            labels = entity.get("labels", ["Entity"])
+            # Skip Episodic nodes, use first non-Episodic label
+            label = next((lbl for lbl in labels if lbl != "Episodic"), "Entity")
+            icon = ENTITY_ICONS.get(label, "•")
+            name = entity.get("name", "Unknown")
+            items.append(f" {icon} [entity.name]{name}[/] [entity.label]({label})[/]")
+
+        panel = Panel(
+            "\n".join(items),
+            title="[entity.title]Recent Entities[/]",
+            border_style="cyan",
+        )
+        self.console.print(panel)
+
     def render_farewell(self) -> None:
         """Display farewell message."""
         self.console.print()
@@ -185,4 +230,4 @@ class CLIRenderer:
 # Export
 # ===========================================================================
 
-__all__ = ["NAUTICAL_THEME", "CLIRenderer"]
+__all__ = ["ENTITY_ICONS", "NAUTICAL_THEME", "CLIRenderer"]

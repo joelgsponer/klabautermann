@@ -98,14 +98,14 @@ class TestHandleUserInputV2:
         # Mock all the workflow steps
         with (
             patch.object(
-                orchestrator, "_build_context", return_value=mock_context
+                orchestrator, "_build_context_safe", return_value=mock_context
             ) as mock_build_context,
             patch.object(
                 orchestrator, "_plan_tasks", return_value=mock_task_plan_with_tasks
             ) as mock_plan_tasks,
             patch.object(
                 orchestrator,
-                "_execute_parallel",
+                "_execute_parallel_safe",
                 return_value={
                     "Search for Sarah in knowledge graph": {
                         "agent": "researcher",
@@ -155,11 +155,11 @@ class TestHandleUserInputV2:
     ) -> None:
         """Direct response handling when no tasks needed."""
         with (
-            patch.object(orchestrator, "_build_context", return_value=mock_context),
+            patch.object(orchestrator, "_build_context_safe", return_value=mock_context),
             patch.object(orchestrator, "_plan_tasks", return_value=mock_task_plan_direct_response),
             patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
             patch.object(orchestrator, "_store_response", return_value=None) as mock_store,
-            patch.object(orchestrator, "_execute_parallel") as mock_execute,
+            patch.object(orchestrator, "_execute_parallel_safe") as mock_execute,
         ):
             response = await orchestrator.handle_user_input_v2(
                 text="Hello!",
@@ -214,13 +214,13 @@ class TestHandleUserInputV2:
         }
 
         with (
-            patch.object(orchestrator, "_build_context", return_value=mock_context),
+            patch.object(orchestrator, "_build_context_safe", return_value=mock_context),
             patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
             patch.object(
-                orchestrator, "_execute_parallel", side_effect=[initial_results, deeper_results]
+                orchestrator, "_execute_parallel_safe", return_value=initial_results
             ) as mock_execute,
             patch.object(orchestrator, "_needs_deeper_research", side_effect=[True, False]),
-            patch.object(orchestrator, "_extract_mentions_from_results", return_value=["Acme"]),
+            patch.object(orchestrator, "_deepen_research", return_value=deeper_results),
             patch.object(
                 orchestrator, "_synthesize_response", return_value="Found info about Acme"
             ),
@@ -233,8 +233,8 @@ class TestHandleUserInputV2:
                 trace_id="trace-456",
             )
 
-            # Execute should be called twice (initial + deepening)
-            assert mock_execute.call_count == 2
+            # Execute_parallel_safe should be called once, _deepen_research handles deepening
+            assert mock_execute.call_count == 1
 
             assert "Found info about Acme" in response
 
@@ -245,7 +245,7 @@ class TestHandleUserInputV2:
     ) -> None:
         """Error handling prevents workflow crash."""
         with patch.object(
-            orchestrator, "_build_context", side_effect=Exception("Database connection failed")
+            orchestrator, "_build_context_safe", side_effect=Exception("Database connection failed")
         ):
             response = await orchestrator.handle_user_input_v2(
                 text="Test message",
@@ -269,7 +269,7 @@ class TestHandleUserInputV2:
         orchestrator.thread_manager = mock_thread_manager
 
         with (
-            patch.object(orchestrator, "_build_context", return_value=mock_context),
+            patch.object(orchestrator, "_build_context_safe", return_value=mock_context),
             patch.object(orchestrator, "_plan_tasks", return_value=mock_task_plan_direct_response),
             patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
         ):
@@ -296,7 +296,7 @@ class TestHandleUserInputV2:
     ) -> None:
         """Personality is applied to final response."""
         with (
-            patch.object(orchestrator, "_build_context", return_value=mock_context),
+            patch.object(orchestrator, "_build_context_safe", return_value=mock_context),
             patch.object(orchestrator, "_plan_tasks", return_value=mock_task_plan_direct_response),
             patch.object(
                 orchestrator,
@@ -325,7 +325,7 @@ class TestHandleUserInputV2:
         """Trace ID is generated if not provided."""
         with (
             patch.object(
-                orchestrator, "_build_context", return_value=mock_context
+                orchestrator, "_build_context_safe", return_value=mock_context
             ) as mock_build_context,
             patch.object(
                 orchestrator, "_plan_tasks", return_value=mock_task_plan_direct_response

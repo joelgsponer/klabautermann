@@ -1506,9 +1506,17 @@ Analyze this message and return a JSON task plan.
         Returns:
             Dictionary mapping task descriptions to results
         """
+        blocking_count = sum(1 for t in task_plan.tasks if t.blocking)
+        non_blocking_count = len(task_plan.tasks) - blocking_count
+
         logger.info(
             f"[CHART] Executing {len(task_plan.tasks)} tasks in parallel",
-            extra={"trace_id": trace_id},
+            extra={
+                "trace_id": trace_id,
+                "total_tasks": len(task_plan.tasks),
+                "blocking_tasks": blocking_count,
+                "non_blocking_tasks": non_blocking_count,
+            },
         )
 
         results: dict[str, Any] = {}
@@ -1525,19 +1533,24 @@ Analyze this message and return a JSON task plan.
                 coro = self._dispatch_task(task, trace_id)
                 blocking_coros.append(coro)
                 blocking_tasks.append(task)
+                logger.debug(
+                    f"[WHISPER] Queued blocking task: {task.task_type} -> {task.agent}",
+                    extra={"trace_id": trace_id, "description": task.description[:50]},
+                )
             else:
                 # Fire-and-forget for non-blocking tasks (ingestion)
                 bg_task = asyncio.create_task(self._dispatch_task_fire_and_forget(task, trace_id))
                 # Track to prevent garbage collection
                 self._background_tasks.add(bg_task)
                 bg_task.add_done_callback(self._background_tasks.discard)
-                logger.debug(
-                    f"[WHISPER] Fire-and-forget task started: {task.description}",
-                    extra={"trace_id": trace_id},
+                logger.info(
+                    f"[WHISPER] Fire-and-forget task started: {task.task_type} -> {task.agent}",
+                    extra={"trace_id": trace_id, "description": task.description[:50]},
                 )
 
         # Wait for all blocking tasks in parallel with timeout
         if blocking_coros:
+            exec_start = time.time()
             try:
                 task_results = await asyncio.wait_for(
                     asyncio.gather(*blocking_coros, return_exceptions=True),
@@ -1548,27 +1561,51 @@ Analyze this message and return a JSON task plan.
                 for task, result in zip(blocking_tasks, task_results, strict=False):
                     if isinstance(result, Exception):
                         logger.warning(
-                            f"[SWELL] Task failed: {task.description}: {result}",
-                            extra={"trace_id": trace_id},
+                            f"[SWELL] Task failed: {task.description}",
+                            extra={
+                                "trace_id": trace_id,
+                                "task_type": task.task_type,
+                                "agent": task.agent,
+                                "error": str(result),
+                            },
                         )
                         results[task.description] = {"error": str(result)}
                     else:
+                        logger.info(
+                            f"[WHISPER] Task succeeded: {task.task_type}",
+                            extra={
+                                "trace_id": trace_id,
+                                "agent": task.agent,
+                                "description": task.description[:50],
+                            },
+                        )
                         results[task.description] = result
 
             except TimeoutError:
-                logger.warning(
+                logger.error(
                     f"[STORM] Parallel execution timed out after {timeout_seconds}s",
-                    extra={"trace_id": trace_id},
+                    extra={
+                        "trace_id": trace_id,
+                        "timeout_seconds": timeout_seconds,
+                        "blocking_task_count": len(blocking_tasks),
+                    },
                 )
                 # Mark all remaining tasks as timed out
                 for task in blocking_tasks:
                     if task.description not in results:
                         results[task.description] = {"error": "Execution timed out"}
 
-        logger.info(
-            f"[BEACON] Execution complete: {len(results)} results",
-            extra={"trace_id": trace_id, "result_count": len(results)},
-        )
+            elapsed_ms = (time.time() - exec_start) * 1000
+            logger.info(
+                "[BEACON] Blocking tasks complete",
+                extra={
+                    "trace_id": trace_id,
+                    "duration_ms": round(elapsed_ms, 2),
+                    "result_count": len(results),
+                    "success_count": sum(1 for r in results.values() if "error" not in r),
+                    "error_count": sum(1 for r in results.values() if "error" in r),
+                },
+            )
 
         return results
 
@@ -1798,27 +1835,90 @@ Analyze this message and return a JSON task plan.
         if trace_id is None:
             trace_id = str(uuid.uuid4())
 
+        start_time = time.time()
         logger.info(
-            "[CHART] Starting v2 workflow", extra={"trace_id": trace_id, "thread_uuid": thread_uuid}
+            "[CHART] Starting v2 workflow",
+            extra={
+                "trace_id": trace_id,
+                "thread_uuid": thread_uuid,
+                "text_preview": text[:50],
+            },
         )
 
         try:
             # 1. Build rich context
-            context = await self._build_context(thread_uuid, trace_id)
+            ctx_start = time.time()
+            context = await self._build_context_safe(thread_uuid, trace_id)
+            logger.info(
+                "[BEACON] Context built",
+                extra={
+                    "trace_id": trace_id,
+                    "duration_ms": round((time.time() - ctx_start) * 1000, 2),
+                    "message_count": len(context.messages),
+                    "summary_count": len(context.recent_summaries),
+                    "task_count": len(context.pending_tasks),
+                    "entity_count": len(context.recent_entities),
+                },
+            )
 
-            # 2. Think: Plan tasks
-            task_plan = await self._plan_tasks(text, context, trace_id)
+            # 2. Think: Plan tasks (fallback to direct response on failure)
+            plan_start = time.time()
+            try:
+                config = self._load_v2_config()
+                planning_timeout = config.get("execution", {}).get("planning_timeout_seconds", 30.0)
+                task_plan = await asyncio.wait_for(
+                    self._plan_tasks(text, context, trace_id),
+                    timeout=planning_timeout,
+                )
+                logger.info(
+                    "[BEACON] Task plan created",
+                    extra={
+                        "trace_id": trace_id,
+                        "duration_ms": round((time.time() - plan_start) * 1000, 2),
+                        "task_count": len(task_plan.tasks),
+                        "reasoning_preview": task_plan.reasoning[:100],
+                        "has_direct_response": bool(task_plan.direct_response),
+                    },
+                )
+            except (TimeoutError, Exception) as e:
+                logger.warning(
+                    f"[SWELL] Task planning failed: {e}",
+                    extra={
+                        "trace_id": trace_id,
+                        "duration_ms": round((time.time() - plan_start) * 1000, 2),
+                    },
+                )
+                return await self._fallback_direct_response(text, context, trace_id)
 
             # 3. Handle direct response (no tasks needed)
             if task_plan.direct_response and not task_plan.tasks:
-                logger.info("[BEACON] Direct response (no tasks)", extra={"trace_id": trace_id})
+                logger.info(
+                    "[BEACON] Direct response (no tasks)",
+                    extra={"trace_id": trace_id, "response_length": len(task_plan.direct_response)},
+                )
                 response = task_plan.direct_response
                 response = await self._apply_personality(response, trace_id)
                 await self._store_response(thread_uuid, response, trace_id)
+                logger.info(
+                    "[CHART] V2 workflow complete (direct response)",
+                    extra={
+                        "trace_id": trace_id,
+                        "total_duration_ms": round((time.time() - start_time) * 1000, 2),
+                    },
+                )
                 return response
 
-            # 4. Dispatch: Execute tasks in parallel
-            results = await self._execute_parallel(task_plan, trace_id)
+            # 4. Dispatch: Execute tasks in parallel (individual failures captured)
+            exec_start = time.time()
+            results = await self._execute_parallel_safe(task_plan, trace_id)
+            logger.info(
+                "[BEACON] Parallel execution complete",
+                extra={
+                    "trace_id": trace_id,
+                    "duration_ms": round((time.time() - exec_start) * 1000, 2),
+                    "result_count": len(results),
+                },
+            )
 
             # 5. Optional: Iterative deepening
             config = self._load_v2_config()
@@ -1826,24 +1926,70 @@ Analyze this message and return a JSON task plan.
             current_depth = 1
 
             while self._needs_deeper_research(results, task_plan) and current_depth < max_depth:
+                deep_start = time.time()
                 logger.info(
                     f"[CHART] Deepening research (depth {current_depth + 1})",
-                    extra={"trace_id": trace_id},
+                    extra={"trace_id": trace_id, "current_depth": current_depth},
                 )
-                deeper_results = await self._deepen_research(results, context, trace_id)
-                results = self._merge_results(results, deeper_results)
-                current_depth += 1
+                try:
+                    deeper_results = await self._deepen_research(results, context, trace_id)
+                    results = self._merge_results(results, deeper_results)
+                    logger.info(
+                        "[WHISPER] Deepening complete",
+                        extra={
+                            "trace_id": trace_id,
+                            "duration_ms": round((time.time() - deep_start) * 1000, 2),
+                            "new_result_count": len(deeper_results),
+                        },
+                    )
+                    current_depth += 1
+                except Exception as e:
+                    logger.warning(
+                        f"[SWELL] Deepening research failed: {e}",
+                        extra={"trace_id": trace_id},
+                    )
+                    break  # Stop deepening on failure, use what we have
 
-            # 6. Synthesize: Combine results into response
-            response = await self._synthesize_response(text, context, results, trace_id)
+            # 6. Synthesize: Combine results into response (fallback to results summary on failure)
+            synth_start = time.time()
+            try:
+                synthesis_timeout = config.get("execution", {}).get(
+                    "synthesis_timeout_seconds", 30.0
+                )
+                response = await asyncio.wait_for(
+                    self._synthesize_response(text, context, results, trace_id),
+                    timeout=synthesis_timeout,
+                )
+                logger.info(
+                    "[BEACON] Synthesis complete",
+                    extra={
+                        "trace_id": trace_id,
+                        "duration_ms": round((time.time() - synth_start) * 1000, 2),
+                        "response_length": len(response),
+                        "input_result_count": len(results),
+                    },
+                )
+            except (TimeoutError, Exception) as e:
+                logger.warning(
+                    f"[SWELL] Synthesis failed: {e}",
+                    extra={
+                        "trace_id": trace_id,
+                        "duration_ms": round((time.time() - synth_start) * 1000, 2),
+                    },
+                )
+                response = self._fallback_results_summary(results)
 
             # 7. Apply personality and store
             response = await self._apply_personality(response, trace_id)
             await self._store_response(thread_uuid, response, trace_id)
 
             logger.info(
-                "[BEACON] V2 workflow complete",
-                extra={"trace_id": trace_id, "response_length": len(response)},
+                "[CHART] V2 workflow complete",
+                extra={
+                    "trace_id": trace_id,
+                    "total_duration_ms": round((time.time() - start_time) * 1000, 2),
+                    "response_length": len(response),
+                },
             )
 
             return response
@@ -1851,11 +1997,306 @@ Analyze this message and return a JSON task plan.
         except Exception as e:
             logger.error(
                 f"[STORM] V2 workflow failed: {e}",
-                extra={"trace_id": trace_id},
+                extra={
+                    "trace_id": trace_id,
+                    "elapsed_ms": round((time.time() - start_time) * 1000, 2),
+                },
                 exc_info=True,
             )
             # Fallback to error response
-            return "I apologize, but I had trouble processing your request. Could you try again?"
+            return "I'm having trouble processing that right now. Please try again."
+
+    # =========================================================================
+    # Orchestrator v2 Error Handling Helpers (T068)
+    # =========================================================================
+
+    async def _build_context_safe(
+        self,
+        thread_uuid: str,
+        trace_id: str,
+    ) -> EnrichedContext:
+        """
+        Build context with partial failure tolerance.
+
+        If individual context queries fail (recent summaries, pending tasks, etc.),
+        use empty defaults rather than failing the entire workflow.
+
+        This allows the system to continue with partial context when some
+        memory layers are unavailable.
+
+        Args:
+            thread_uuid: UUID of the current thread
+            trace_id: For logging and tracing
+
+        Returns:
+            EnrichedContext with successfully loaded data (uses empty defaults for failures)
+        """
+        logger.debug(
+            "[WHISPER] Building context with failure tolerance",
+            extra={"trace_id": trace_id, "thread_uuid": thread_uuid},
+        )
+
+        # Load config for context parameters
+        config = self._load_v2_config()
+        context_config = config.get("context", {})
+
+        # Parallel context gathering with return_exceptions=True
+        # This allows individual queries to fail without stopping others
+        results = await asyncio.gather(
+            self.thread_manager.get_context_window(
+                thread_uuid, limit=context_config.get("message_window", 20)
+            )
+            if self.thread_manager
+            else self._build_empty_context_window(thread_uuid),
+            get_recent_summaries(
+                self.neo4j_client,
+                hours=context_config.get("summary_hours", 12),
+                trace_id=trace_id,
+            )
+            if self.neo4j_client and context_config.get("include_summaries", True)
+            else self._return_empty_list(),
+            get_pending_tasks(
+                self.neo4j_client,
+                trace_id=trace_id,
+            )
+            if self.neo4j_client and context_config.get("include_pending_tasks", True)
+            else self._return_empty_list(),
+            get_recent_entities(
+                self.neo4j_client,
+                hours=context_config.get("recent_entity_hours", 24),
+                trace_id=trace_id,
+            )
+            if self.neo4j_client and context_config.get("include_recent_entities", True)
+            else self._return_empty_list(),
+            get_relevant_islands(
+                self.neo4j_client,
+                trace_id=trace_id,
+            )
+            if self.neo4j_client and context_config.get("include_islands", True)
+            else self._return_empty_list(),
+            return_exceptions=True,  # Don't fail if one query fails
+        )
+
+        # Unpack results, handling exceptions gracefully
+        messages_ctx, summaries, tasks, entities, islands = results
+
+        # Handle exceptions - log and use empty defaults
+        if isinstance(messages_ctx, Exception):
+            logger.warning(
+                f"[SWELL] Failed to get messages: {messages_ctx}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            messages = []
+            channel_type = ChannelType.CLI
+        else:
+            messages = messages_ctx.messages if hasattr(messages_ctx, "messages") else []
+            channel_type = (
+                messages_ctx.channel_type
+                if hasattr(messages_ctx, "channel_type")
+                else ChannelType.CLI
+            )
+
+        if isinstance(summaries, Exception):
+            logger.warning(
+                f"[SWELL] Failed to get summaries: {summaries}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            summaries = []
+
+        if isinstance(tasks, Exception):
+            logger.warning(
+                f"[SWELL] Failed to get tasks: {tasks}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            tasks = []
+
+        if isinstance(entities, Exception):
+            logger.warning(
+                f"[SWELL] Failed to get entities: {entities}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            entities = []
+
+        if isinstance(islands, Exception):
+            logger.warning(
+                f"[SWELL] Failed to get islands: {islands}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            islands = []
+
+        context = EnrichedContext(
+            thread_uuid=thread_uuid,
+            channel_type=channel_type,
+            messages=messages,
+            recent_summaries=summaries,
+            pending_tasks=tasks,
+            recent_entities=entities,
+            relevant_islands=islands if islands else None,
+        )
+
+        logger.debug(
+            f"[WHISPER] Safe context built: {len(messages)} msgs, {len(summaries)} summaries, "
+            f"{len(tasks)} tasks, {len(entities)} entities",
+            extra={"trace_id": trace_id},
+        )
+
+        return context
+
+    async def _fallback_direct_response(
+        self,
+        text: str,
+        context: EnrichedContext,
+        trace_id: str,
+    ) -> str:
+        """
+        Fallback when task planning fails - simple LLM call without decomposition.
+
+        This is a degraded mode that bypasses the Think-Dispatch-Synthesize pattern
+        and just calls Claude directly with the context.
+
+        Args:
+            text: User's message
+            context: Enriched context (may be partial)
+            trace_id: For logging
+
+        Returns:
+            Direct response from Claude
+        """
+        logger.info(
+            "[CHART] Using fallback direct response",
+            extra={"trace_id": trace_id},
+        )
+
+        try:
+            # Build simple messages list from context
+            messages = []
+
+            # Add recent messages for continuity
+            if context.messages:
+                for msg in context.messages[-5:]:  # Last 5 messages
+                    messages.append(
+                        {
+                            "role": msg.get("role", "user"),
+                            "content": msg.get("content", ""),
+                        }
+                    )
+
+            # Add current user message
+            messages.append({"role": "user", "content": text})
+
+            # Call Claude directly
+            response = await asyncio.wait_for(
+                self._call_claude(messages, trace_id),
+                timeout=30.0,
+            )
+
+            logger.info(
+                "[BEACON] Fallback response generated",
+                extra={"trace_id": trace_id, "response_length": len(response)},
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Fallback response failed: {e}",
+                extra={"trace_id": trace_id},
+                exc_info=True,
+            )
+            return "I'm having trouble processing that right now. Please try again."
+
+    def _fallback_results_summary(
+        self,
+        results: dict[str, Any],
+    ) -> str:
+        """
+        Fallback when synthesis fails - format raw results as user-friendly text.
+
+        This is a simple formatter that doesn't require LLM calls.
+
+        Args:
+            results: Dictionary mapping task descriptions to results
+
+        Returns:
+            User-friendly summary of results
+        """
+        if not results:
+            return "I processed your request but couldn't find any relevant information."
+
+        # Separate successful results from errors
+        successful = []
+        failed = []
+
+        for task_desc, result in results.items():
+            if isinstance(result, dict) and "error" in result:
+                failed.append(f"- {task_desc}: {result['error']}")
+            elif isinstance(result, dict):
+                response = result.get("response", result)
+                if response and str(response).strip():
+                    successful.append(f"- {task_desc}: {str(response)[:200]}")
+
+        # Build response
+        parts = []
+
+        if successful:
+            parts.append("Here's what I found:")
+            parts.extend(successful[:3])  # Limit to 3 results
+
+        if failed:
+            parts.append("\nSome tasks encountered issues:")
+            parts.extend(failed[:2])  # Limit to 2 errors
+
+        if not successful and not failed:
+            return "I processed your request but couldn't find any relevant information."
+
+        return "\n".join(parts)
+
+    async def _execute_parallel_safe(
+        self,
+        task_plan: TaskPlan,
+        trace_id: str,
+    ) -> dict[str, Any]:
+        """
+        Execute all planned tasks in parallel with individual failure capture.
+
+        This wraps _execute_parallel to ensure that:
+        - Individual task failures don't stop other tasks
+        - All failures are captured and logged with trace_id
+        - The workflow can continue with partial results
+
+        Args:
+            task_plan: TaskPlan from _plan_tasks()
+            trace_id: For logging
+
+        Returns:
+            Dictionary mapping task descriptions to results (includes errors)
+        """
+        try:
+            # Use the existing _execute_parallel which already has return_exceptions=True
+            results = await self._execute_parallel(task_plan, trace_id)
+
+            # Count successes and failures
+            success_count = sum(
+                1 for r in results.values() if isinstance(r, dict) and "error" not in r
+            )
+            failure_count = len(results) - success_count
+
+            if failure_count > 0:
+                logger.warning(
+                    f"[SWELL] Parallel execution had {failure_count} failures out of {len(results)} tasks",
+                    extra={"trace_id": trace_id},
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Parallel execution failed entirely: {e}",
+                extra={"trace_id": trace_id},
+                exc_info=True,
+            )
+            # Return empty results rather than crashing
+            return {}
 
     def _needs_deeper_research(
         self,

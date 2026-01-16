@@ -221,11 +221,11 @@ async def test_v2_workflow_multi_intent_message(orchestrator, enriched_context):
 
     with (
         patch.object(
-            orchestrator, "_build_context", return_value=enriched_context
+            orchestrator, "_build_context_safe", return_value=enriched_context
         ) as mock_build_context,
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan) as mock_plan_tasks,
         patch.object(
-            orchestrator, "_execute_parallel", return_value=execution_results
+            orchestrator, "_execute_parallel_safe", return_value=execution_results
         ) as mock_execute,
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
         patch.object(
@@ -299,7 +299,7 @@ async def test_v2_workflow_parallel_execution_timing(orchestrator, enriched_cont
         return {"agent": task.agent, "response": "result", "task_type": task.task_type}
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
         patch.object(orchestrator, "_dispatch_task", side_effect=mock_dispatch),
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
@@ -349,9 +349,9 @@ async def test_v2_workflow_simple_greeting(orchestrator, enriched_context):
     )
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
-        patch.object(orchestrator, "_execute_parallel") as mock_execute,
+        patch.object(orchestrator, "_execute_parallel_safe") as mock_execute,
         patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
         patch.object(orchestrator, "_store_response", return_value=None),
     ):
@@ -421,9 +421,9 @@ async def test_v2_workflow_partial_failure(orchestrator, enriched_context):
     }
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
-        patch.object(orchestrator, "_execute_parallel", return_value=execution_results),
+        patch.object(orchestrator, "_execute_parallel_safe", return_value=execution_results),
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
         patch.object(
             orchestrator,
@@ -488,9 +488,9 @@ async def test_v2_workflow_single_intent_message(orchestrator, enriched_context)
     }
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
-        patch.object(orchestrator, "_execute_parallel", return_value=execution_results),
+        patch.object(orchestrator, "_execute_parallel_safe", return_value=execution_results),
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
         patch.object(
             orchestrator, "_synthesize_response", return_value="Sarah is a PM at Acme Corp"
@@ -609,7 +609,7 @@ async def test_v2_workflow_handles_context_build_error(orchestrator):
     or return a user-friendly error.
     """
     with patch.object(
-        orchestrator, "_build_context", side_effect=Exception("Database connection failed")
+        orchestrator, "_build_context_safe", side_effect=Exception("Database connection failed")
     ):
         response = await orchestrator.handle_user_input_v2(
             text="Test error handling",
@@ -628,7 +628,7 @@ async def test_v2_workflow_handles_planning_error(orchestrator, enriched_context
     Verify workflow handles task planning errors gracefully.
     """
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", side_effect=Exception("LLM API failed")),
     ):
         response = await orchestrator.handle_user_input_v2(
@@ -669,9 +669,9 @@ async def test_v2_workflow_handles_synthesis_error(orchestrator, enriched_contex
     }
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
-        patch.object(orchestrator, "_execute_parallel", return_value=execution_results),
+        patch.object(orchestrator, "_execute_parallel_safe", return_value=execution_results),
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
         patch.object(orchestrator, "_synthesize_response", side_effect=Exception("LLM failed")),
     ):
@@ -684,8 +684,9 @@ async def test_v2_workflow_handles_synthesis_error(orchestrator, enriched_contex
 
         # Fallback should still provide a response
         assert response is not None
-        # _build_fallback_response is called internally when synthesis fails
-        assert "trouble" in response.lower() or "error" in response.lower()
+        # _fallback_results_summary is called when synthesis fails
+        # Should format results as simple summary
+        assert "found" in response.lower() or "result" in response.lower()
 
 
 # =============================================================================
@@ -723,9 +724,9 @@ async def test_v2_workflow_deterministic_with_same_mocks(orchestrator, enriched_
     }
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
-        patch.object(orchestrator, "_execute_parallel", return_value=execution_results),
+        patch.object(orchestrator, "_execute_parallel_safe", return_value=execution_results),
         patch.object(orchestrator, "_needs_deeper_research", return_value=False),
         patch.object(orchestrator, "_synthesize_response", return_value="Deterministic response"),
         patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
@@ -776,7 +777,7 @@ async def test_no_real_database_calls(orchestrator, enriched_context):
         raise RuntimeError("Attempted real network call during test!")
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
         patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
         patch.object(orchestrator, "_store_response", return_value=None),
@@ -810,7 +811,7 @@ async def test_all_smoke_tests_run_under_10_seconds(orchestrator, enriched_conte
     task_plan = TaskPlan(reasoning="Speed test", tasks=[], direct_response="Fast")
 
     with (
-        patch.object(orchestrator, "_build_context", return_value=enriched_context),
+        patch.object(orchestrator, "_build_context_safe", return_value=enriched_context),
         patch.object(orchestrator, "_plan_tasks", return_value=task_plan),
         patch.object(orchestrator, "_apply_personality", side_effect=lambda x, _: x),
         patch.object(orchestrator, "_store_response", return_value=None),
@@ -919,8 +920,8 @@ class TestMainAgentScenarios:
         """
         orchestrator, context = orchestrator_with_context
 
-        # Mock _build_context to return our test context
-        orchestrator._build_context = AsyncMock(return_value=context)
+        # Mock _build_context_safe to return our test context
+        orchestrator._build_context_safe = AsyncMock(return_value=context)
 
         # Mock _plan_tasks to return multi-intent task plan
         task_plan = TaskPlan(
@@ -974,7 +975,7 @@ class TestMainAgentScenarios:
                 "response": "Sarah loves italian food.",
             },
         }
-        orchestrator._execute_parallel = AsyncMock(return_value=task_results)
+        orchestrator._execute_parallel_safe = AsyncMock(return_value=task_results)
 
         # Mock _synthesize_response
         synthesis_response = (
@@ -1027,7 +1028,7 @@ class TestMainAgentScenarios:
         orchestrator, context = orchestrator_with_context
 
         # Mock _build_context
-        orchestrator._build_context = AsyncMock(return_value=context)
+        orchestrator._build_context_safe = AsyncMock(return_value=context)
 
         # Mock _plan_tasks for follow-up email
         task_plan = TaskPlan(
@@ -1067,7 +1068,7 @@ class TestMainAgentScenarios:
                 "response": "Draft created: 'Dear Sarah, Looking forward to our lunch...'",
             },
         }
-        orchestrator._execute_parallel = AsyncMock(return_value=task_results)
+        orchestrator._execute_parallel_safe = AsyncMock(return_value=task_results)
 
         # Mock _synthesize_response
         synthesis_response = (
@@ -1106,7 +1107,7 @@ class TestMainAgentScenarios:
         orchestrator, context = orchestrator_with_context
 
         # Mock _build_context
-        orchestrator._build_context = AsyncMock(return_value=context)
+        orchestrator._build_context_safe = AsyncMock(return_value=context)
 
         # Mock _plan_tasks - simple acknowledgment but with proactive behavior
         task_plan = TaskPlan(
@@ -1149,7 +1150,7 @@ class TestMainAgentScenarios:
         """
         orchestrator, context = orchestrator_with_context
 
-        orchestrator._build_context = AsyncMock(return_value=context)
+        orchestrator._build_context_safe = AsyncMock(return_value=context)
 
         # Capture the task plan that would be generated
         task_plan = TaskPlan(

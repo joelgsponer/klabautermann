@@ -1,1 +1,1 @@
-"""Smoke tests for application startup and basic functionality."""
+"""Smoke tests for Klabautermann TUI and API."""

@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Response Synthesis with Opus**: Orchestrator now uses Claude Opus to synthesize coherent responses from multiple subagent results, with proactive suggestions based on configuration
 - **Gmail & Calendar Integration**: Check emails and calendar events via natural language ("any unread emails?", "what's on my calendar today?")
 - **Google OAuth Helper**: `scripts/get_google_token.py` for easy OAuth credential setup
 - **Daily Journal Generation**: Klabautermann generates daily reflections with personality (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING)

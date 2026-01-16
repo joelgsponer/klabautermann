@@ -199,9 +199,9 @@ def setup_logger(
     # Prevent propagation to root logger
     log.propagate = False
 
-    # Console handler (use stderr to avoid interfering with CLI input)
+    # Console handler (use stdout so patch_stdout() can coordinate with CLI input)
     global _console_handler
-    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler = logging.StreamHandler(sys.stdout)
     if json_output or os.getenv("LOG_FORMAT") == "json":
         console_handler.setFormatter(JSONFormatter())
     else:

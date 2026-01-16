@@ -15,13 +15,13 @@ Reference: specs/architecture/CHANNELS.md
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 
 from klabautermann.channels.base_channel import BaseChannel
 from klabautermann.channels.cli_renderer import CLIRenderer
@@ -119,68 +119,70 @@ class CLIDriver(BaseChannel):
             extra={"agent_name": "cli", "session_id": self.session_id[:8]},
         )
 
-        while self._running:
-            try:
-                # Get user input with history support
-                user_input = await self._async_input("> ")
+        # patch_stdout wraps ENTIRE REPL - logs always appear above prompt
+        with patch_stdout():
+            while self._running:
+                try:
+                    # Get user input with history support
+                    user_input = await self._async_input("> ")
 
-                # Skip empty input
-                if not user_input:
-                    continue
+                    # Skip empty input
+                    if not user_input:
+                        continue
 
-                # Check for exit commands
-                if user_input.lower() in ("exit", "quit", "/quit", "/exit", "q"):
+                    # Check for exit commands
+                    if user_input.lower() in ("exit", "quit", "/quit", "/exit", "q"):
+                        await self.stop()
+                        break
+
+                    # Check for help command
+                    if user_input.lower() in ("help", "/help", "?"):
+                        self.renderer.render_help()
+                        continue
+
+                    # Check for clear command
+                    if user_input.lower() in ("/clear", "clear"):
+                        self.renderer.clear()
+                        self.renderer.render_banner()
+                        continue
+
+                    # Check for logs toggle command
+                    if user_input.lower() in ("/logs", "/log"):
+                        global _logs_visible
+                        _logs_visible = not _logs_visible
+                        if _logs_visible:
+                            restore_console_logging()
+                            self.renderer.render_info("Logs enabled")
+                        else:
+                            suppress_console_logging()
+                            self.renderer.render_info("Logs disabled")
+                        continue
+
+                    # Process the message with spinner
+                    response = await self.receive_message(
+                        thread_id=self.get_thread_id(),
+                        content=user_input,
+                    )
+
+                    # Display the response with markdown rendering
+                    await self.send_message(
+                        thread_id=self.get_thread_id(),
+                        content=response,
+                    )
+
+                except KeyboardInterrupt:
                     await self.stop()
                     break
-
-                # Check for help command
-                if user_input.lower() in ("help", "/help", "?"):
-                    self.renderer.render_help()
-                    continue
-
-                # Check for clear command
-                if user_input.lower() in ("/clear", "clear"):
-                    self.renderer.clear()
-                    self.renderer.render_banner()
-                    continue
-
-                # Check for logs toggle command
-                if user_input.lower() in ("/logs", "/log"):
-                    global _logs_visible
-                    _logs_visible = not _logs_visible
-                    if _logs_visible:
-                        restore_console_logging()
-                        self.renderer.render_info("Logs enabled")
-                    else:
-                        suppress_console_logging()
-                        self.renderer.render_info("Logs disabled")
-                    continue
-
-                # Process the message with spinner
-                response = await self.receive_message(
-                    thread_id=self.get_thread_id(),
-                    content=user_input,
-                )
-
-                # Display the response with markdown rendering
-                await self.send_message(
-                    thread_id=self.get_thread_id(),
-                    content=response,
-                )
-
-            except KeyboardInterrupt:
-                await self.stop()
-                break
-            except EOFError:
-                await self.stop()
-                break
-            except Exception as e:
-                logger.error(
-                    f"[STORM] CLI error: {e}",
-                    extra={"agent_name": "cli"},
-                    exc_info=True,
-                )
-                self.renderer.render_error(str(e))
+                except EOFError:
+                    await self.stop()
+                    break
+                except Exception as e:
+                    logger.error(
+                        f"[STORM] CLI error: {e}",
+                        extra={"agent_name": "cli"},
+                        exc_info=True,
+                    )
+                    self.renderer.render_error(str(e))
 
     async def stop(self) -> None:
         """Stop the CLI gracefully."""
@@ -246,9 +248,9 @@ class CLIDriver(BaseChannel):
 
     async def _async_input(self, prompt: str) -> str:
         """
-        Async wrapper for prompt_toolkit input with history support.
+        Get user input asynchronously.
 
-        Uses run_in_executor to avoid blocking the event loop.
+        Note: patch_stdout() is handled by the REPL loop in start().
 
         Args:
             prompt: Input prompt to display.
@@ -259,11 +261,7 @@ class CLIDriver(BaseChannel):
         if self._prompt_session is None:
             self._prompt_session = self._create_prompt_session()
 
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self._prompt_session.prompt(prompt).strip(),  # type: ignore[union-attr]
-        )
+        return (await self._prompt_session.prompt_async(prompt)).strip()
 
 
 # ===========================================================================
