@@ -1,7 +1,10 @@
 """
-Unit tests for the Researcher agent (T024).
+Unit tests for the Intelligent Researcher agent.
 
-Tests query classification, search strategies, and result formatting.
+Tests the Opus-powered search planning, parallel execution,
+strength-aware scoring, and report synthesis.
+
+Reference: specs/RESEARCHER.md
 """
 
 import time
@@ -9,12 +12,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from klabautermann.agents.researcher import (
-    Researcher,
-    SearchResponse,
-    SearchResult,
-    SearchType,
-    ZoomLevel,
+from klabautermann.agents.researcher import STRUCTURAL_QUERIES, Researcher
+from klabautermann.agents.researcher_models import (
+    ConfidenceLevel,
+    GraphIntelligenceReport,
+    RawSearchResult,
+    SearchPlan,
+    SearchStrategy,
+    SearchTechnique,
 )
 from klabautermann.core.models import AgentMessage
 
@@ -44,112 +49,330 @@ def mock_neo4j() -> MagicMock:
 @pytest.fixture
 def researcher(mock_graphiti: MagicMock, mock_neo4j: MagicMock) -> Researcher:
     """Create Researcher with mocked dependencies."""
+    config = {
+        "model": {
+            "planning": "claude-opus-4-5-20251101",
+            "synthesis": "claude-opus-4-5-20251101",
+            "temperature": 0.3,
+        },
+        "search": {
+            "max_parallel_strategies": 4,
+            "default_result_limit": 10,
+        },
+        "scoring": {
+            "strength_boost_factor": 0.3,
+        },
+    }
     return Researcher(
+        config=config,
         graphiti=mock_graphiti,
         neo4j=mock_neo4j,
     )
 
 
-# ===========================================================================
-# Test Query Classification
-# ===========================================================================
+@pytest.fixture
+def sample_search_plan() -> SearchPlan:
+    """Sample search plan for testing."""
+    return SearchPlan(
+        original_query="Who does Sarah work for?",
+        reasoning="Employment query requires structural and entity search",
+        strategies=[
+            SearchStrategy(
+                technique=SearchTechnique.ENTITY_FULLTEXT,
+                query="Sarah",
+                limit=5,
+                rationale="Find Sarah's entity",
+            ),
+            SearchStrategy(
+                technique=SearchTechnique.STRUCTURAL,
+                cypher_pattern="WORKS_AT",
+                params={"name_pattern": "(?i).*sarah.*"},
+                limit=10,
+                rationale="Find employment relationships",
+            ),
+        ],
+        expected_result_type="employer",
+        zoom_level="micro",
+    )
 
 
-class TestQueryClassification:
-    """Tests for _classify_search_type method."""
-
-    def test_semantic_query_basic_question(self, researcher: Researcher) -> None:
-        """Basic question without structural patterns → SEMANTIC."""
-        query = "Tell me about the project"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.SEMANTIC
-
-    def test_semantic_query_general_recall(self, researcher: Researcher) -> None:
-        """General recall query → SEMANTIC."""
-        query = "What was that thing about battery density?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.SEMANTIC
-
-    def test_structural_query_works_at(self, researcher: Researcher) -> None:
-        """Query about employment → STRUCTURAL."""
-        query = "Who does Sarah work for?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.STRUCTURAL
-
-    def test_structural_query_reports_to(self, researcher: Researcher) -> None:
-        """Query about reporting relationship → STRUCTURAL."""
-        query = "Who did John report to?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.STRUCTURAL
-
-    def test_structural_query_blocks(self, researcher: Researcher) -> None:
-        """Query about blocked tasks → STRUCTURAL."""
-        query = "What tasks are blocked?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.STRUCTURAL
-
-    def test_temporal_query_last_week(self, researcher: Researcher) -> None:
-        """Query with 'last week' → TEMPORAL."""
-        query = "What did I do last week?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.TEMPORAL
-
-    def test_temporal_query_yesterday(self, researcher: Researcher) -> None:
-        """Query with 'yesterday' → TEMPORAL."""
-        query = "What happened yesterday?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.TEMPORAL
-
-    def test_temporal_query_year(self, researcher: Researcher) -> None:
-        """Query with year → TEMPORAL."""
-        query = "What did I work on in 2024?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.TEMPORAL
-
-    def test_hybrid_query_structural_and_temporal(self, researcher: Researcher) -> None:
-        """Query with both structural and temporal → HYBRID."""
-        query = "Who did Sarah work for last week?"
-        search_type = researcher._classify_search_type(query)
-        assert search_type == SearchType.HYBRID
+@pytest.fixture
+def sample_results() -> list[RawSearchResult]:
+    """Sample search results for testing."""
+    return [
+        RawSearchResult(
+            content="Sarah Chen works at TechCorp as Senior Engineer",
+            source_technique=SearchTechnique.STRUCTURAL,
+            source_id="rel-123",
+            relationship_strengths=[0.9],
+        ),
+        RawSearchResult(
+            content="Sarah Chen: Software engineer with 10 years experience",
+            source_technique=SearchTechnique.ENTITY_FULLTEXT,
+            source_id="person-456",
+            vector_score=0.85,
+        ),
+        RawSearchResult(
+            content="TechCorp hired Sarah in 2023",
+            source_technique=SearchTechnique.VECTOR,
+            source_id="fact-789",
+            vector_score=0.72,
+        ),
+    ]
 
 
 # ===========================================================================
-# Test Entity Extraction
+# Test Pydantic Models
 # ===========================================================================
 
 
-class TestEntityExtraction:
-    """Tests for _extract_entity_name method."""
+class TestModels:
+    """Tests for Pydantic model validation."""
 
-    def test_extract_name_who_is(self, researcher: Researcher) -> None:
-        """Extract name from 'who is <name>' pattern."""
-        query = "Who is Sarah?"
-        name = researcher._extract_entity_name(query)
-        assert name == "Sarah"
+    def test_search_technique_enum(self) -> None:
+        """SearchTechnique enum values."""
+        assert SearchTechnique.VECTOR.value == "vector"
+        assert SearchTechnique.STRUCTURAL.value == "structural"
+        assert SearchTechnique.TEMPORAL.value == "temporal"
+        assert SearchTechnique.ENTITY_FULLTEXT.value == "entity_fulltext"
 
-    def test_extract_name_who_does(self, researcher: Researcher) -> None:
-        """Extract name from 'who does <name>' pattern."""
-        query = "Who does Sarah work for?"
-        name = researcher._extract_entity_name(query)
-        assert name == "Sarah"
+    def test_confidence_level_enum(self) -> None:
+        """ConfidenceLevel enum values."""
+        assert ConfidenceLevel.HIGH.value == "high"
+        assert ConfidenceLevel.MEDIUM.value == "medium"
+        assert ConfidenceLevel.LOW.value == "low"
+        assert ConfidenceLevel.UNCERTAIN.value == "uncertain"
 
-    def test_extract_name_works_at(self, researcher: Researcher) -> None:
-        """Extract name from '<name> works at' pattern."""
-        query = "Sarah works at Acme"
-        name = researcher._extract_entity_name(query)
-        assert name == "Sarah"
+    def test_search_strategy_defaults(self) -> None:
+        """SearchStrategy has sensible defaults."""
+        strategy = SearchStrategy(
+            technique=SearchTechnique.VECTOR,
+            rationale="Test search",
+        )
+        assert strategy.limit == 10
+        assert strategy.consider_strength is False
+        assert strategy.params == {}
 
-    def test_extract_name_case_insensitive(self, researcher: Researcher) -> None:
-        """Extract name is case insensitive."""
-        query = "WHO IS sarah?"
-        name = researcher._extract_entity_name(query)
-        assert name == "Sarah"
+    def test_search_plan_validation(self) -> None:
+        """SearchPlan validates zoom_level pattern."""
+        plan = SearchPlan(
+            original_query="test",
+            strategies=[],
+            expected_result_type="info",
+            zoom_level="micro",
+        )
+        assert plan.zoom_level == "micro"
 
-    def test_extract_name_returns_none_when_no_match(self, researcher: Researcher) -> None:
-        """Returns None when no entity pattern matches."""
-        query = "Tell me about the project"
-        name = researcher._extract_entity_name(query)
-        assert name is None
+    def test_raw_search_result_with_strength(self) -> None:
+        """RawSearchResult can include relationship strengths."""
+        result = RawSearchResult(
+            content="Test content",
+            source_technique=SearchTechnique.STRUCTURAL,
+            relationship_strengths=[0.8, 0.9],
+        )
+        assert len(result.relationship_strengths) == 2
+        assert result.vector_score is None
+
+    def test_graph_intelligence_report_structure(self) -> None:
+        """GraphIntelligenceReport has all required fields."""
+        report = GraphIntelligenceReport(
+            query="Who is John?",
+            direct_answer="John is a software engineer.",
+            confidence=0.85,
+            confidence_level=ConfidenceLevel.HIGH,
+            as_of_date="2026-01-16",
+            result_count=5,
+        )
+        assert report.evidence == []
+        assert report.relationships == []
+        assert report.key_entities == []
+
+
+# ===========================================================================
+# Test Scoring Algorithm
+# ===========================================================================
+
+
+class TestScoring:
+    """Tests for strength-aware scoring."""
+
+    def test_score_without_strength(self, researcher: Researcher) -> None:
+        """Score without strength uses vector_score only."""
+        result = RawSearchResult(
+            content="Test",
+            source_technique=SearchTechnique.VECTOR,
+            vector_score=0.8,
+        )
+        score = researcher._calculate_result_score(result)
+        assert score == 0.8  # No boost
+
+    def test_score_with_strength_boost(self, researcher: Researcher) -> None:
+        """Score with strength gets boosted."""
+        result = RawSearchResult(
+            content="Test",
+            source_technique=SearchTechnique.STRUCTURAL,
+            vector_score=0.8,
+            relationship_strengths=[1.0],  # Maximum strength
+        )
+        # Formula: 0.8 * (1 + 1.0 * 0.3) = 0.8 * 1.3 = 1.04
+        score = researcher._calculate_result_score(result)
+        assert score == pytest.approx(1.04)
+
+    def test_score_with_multiple_strengths(self, researcher: Researcher) -> None:
+        """Score averages multiple relationship strengths."""
+        result = RawSearchResult(
+            content="Test",
+            source_technique=SearchTechnique.STRUCTURAL,
+            vector_score=0.8,
+            relationship_strengths=[0.6, 1.0],  # Average = 0.8
+        )
+        # Formula: 0.8 * (1 + 0.8 * 0.3) = 0.8 * 1.24 = 0.992
+        score = researcher._calculate_result_score(result)
+        assert score == pytest.approx(0.992)
+
+    def test_score_without_vector_score(self, researcher: Researcher) -> None:
+        """Score defaults to 0.5 when no vector_score."""
+        result = RawSearchResult(
+            content="Test",
+            source_technique=SearchTechnique.STRUCTURAL,
+        )
+        score = researcher._calculate_result_score(result)
+        assert score == 0.5  # Default base score
+
+
+# ===========================================================================
+# Test Result Aggregation
+# ===========================================================================
+
+
+class TestAggregation:
+    """Tests for result aggregation and deduplication."""
+
+    def test_deduplication_by_source_id(self, researcher: Researcher) -> None:
+        """Results with same source_id are deduplicated."""
+        results = {
+            "vector:0": [
+                RawSearchResult(
+                    content="Duplicate",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id="same-id",
+                    vector_score=0.9,
+                ),
+            ],
+            "entity:1": [
+                RawSearchResult(
+                    content="Duplicate again",
+                    source_technique=SearchTechnique.ENTITY_FULLTEXT,
+                    source_id="same-id",
+                    vector_score=0.8,
+                ),
+            ],
+        }
+        aggregated = researcher._aggregate_results(results, max_results=10)
+        assert len(aggregated) == 1
+
+    def test_aggregation_sorts_by_score(self, researcher: Researcher) -> None:
+        """Results are sorted by composite score descending."""
+        results = {
+            "vector:0": [
+                RawSearchResult(
+                    content="Low score",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id="id-1",
+                    vector_score=0.3,
+                ),
+                RawSearchResult(
+                    content="High score",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id="id-2",
+                    vector_score=0.9,
+                ),
+            ],
+        }
+        aggregated = researcher._aggregate_results(results, max_results=10)
+        assert aggregated[0].vector_score == 0.9
+        assert aggregated[1].vector_score == 0.3
+
+    def test_aggregation_respects_max_results(self, researcher: Researcher) -> None:
+        """Aggregation limits results to max_results."""
+        results = {
+            "vector:0": [
+                RawSearchResult(
+                    content=f"Result {i}",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id=f"id-{i}",
+                    vector_score=0.5,
+                )
+                for i in range(20)
+            ],
+        }
+        aggregated = researcher._aggregate_results(results, max_results=5)
+        assert len(aggregated) == 5
+
+
+# ===========================================================================
+# Test JSON Extraction
+# ===========================================================================
+
+
+class TestJsonExtraction:
+    """Tests for extracting JSON from LLM responses."""
+
+    def test_extract_from_code_block(self, researcher: Researcher) -> None:
+        """Extract JSON from markdown code block."""
+        text = '```json\n{"key": "value"}\n```'
+        result = researcher._extract_json(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_from_code_block_no_lang(self, researcher: Researcher) -> None:
+        """Extract JSON from code block without language."""
+        text = '```\n{"key": "value"}\n```'
+        result = researcher._extract_json(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_raw_json(self, researcher: Researcher) -> None:
+        """Extract raw JSON object from text."""
+        text = 'Here is the result: {"key": "value"} and more text'
+        result = researcher._extract_json(text)
+        assert result == '{"key": "value"}'
+
+    def test_extract_returns_text_if_no_json(self, researcher: Researcher) -> None:
+        """Return original text if no JSON found."""
+        text = "No JSON here"
+        result = researcher._extract_json(text)
+        assert result == text
+
+
+# ===========================================================================
+# Test Confidence Calculation
+# ===========================================================================
+
+
+class TestConfidenceCalculation:
+    """Tests for confidence score calculation."""
+
+    def test_empty_results_uncertain(self, researcher: Researcher) -> None:
+        """Empty results give uncertain confidence."""
+        confidence, level = researcher._calculate_confidence([])
+        assert confidence == 0.0
+        assert level == ConfidenceLevel.UNCERTAIN
+
+    def test_high_confidence_multiple_sources(self, researcher: Researcher) -> None:
+        """Multiple high-quality sources give high confidence."""
+        results = [
+            RawSearchResult(
+                content=f"Result {i}",
+                source_technique=SearchTechnique.VECTOR
+                if i % 2 == 0
+                else SearchTechnique.STRUCTURAL,
+                vector_score=0.9,
+                relationship_strengths=[0.9] if i % 2 == 1 else [],
+            )
+            for i in range(5)
+        ]
+        confidence, level = researcher._calculate_confidence(results)
+        assert confidence >= 0.5  # Should be at least medium
+        assert level in [ConfidenceLevel.HIGH, ConfidenceLevel.MEDIUM]
 
 
 # ===========================================================================
@@ -158,666 +381,255 @@ class TestEntityExtraction:
 
 
 class TestTimeReferenceParsing:
-    """Tests for _parse_time_reference method."""
+    """Tests for parsing time references."""
 
     def test_parse_yesterday(self, researcher: Researcher) -> None:
-        """Parse 'yesterday' into timestamp range."""
-        query = "What happened yesterday?"
-        time_filter = researcher._parse_time_reference(query)
-
-        assert time_filter is not None
-        assert "start" in time_filter
-        assert "end" in time_filter
-        assert time_filter["start"] < time_filter["end"]
+        """Parse 'yesterday' time reference."""
+        result = researcher._parse_time_reference("What happened yesterday?")
+        assert result is not None
+        assert result.relative == "yesterday"
+        assert result.start is not None
+        assert result.end is not None
 
     def test_parse_last_week(self, researcher: Researcher) -> None:
-        """Parse 'last week' into timestamp range."""
-        query = "What did I do last week?"
-        time_filter = researcher._parse_time_reference(query)
-
-        assert time_filter is not None
-        assert "start" in time_filter
-        assert "end" in time_filter
-
-    def test_parse_last_month(self, researcher: Researcher) -> None:
-        """Parse 'last month' into timestamp range."""
-        query = "What projects from last month?"
-        time_filter = researcher._parse_time_reference(query)
-
-        assert time_filter is not None
-        assert "start" in time_filter
-        assert "end" in time_filter
+        """Parse 'last week' time reference."""
+        result = researcher._parse_time_reference("Events from last week")
+        assert result is not None
+        assert result.relative == "last week"
 
     def test_parse_days_ago(self, researcher: Researcher) -> None:
-        """Parse '5 days ago' pattern."""
-        query = "What was discussed 5 days ago?"
-        time_filter = researcher._parse_time_reference(query)
+        """Parse 'X days ago' time reference."""
+        result = researcher._parse_time_reference("What happened 5 days ago?")
+        assert result is not None
+        assert result.relative == "5 days ago"
 
-        assert time_filter is not None
-        assert "start" in time_filter
-        assert "end" in time_filter
-
-    def test_parse_returns_none_for_no_temporal_reference(self, researcher: Researcher) -> None:
-        """Returns None when no temporal pattern found."""
-        query = "Who is Sarah?"
-        time_filter = researcher._parse_time_reference(query)
-
-        assert time_filter is None
+    def test_parse_no_time_reference(self, researcher: Researcher) -> None:
+        """Return None for queries without time reference."""
+        result = researcher._parse_time_reference("Who is John?")
+        assert result is None
 
 
 # ===========================================================================
-# Test Semantic Search
+# Test Structural Queries
 # ===========================================================================
 
 
-class TestSemanticSearch:
-    """Tests for _semantic_search method."""
+class TestStructuralQueries:
+    """Tests for predefined Cypher patterns."""
 
-    @pytest.mark.asyncio
-    async def test_semantic_search_with_results(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """Semantic search returns results from Graphiti."""
-        # Mock Graphiti results
-        mock_results = [
-            MagicMock(
-                fact="Sarah is a PM at Acme",
-                uuid="uuid-1",
-                score=0.9,
-            ),
-            MagicMock(
-                fact="John works with Sarah",
-                uuid="uuid-2",
-                score=0.8,
-            ),
-        ]
-        mock_graphiti.search.return_value = mock_results
+    def test_works_at_pattern_exists(self) -> None:
+        """WORKS_AT pattern is defined."""
+        assert "WORKS_AT" in STRUCTURAL_QUERIES
+        assert "MATCH" in STRUCTURAL_QUERIES["WORKS_AT"]
+        assert "$name_pattern" in STRUCTURAL_QUERIES["WORKS_AT"]
 
-        response = await researcher._semantic_search("Who is Sarah?", "trace-123")
+    def test_knows_pattern_includes_strength(self) -> None:
+        """KNOWS pattern returns strength."""
+        assert "KNOWS" in STRUCTURAL_QUERIES
+        assert "strength" in STRUCTURAL_QUERIES["KNOWS"]
+        assert "ORDER BY r.strength" in STRUCTURAL_QUERIES["KNOWS"]
 
-        assert response.search_type == SearchType.SEMANTIC
-        assert len(response.results) == 2
-        assert response.results[0].content == "Sarah is a PM at Acme"
-        assert response.results[0].confidence == 0.9
-        assert response.results[0].source == "graphiti"
-
-    @pytest.mark.asyncio
-    async def test_semantic_search_empty_results(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """Semantic search returns empty when nothing found."""
-        mock_graphiti.search.return_value = []
-
-        response = await researcher._semantic_search("Unknown entity", "trace-123")
-
-        assert response.search_type == SearchType.SEMANTIC
-        assert len(response.results) == 0
-
-    @pytest.mark.asyncio
-    async def test_semantic_search_without_graphiti(self) -> None:
-        """Semantic search returns empty when Graphiti unavailable."""
-        researcher = Researcher(graphiti=None, neo4j=None)
-
-        response = await researcher._semantic_search("Query", "trace-123")
-
-        assert response.search_type == SearchType.SEMANTIC
-        assert len(response.results) == 0
+    def test_historical_pattern_uses_as_of(self) -> None:
+        """WORKS_AT_HISTORICAL uses as_of parameter."""
+        assert "WORKS_AT_HISTORICAL" in STRUCTURAL_QUERIES
+        assert "$as_of" in STRUCTURAL_QUERIES["WORKS_AT_HISTORICAL"]
 
 
 # ===========================================================================
-# Test Structural Search
-# ===========================================================================
-
-
-class TestStructuralSearch:
-    """Tests for _structural_search method."""
-
-    @pytest.mark.asyncio
-    async def test_structural_search_works_at(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """Structural search for WORKS_AT relationship."""
-        # Mock Neo4j results
-        mock_neo4j.execute_query.return_value = [
-            {"person": "Sarah", "org": "Acme Corp", "title": "PM"}
-        ]
-
-        response = await researcher._structural_search("Who does Sarah work for?", "trace-123")
-
-        assert response.search_type == SearchType.STRUCTURAL
-        assert len(response.results) == 1
-        assert "Sarah" in response.results[0].content
-        assert "Acme Corp" in response.results[0].content
-
-    @pytest.mark.asyncio
-    async def test_structural_search_reports_to(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """Structural search for REPORTS_TO relationship."""
-        mock_neo4j.execute_query.return_value = [{"person": "John", "manager": "Sarah"}]
-
-        response = await researcher._structural_search("Who does John report to?", "trace-123")
-
-        assert response.search_type == SearchType.STRUCTURAL
-        assert len(response.results) == 1
-
-    @pytest.mark.asyncio
-    async def test_structural_search_empty_results(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """Structural search returns empty when nothing found."""
-        mock_neo4j.execute_query.return_value = []
-
-        response = await researcher._structural_search("Who does Unknown work for?", "trace-123")
-
-        assert len(response.results) == 0
-
-    @pytest.mark.asyncio
-    async def test_structural_search_fallback_to_semantic(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """Structural search falls back to semantic when no entity found."""
-        mock_graphiti.search.return_value = []
-
-        # Query without clear entity
-        await researcher._structural_search("Tell me about the project", "trace-123")
-
-        # Should have fallen back to semantic search
-        mock_graphiti.search.assert_called_once()
-
-
-# ===========================================================================
-# Test Temporal Search
-# ===========================================================================
-
-
-class TestTemporalSearch:
-    """Tests for _temporal_search method."""
-
-    @pytest.mark.asyncio
-    async def test_temporal_search_with_results(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """Temporal search returns time-filtered results."""
-        mock_neo4j.execute_query.return_value = [
-            {"n": {"name": "Project A", "created_at": time.time()}, "type": ["Project"]}
-        ]
-
-        response = await researcher._temporal_search("What did I work on last week?", "trace-123")
-
-        assert response.search_type == SearchType.TEMPORAL
-        assert len(response.results) == 1
-        assert response.results[0].temporal_context is not None
-
-    @pytest.mark.asyncio
-    async def test_temporal_search_no_time_reference(self, researcher: Researcher) -> None:
-        """Temporal search returns empty when time reference can't be parsed."""
-        response = await researcher._temporal_search("Who is Sarah?", "trace-123")
-
-        assert response.search_type == SearchType.TEMPORAL
-        assert len(response.results) == 0
-
-
-# ===========================================================================
-# Test Hybrid Search
-# ===========================================================================
-
-
-class TestHybridSearch:
-    """Tests for _hybrid_search method."""
-
-    @pytest.mark.asyncio
-    async def test_hybrid_search_combines_results(
-        self,
-        researcher: Researcher,
-        mock_graphiti: MagicMock,
-        mock_neo4j: MagicMock,
-    ) -> None:
-        """Hybrid search combines semantic and structural results."""
-        # Mock semantic results
-        mock_graphiti.search.return_value = [
-            MagicMock(fact="Semantic result", uuid="uuid-1", score=0.9)
-        ]
-
-        # Mock structural results
-        mock_neo4j.execute_query.return_value = [{"person": "John", "org": "Acme"}]
-
-        response = await researcher._hybrid_search("Who does John work for last week?", "trace-123")
-
-        assert response.search_type == SearchType.HYBRID
-        # Should have results from both searches
-        assert len(response.results) >= 1
-
-
-# ===========================================================================
-# Test Process Message
+# Test Process Message Flow
 # ===========================================================================
 
 
 class TestProcessMessage:
-    """Tests for process_message method."""
+    """Tests for the main process_message flow."""
 
     @pytest.mark.asyncio
-    async def test_process_message_with_query(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """process_message handles search request."""
-        mock_graphiti.search.return_value = [
-            MagicMock(fact="Test result", uuid="uuid-1", score=0.9)
-        ]
-
+    async def test_empty_query_returns_empty_report(self, researcher: Researcher) -> None:
+        """Empty query returns empty report."""
         msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={"query": "Who is Sarah?"},
-        )
-
-        response = await researcher.process_message(msg)
-
-        assert response is not None
-        assert response.intent == "search_response"
-        assert response.target_agent == "orchestrator"
-        assert "result" in response.payload
-        assert "search_type" in response.payload
-
-    @pytest.mark.asyncio
-    async def test_process_message_empty_query(self, researcher: Researcher) -> None:
-        """process_message handles empty query gracefully."""
-        msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={},  # No query
-        )
-
-        response = await researcher.process_message(msg)
-
-        assert response is not None
-        assert response.payload["result"] == ""
-
-    @pytest.mark.asyncio
-    async def test_process_message_error_handling(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """process_message handles errors gracefully and returns empty results."""
-        # Make Graphiti raise an error
-        mock_graphiti.search.side_effect = Exception("Database error")
-
-        msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={"query": "Test query"},
-        )
-
-        response = await researcher.process_message(msg)
-
-        # Should gracefully degrade to empty results, not crash
-        assert response is not None
-        assert response.payload["count"] == 0
-        assert response.payload["result"] == ""
-        # Error is logged but system remains stable
-
-
-# ===========================================================================
-# Test Response Formatting
-# ===========================================================================
-
-
-class TestResponseFormatting:
-    """Tests for _create_response method."""
-
-    def test_create_response_with_results(self, researcher: Researcher) -> None:
-        """_create_response formats results correctly."""
-        search_response = SearchResponse(
-            query="Test query",
-            search_type=SearchType.SEMANTIC,
-            results=[
-                SearchResult(
-                    content="Result 1",
-                    source="graphiti",
-                    confidence=0.9,
-                ),
-                SearchResult(
-                    content="Result 2",
-                    source="graphiti",
-                    confidence=0.8,
-                ),
-            ],
-        )
-
-        original_msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={"query": "Test query"},
-        )
-
-        response = researcher._create_response(original_msg, search_response)
-
-        assert response.intent == "search_response"
-        assert response.target_agent == "orchestrator"
-        assert "Result 1" in response.payload["result"]
-        assert "Result 2" in response.payload["result"]
-        assert response.payload["count"] == 2
-
-    def test_create_response_empty_results(self, researcher: Researcher) -> None:
-        """_create_response handles empty results."""
-        search_response = SearchResponse(
-            query="Test query",
-            search_type=SearchType.SEMANTIC,
-            results=[],
-        )
-
-        original_msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={"query": "Test query"},
-        )
-
-        response = researcher._create_response(original_msg, search_response)
-
-        assert response.payload["result"] == ""
-        assert response.payload["count"] == 0
-
-
-# ===========================================================================
-# Test Never Fabricates
-# ===========================================================================
-
-
-class TestNeverFabricates:
-    """Tests that Researcher NEVER fabricates results."""
-
-    @pytest.mark.asyncio
-    async def test_empty_query_returns_empty_not_fabricated(self, researcher: Researcher) -> None:
-        """Empty query returns empty, doesn't fabricate."""
-        msg = AgentMessage(
-            trace_id="trace-123",
+            trace_id="test-123",
             source_agent="orchestrator",
             target_agent="researcher",
             intent="search",
             payload={"query": ""},
+            timestamp=time.time(),
         )
 
         response = await researcher.process_message(msg)
 
         assert response is not None
-        assert response.payload["result"] == ""
-        assert response.payload["count"] == 0
+        assert response.payload["report"]["confidence"] == 0.0
+        assert "No query provided" in response.payload["report"]["direct_answer"]
 
     @pytest.mark.asyncio
-    async def test_no_results_returns_empty_not_fabricated(
-        self, researcher: Researcher, mock_graphiti: MagicMock
+    async def test_process_message_with_mocked_opus(
+        self,
+        researcher: Researcher,
+        sample_search_plan: SearchPlan,
     ) -> None:
-        """No results returns empty, doesn't fabricate."""
-        mock_graphiti.search.return_value = []
+        """Process message with mocked Opus calls."""
+        # Mock the Opus client
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text=sample_search_plan.model_dump_json())]
+
+        mock_client = MagicMock()
+        mock_client.messages.create = AsyncMock(return_value=mock_response)
+        researcher._anthropic = mock_client
 
         msg = AgentMessage(
-            trace_id="trace-123",
+            trace_id="test-456",
             source_agent="orchestrator",
             target_agent="researcher",
             intent="search",
-            payload={"query": "Unknown person"},
+            payload={"query": "Who does Sarah work for?"},
+            timestamp=time.time(),
         )
 
         response = await researcher.process_message(msg)
 
         assert response is not None
-        assert response.payload["result"] == ""
-        assert response.payload["count"] == 0
-
-
-# ===========================================================================
-# Test Zoom Level Detection
-# ===========================================================================
-
-
-class TestZoomLevelDetection:
-    """Tests for _detect_zoom_level method."""
-
-    def test_detect_macro_overview_query(self, researcher: Researcher) -> None:
-        """Query with 'overview' → MACRO."""
-        query = "Give me an overview of my priorities"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MACRO
-
-    def test_detect_macro_themes_query(self, researcher: Researcher) -> None:
-        """Query with 'themes' → MACRO."""
-        query = "What are the main themes in my life?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MACRO
-
-    def test_detect_macro_big_picture_query(self, researcher: Researcher) -> None:
-        """Query with 'big picture' → MACRO."""
-        query = "Show me the big picture of my focus areas"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MACRO
-
-    def test_detect_meso_project_query(self, researcher: Researcher) -> None:
-        """Query with 'project' → MESO."""
-        query = "What's the status of the Q1 budget project?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MESO
-
-    def test_detect_meso_progress_query(self, researcher: Researcher) -> None:
-        """Query with 'progress' → MESO."""
-        query = "What progress have I made on the marketing campaign?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MESO
-
-    def test_detect_meso_notes_query(self, researcher: Researcher) -> None:
-        """Query with 'notes' → MESO."""
-        query = "What did my recent notes discuss?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MESO
-
-    def test_detect_micro_who_query(self, researcher: Researcher) -> None:
-        """Query starting with 'Who' → MICRO."""
-        query = "Who is Sarah?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MICRO
-
-    def test_detect_micro_email_query(self, researcher: Researcher) -> None:
-        """Query with 'email' → MICRO."""
-        query = "What's Sarah's email address?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MICRO
-
-    def test_detect_micro_specific_query(self, researcher: Researcher) -> None:
-        """Query with 'specific' → MICRO."""
-        query = "What specific date did John join?"
-        zoom_level = researcher._detect_zoom_level(query)
-        assert zoom_level == ZoomLevel.MICRO
-
-
-# ===========================================================================
-# Test Zoom Level Searches
-# ===========================================================================
-
-
-class TestZoomLevelSearches:
-    """Tests for zoom-level specific searches."""
+        assert response.intent == "search_response"
+        assert "report" in response.payload
 
     @pytest.mark.asyncio
-    async def test_search_macro_returns_island_summaries(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """Macro search returns Knowledge Island summaries."""
-        # Mock Community node results
-        mock_neo4j.execute_query.return_value = [
-            {
-                "island_name": "Work Island",
-                "theme": "professional",
-                "summary": "Career and work-related activities",
-                "member_count": 150,
-                "pending_tasks": 12,
-            },
-            {
-                "island_name": "Family Island",
-                "theme": "family",
-                "summary": "Family relationships and events",
-                "member_count": 45,
-                "pending_tasks": 3,
-            },
-        ]
+    async def test_fallback_on_opus_timeout(self, researcher: Researcher) -> None:
+        """Falls back to simple plan on Opus timeout."""
+        # Configure very short timeout
+        researcher.planning_timeout = 0.001
 
-        response = await researcher._search_macro("What are my priorities?", "trace-123")
+        # Make the call hang
+        async def slow_call(*args, **kwargs):
+            import asyncio
 
-        assert response.zoom_level == ZoomLevel.MACRO
-        assert len(response.results) == 2
-        assert "Work Island" in response.results[0].content
-        assert response.results[0].source == "community"
+            await asyncio.sleep(10)
 
-    @pytest.mark.asyncio
-    async def test_search_meso_returns_notes_and_projects(
-        self, researcher: Researcher, mock_graphiti: MagicMock, mock_neo4j: MagicMock
-    ) -> None:
-        """Meso search returns Note and Project results."""
-        # Mock Graphiti note results
-        mock_graphiti.search.return_value = [
-            MagicMock(
-                fact="Discussed Q1 budget with Sarah",
-                uuid="note-1",
-                score=0.9,
-            )
-        ]
-
-        # Mock Neo4j project results
-        mock_neo4j.execute_query.return_value = [
-            {
-                "project_name": "Q1 Budget",
-                "status": "in_progress",
-                "goal": "Finalize Q1 financial planning",
-                "pending_tasks": 5,
-            }
-        ]
-
-        response = await researcher._search_meso("Status of Q1 budget?", "trace-123")
-
-        assert response.zoom_level == ZoomLevel.MESO
-        assert len(response.results) >= 1
-        # Should have results from both notes and projects
-
-    @pytest.mark.asyncio
-    async def test_search_micro_returns_entity_facts(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """Micro search returns specific entity facts."""
-        mock_graphiti.search.return_value = [
-            MagicMock(
-                fact="Sarah's email is sarah@example.com",
-                uuid="entity-1",
-                score=0.95,
-            )
-        ]
-        mock_graphiti.search_entities.return_value = []
-
-        response = await researcher._search_micro("What's Sarah's email?", "trace-123")
-
-        assert response.zoom_level == ZoomLevel.MICRO
-        assert len(response.results) >= 1
-
-    @pytest.mark.asyncio
-    async def test_search_with_zoom_auto_detects_macro(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """search_with_zoom with AUTO correctly detects MACRO."""
-        mock_neo4j.execute_query.return_value = []
-
-        response = await researcher.search_with_zoom(
-            "What are my main priorities?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
-        )
-
-        assert response.zoom_level == ZoomLevel.MACRO
-
-    @pytest.mark.asyncio
-    async def test_search_with_zoom_auto_detects_meso(
-        self, researcher: Researcher, mock_graphiti: MagicMock, mock_neo4j: MagicMock
-    ) -> None:
-        """search_with_zoom with AUTO correctly detects MESO."""
-        mock_graphiti.search.return_value = []
-        mock_neo4j.execute_query.return_value = []
-
-        response = await researcher.search_with_zoom(
-            "What's the status of my project?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
-        )
-
-        assert response.zoom_level == ZoomLevel.MESO
-
-    @pytest.mark.asyncio
-    async def test_search_with_zoom_auto_detects_micro(
-        self, researcher: Researcher, mock_graphiti: MagicMock
-    ) -> None:
-        """search_with_zoom with AUTO correctly detects MICRO."""
-        mock_graphiti.search.return_value = []
-        mock_graphiti.search_entities.return_value = []
-
-        response = await researcher.search_with_zoom(
-            "Who is Sarah?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
-        )
-
-        assert response.zoom_level == ZoomLevel.MICRO
-
-    @pytest.mark.asyncio
-    async def test_search_with_zoom_explicit_macro(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """search_with_zoom with explicit MACRO level."""
-        mock_neo4j.execute_query.return_value = []
-
-        response = await researcher.search_with_zoom(
-            "Some query", zoom_level=ZoomLevel.MACRO, trace_id="trace-123"
-        )
-
-        assert response.zoom_level == ZoomLevel.MACRO
-
-    @pytest.mark.asyncio
-    async def test_process_message_with_zoom_level_parameter(
-        self, researcher: Researcher, mock_neo4j: MagicMock
-    ) -> None:
-        """process_message handles zoom_level in payload."""
-        mock_neo4j.execute_query.return_value = []
+        mock_client = MagicMock()
+        mock_client.messages.create = slow_call
+        researcher._anthropic = mock_client
 
         msg = AgentMessage(
-            trace_id="trace-123",
+            trace_id="test-timeout",
             source_agent="orchestrator",
             target_agent="researcher",
             intent="search",
-            payload={"query": "My priorities", "zoom_level": "macro"},
+            payload={"query": "Test query"},
+            timestamp=time.time(),
         )
 
         response = await researcher.process_message(msg)
 
+        # Should still return a response (using fallback)
         assert response is not None
-        assert "zoom_level" in response.payload
-        assert response.payload["zoom_level"] == "macro"
+
+
+# ===========================================================================
+# Test Custom Cypher Support
+# ===========================================================================
+
+
+class TestCustomCypher:
+    """Tests for custom Cypher query support."""
 
     @pytest.mark.asyncio
-    async def test_process_message_backward_compatible(
-        self, researcher: Researcher, mock_graphiti: MagicMock
+    async def test_custom_cypher_detection(
+        self, researcher: Researcher, mock_neo4j: MagicMock
     ) -> None:
-        """process_message works without zoom_level (backward compatible)."""
-        mock_graphiti.search.return_value = []
-        mock_graphiti.search_entities.return_value = []
+        """Custom Cypher queries starting with MATCH are executed directly."""
+        custom_cypher = "MATCH (p:Person)-[:KNOWS]->(f) WHERE p.name = $name RETURN f"
+        params = {"name": "John"}
 
-        msg = AgentMessage(
-            trace_id="trace-123",
-            source_agent="orchestrator",
-            target_agent="researcher",
-            intent="search",
-            payload={"query": "Who is Sarah?"},
+        mock_neo4j.execute_query = AsyncMock(return_value=[{"f": {"name": "Jane"}}])
+
+        _results = await researcher._execute_structural_search(
+            cypher_pattern=custom_cypher,
+            params=params,
+            consider_strength=False,
+            limit=10,
+            trace_id="test",
         )
 
-        response = await researcher.process_message(msg)
+        # Verify the custom query was used (results not needed for this test)
+        mock_neo4j.execute_query.assert_called_once()
+        call_args = mock_neo4j.execute_query.call_args
+        assert "MATCH (p:Person)" in call_args[0][0]
 
-        # Should work fine without zoom_level parameter
-        assert response is not None
-        assert response.payload["count"] >= 0
+    @pytest.mark.asyncio
+    async def test_predefined_pattern_lookup(
+        self, researcher: Researcher, mock_neo4j: MagicMock
+    ) -> None:
+        """Predefined patterns like 'WORKS_AT' are looked up."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        await researcher._execute_structural_search(
+            cypher_pattern="WORKS_AT",
+            params={"name_pattern": "(?i).*john.*"},
+            consider_strength=False,
+            limit=10,
+            trace_id="test",
+        )
+
+        # Verify the predefined pattern was used
+        mock_neo4j.execute_query.assert_called_once()
+        call_args = mock_neo4j.execute_query.call_args
+        assert "WORKS_AT" in call_args[0][0]
+
+
+# ===========================================================================
+# Test Report Formatting
+# ===========================================================================
+
+
+class TestReportFormatting:
+    """Tests for result and report formatting."""
+
+    def test_format_record(self, researcher: Researcher) -> None:
+        """Format Neo4j record for display."""
+        record = {
+            "person": "John",
+            "organization": "TechCorp",
+            "title": "Engineer",
+            "uuid": "should-be-hidden",
+        }
+        formatted = researcher._format_record(record)
+        assert "John" in formatted
+        assert "TechCorp" in formatted
+        assert "uuid" not in formatted
+
+    def test_format_results_for_synthesis(
+        self,
+        researcher: Researcher,
+        sample_results: list[RawSearchResult],
+    ) -> None:
+        """Format results for synthesis prompt."""
+        formatted = researcher._format_results_for_synthesis(sample_results)
+        assert "[structural]" in formatted
+        assert "[entity_fulltext]" in formatted
+        assert "[vector]" in formatted
+        assert "Sarah" in formatted
+
+
+# ===========================================================================
+# Test Fallback Report
+# ===========================================================================
+
+
+class TestFallbackReport:
+    """Tests for fallback report generation."""
+
+    def test_fallback_report_structure(
+        self,
+        researcher: Researcher,
+        sample_results: list[RawSearchResult],
+        sample_search_plan: SearchPlan,
+    ) -> None:
+        """Fallback report has correct structure."""
+        report = researcher._fallback_report(
+            query="Test query",
+            results=sample_results,
+            plan=sample_search_plan,
+        )
+
+        assert report.query == "Test query"
+        assert "what i found" in report.direct_answer.lower()
+        assert len(report.evidence) <= 5
+        assert report.result_count == len(sample_results)

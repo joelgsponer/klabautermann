@@ -1,25 +1,41 @@
 """
-Researcher agent for Klabautermann.
+Intelligent Researcher agent for Klabautermann.
 
-The "Librarian" that performs hybrid search across the knowledge graph.
-Uses vector search via Graphiti and structural queries via Cypher.
+The "Librarian" that uses Claude Opus to intelligently plan searches,
+execute multiple techniques in parallel, and synthesize findings into
+a Graph Intelligence Report.
 
 NEVER fabricates results - returns empty if nothing found.
 
-Reference: specs/architecture/AGENTS.md Section 1.3
+Reference: specs/RESEARCHER.md
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 import time
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar
+from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+import anthropic
+from pydantic import ValidationError
 
 from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.agents.researcher_models import (
+    ConfidenceLevel,
+    EvidenceItem,
+    GraphIntelligenceReport,
+    RawSearchResult,
+    SearchPlan,
+    SearchStrategy,
+    SearchTechnique,
+    TemporalContext,
+    TimeRange,
+    ZoomLevel,
+)
+from klabautermann.agents.researcher_prompts import PLANNING_PROMPT, SYNTHESIS_PROMPT
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
 
@@ -30,124 +46,116 @@ if TYPE_CHECKING:
 
 
 # ===========================================================================
-# Search Models
+# Predefined Cypher Patterns
 # ===========================================================================
 
-
-class SearchType(str, Enum):
-    """Types of search strategies."""
-
-    SEMANTIC = "semantic"
-    STRUCTURAL = "structural"
-    TEMPORAL = "temporal"
-    HYBRID = "hybrid"
-
-
-class ZoomLevel(str, Enum):
-    """Zoom levels for retrieval granularity."""
-
-    AUTO = "auto"  # Let researcher decide
-    MACRO = "macro"  # Knowledge Islands, broad themes
-    MESO = "meso"  # Projects, Notes, mid-level context
-    MICRO = "micro"  # Entity facts, specific details
-
-
-class SearchResult(BaseModel):
-    """Single search result from the knowledge graph."""
-
-    content: str
-    source: str  # "graphiti", "neo4j", or node type
-    source_id: str | None = None
-    confidence: float = 1.0
-    temporal_context: str | None = None
-
-
-class SearchResponse(BaseModel):
-    """Complete search response with results."""
-
-    query: str
-    search_type: SearchType
-    results: list[SearchResult] = Field(default_factory=list)
-    summary: str | None = None
-    zoom_level: ZoomLevel | None = None
+STRUCTURAL_QUERIES: dict[str, str] = {
+    "WORKS_AT": """
+        MATCH (p:Person)-[r:WORKS_AT]->(o:Organization)
+        WHERE p.name =~ $name_pattern
+          AND r.expired_at IS NULL
+        RETURN p.uuid as person_uuid, p.name as person,
+               o.uuid as org_uuid, o.name as organization,
+               r.title as title, r.department as department,
+               r.created_at as created_at
+        ORDER BY r.created_at DESC
+        LIMIT $limit
+    """,
+    "REPORTS_TO": """
+        MATCH (p:Person)-[r:REPORTS_TO]->(m:Person)
+        WHERE p.name =~ $name_pattern
+          AND r.expired_at IS NULL
+        RETURN p.name as person, m.name as manager,
+               r.created_at as created_at
+        LIMIT $limit
+    """,
+    "BLOCKS": """
+        MATCH (blocker:Task)-[r:BLOCKS]->(blocked:Task)
+        WHERE blocker.status <> 'completed'
+          AND r.expired_at IS NULL
+        RETURN blocker.uuid as blocker_uuid, blocker.action as blocker,
+               blocked.uuid as blocked_uuid, blocked.action as blocked_task,
+               r.reason as reason
+        LIMIT $limit
+    """,
+    "DEPENDS_ON": """
+        MATCH (t:Task)-[r:DEPENDS_ON]->(dep:Task)
+        WHERE t.status <> 'completed'
+          AND r.expired_at IS NULL
+        RETURN t.action as task, dep.action as dependency,
+               dep.status as dep_status, r.reason as reason
+        LIMIT $limit
+    """,
+    "KNOWS": """
+        MATCH (a:Person)-[r:KNOWS]->(b:Person)
+        WHERE a.name =~ $name_pattern
+          AND r.expired_at IS NULL
+        RETURN a.name as person, b.name as knows,
+               r.strength as strength, r.context as context,
+               r.created_at as created_at
+        ORDER BY r.strength DESC NULLS LAST
+        LIMIT $limit
+    """,
+    "FRIEND_OF": """
+        MATCH (a:Person)-[r:FRIEND_OF]->(b:Person)
+        WHERE a.name =~ $name_pattern
+          AND r.expired_at IS NULL
+        RETURN a.name as person, b.name as friend,
+               r.strength as strength, r.how_met as how_met,
+               r.since as since
+        ORDER BY r.strength DESC NULLS LAST
+        LIMIT $limit
+    """,
+    "WORKS_AT_HISTORICAL": """
+        MATCH (p:Person)-[r:WORKS_AT]->(o:Organization)
+        WHERE p.name =~ $name_pattern
+          AND r.created_at <= $as_of
+          AND (r.expired_at IS NULL OR r.expired_at > $as_of)
+        RETURN p.name as person, o.name as organization,
+               r.title as title, r.created_at as since,
+               r.expired_at as until
+        ORDER BY r.created_at DESC
+        LIMIT $limit
+    """,
+    "CONTRIBUTES_TO": """
+        MATCH (proj:Project)-[r:CONTRIBUTES_TO]->(goal:Goal)
+        WHERE proj.name =~ $name_pattern
+          AND r.expired_at IS NULL
+        RETURN proj.name as project, goal.name as goal,
+               r.weight as weight, r.how as contribution
+        ORDER BY r.weight DESC NULLS LAST
+        LIMIT $limit
+    """,
+    "ATTENDED": """
+        MATCH (p:Person)-[r:ATTENDED]->(e:Event)
+        WHERE p.name =~ $name_pattern
+        RETURN p.name as person, e.name as event,
+               e.date as event_date, r.role as role
+        ORDER BY e.date DESC
+        LIMIT $limit
+    """,
+}
 
 
 # ===========================================================================
-# Researcher Agent
+# Intelligent Researcher Agent
 # ===========================================================================
 
 
 class Researcher(BaseAgent):
     """
-    The Researcher agent - the "Librarian" of The Locker.
+    Intelligent Researcher agent - the "Librarian" of The Locker.
 
-    Performs hybrid search across the temporal knowledge graph:
-    - SEMANTIC: Vector search via Graphiti
-    - STRUCTURAL: Graph traversal queries (relationships, hierarchies)
-    - TEMPORAL: Time-filtered queries (historical states)
-    - HYBRID: Combination of above strategies
+    Uses Claude Opus to:
+    1. Plan optimal search strategies based on query analysis
+    2. Execute multiple search techniques in parallel
+    3. Aggregate results with strength-aware scoring
+    4. Synthesize findings into a Graph Intelligence Report
 
-    NEVER fabricates results. If nothing found, returns empty.
+    NEVER fabricates results. If nothing found, returns empty report.
 
-    Uses Claude Haiku for query understanding (cost-effective).
+    Reference: specs/RESEARCHER.md
     """
-
-    # Patterns for query classification
-    STRUCTURAL_PATTERNS: ClassVar[list[str]] = [
-        r"who (?:does|did) .+ (?:work|report)",
-        r"what (?:tasks?|projects?) (?:are |is )?(?:blocked|blocking)",
-        r"who (?:attended|went to)",
-        r"what (?:project|task).+ part of",
-        r"who (?:works|worked) (?:at|for)",
-        r"what.+(?:status|progress)",
-    ]
-
-    TEMPORAL_PATTERNS: ClassVar[list[str]] = [
-        r"last (?:week|month|year)",
-        r"yesterday|today|tomorrow",
-        r"in \d{4}",
-        r"(?:on|before|after) (?:january|february|march|april|may|june|july|august|september|october|november|december)",
-        r"(?:\d+) (?:days?|weeks?|months?) ago",
-    ]
-
-    # Zoom level detection patterns (from MEMORY.md Section 9.5)
-    MACRO_INDICATORS: ClassVar[list[str]] = [
-        "overview",
-        "summary",
-        "themes",
-        "big picture",
-        "main areas",
-        "life",
-        "everything",
-        "all",
-        "priorities",
-        "focus",
-    ]
-
-    MESO_INDICATORS: ClassVar[list[str]] = [
-        "project",
-        "status",
-        "progress",
-        "discussed",
-        "meeting",
-        "notes",
-        "recent",
-        "working on",
-        "update",
-    ]
-
-    MICRO_INDICATORS: ClassVar[list[str]] = [
-        "who",
-        "what",
-        "when",
-        "where",
-        "exactly",
-        "specific",
-        "email",
-        "phone",
-        "address",
-        "date",
-    ]
 
     def __init__(
         self,
@@ -157,480 +165,897 @@ class Researcher(BaseAgent):
         neo4j: Neo4jClient | None = None,
     ) -> None:
         """
-        Initialize the Researcher.
+        Initialize the Intelligent Researcher.
 
         Args:
             name: Agent name (default: "researcher").
-            config: Agent configuration.
+            config: Agent configuration with model settings.
             graphiti: GraphitiClient for vector search.
             neo4j: Neo4jClient for Cypher queries.
         """
         super().__init__(name, config)
         self.graphiti = graphiti
         self.neo4j = neo4j
-        model_config = (config or {}).get("model", {})
+
+        # Load configuration
+        self.config = config or {}
+        model_config = self.config.get("model", {})
+
+        # Model settings - handle both dict format and simple string format
         if isinstance(model_config, dict):
-            self.model = model_config.get("primary", "claude-3-haiku-20240307")
+            self.planning_model = model_config.get("planning", "claude-opus-4-5-20251101")
+            self.synthesis_model = model_config.get("synthesis", "claude-opus-4-5-20251101")
+            self.temperature = model_config.get("temperature", 0.3)
         else:
-            self.model = model_config or "claude-3-haiku-20240307"
+            # Simple string format: model is just the model name
+            self.planning_model = "claude-opus-4-5-20251101"
+            self.synthesis_model = "claude-opus-4-5-20251101"
+            self.temperature = 0.3
+
+        # Search settings
+        search_config = self.config.get("search", {})
+        self.max_parallel = search_config.get("max_parallel_strategies", 4)
+        self.default_limit = search_config.get("default_result_limit", 10)
+        self.max_results = search_config.get("max_total_results", 50)
+        self.search_timeout = search_config.get("timeout_seconds", 30)
+
+        # Scoring settings
+        scoring_config = self.config.get("scoring", {})
+        self.strength_boost_factor = scoring_config.get("strength_boost_factor", 0.3)
+
+        # Timeout settings
+        timeout_config = self.config.get("timeouts", {})
+        self.planning_timeout = timeout_config.get("planning", 15.0)
+        self.execution_timeout = timeout_config.get("execution", 30.0)
+        self.synthesis_timeout = timeout_config.get("synthesis", 20.0)
+
+        # Anthropic client
+        self._anthropic: anthropic.AsyncAnthropic | None = None
+
+    @property
+    def anthropic_client(self) -> anthropic.AsyncAnthropic:
+        """Lazy-initialize Anthropic client."""
+        if self._anthropic is None:
+            self._anthropic = anthropic.AsyncAnthropic()
+        return self._anthropic
+
+    # =========================================================================
+    # Main Entry Point
+    # =========================================================================
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
         Process search request from Orchestrator.
 
         Args:
-            msg: AgentMessage with search intent and query.
+            msg: AgentMessage with search query and context.
 
         Returns:
-            AgentMessage with search results or None.
+            AgentMessage with GraphIntelligenceReport.
         """
+        trace_id = msg.trace_id
         query = msg.payload.get("query", "")
+        context = msg.payload.get("context", {})
+        _zoom_level = msg.payload.get("zoom_level", "auto")  # Reserved for future use
+        max_results = msg.payload.get("max_results", self.max_results)
 
         if not query:
             logger.warning(
                 "[SWELL] Researcher received empty query",
-                extra={"trace_id": msg.trace_id, "agent_name": self.name},
-            )
-            return self._create_response(
-                msg, SearchResponse(query="", search_type=SearchType.SEMANTIC)
-            )
-
-        try:
-            # Check if zoom_level is specified in payload
-            zoom_level_str = msg.payload.get("zoom_level", "auto")
-            try:
-                zoom_level = ZoomLevel(zoom_level_str)
-            except ValueError:
-                zoom_level = ZoomLevel.AUTO
-
-            # If zoom level is specified (not AUTO), use zoom-aware search
-            if zoom_level != ZoomLevel.AUTO or zoom_level_str != "auto":
-                response = await self.search_with_zoom(query, zoom_level, msg.trace_id)
-            else:
-                # Legacy behavior: classify search type and execute
-                search_type = self._classify_search_type(query)
-
-                logger.debug(
-                    f"[WHISPER] Search type: {search_type.value}",
-                    extra={"trace_id": msg.trace_id, "query": query[:50]},
-                )
-
-                # Execute appropriate search strategy
-                if search_type == SearchType.SEMANTIC:
-                    response = await self._semantic_search(query, msg.trace_id)
-                elif search_type == SearchType.STRUCTURAL:
-                    response = await self._structural_search(query, msg.trace_id)
-                elif search_type == SearchType.TEMPORAL:
-                    response = await self._temporal_search(query, msg.trace_id)
-                else:
-                    # Hybrid: try both semantic and structural
-                    response = await self._hybrid_search(query, msg.trace_id)
-
-            logger.info(
-                f"[BEACON] Search returned {len(response.results)} results",
-                extra={"trace_id": msg.trace_id, "agent_name": self.name},
-            )
-
-            return self._create_response(msg, response)
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Search failed: {e}",
-                extra={"trace_id": msg.trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            # Return error response with empty results
-            error_response = AgentMessage(
-                trace_id=msg.trace_id,
-                source_agent=self.name,
-                target_agent=msg.source_agent,
-                intent="search_response",
-                payload={
-                    "result": "",
-                    "results": [],
-                    "search_type": SearchType.SEMANTIC.value,
-                    "count": 0,
-                    "error": str(e),
-                },
-                timestamp=time.time(),
-            )
-            return error_response
-
-    def _classify_search_type(self, query: str) -> SearchType:
-        """
-        Classify the type of search needed based on query patterns.
-
-        Args:
-            query: User's search query.
-
-        Returns:
-            SearchType enum value.
-        """
-        query_lower = query.lower()
-
-        is_structural = any(re.search(p, query_lower) for p in self.STRUCTURAL_PATTERNS)
-        is_temporal = any(re.search(p, query_lower) for p in self.TEMPORAL_PATTERNS)
-
-        if is_structural and is_temporal:
-            return SearchType.HYBRID
-        elif is_structural:
-            return SearchType.STRUCTURAL
-        elif is_temporal:
-            return SearchType.TEMPORAL
-        else:
-            return SearchType.SEMANTIC
-
-    def _detect_zoom_level(self, query: str) -> ZoomLevel:
-        """
-        Auto-detect appropriate zoom level from query.
-
-        Args:
-            query: User's search query.
-
-        Returns:
-            ZoomLevel enum value (MACRO, MESO, or MICRO).
-        """
-        query_lower = query.lower()
-
-        # Count indicators - give higher weight to longer/more specific indicators
-        macro_score = sum(2 for indicator in self.MACRO_INDICATORS if indicator in query_lower)
-        meso_score = sum(2 for indicator in self.MESO_INDICATORS if indicator in query_lower)
-        micro_score = 0
-
-        # Only count micro indicators if they're not already matched by meso/macro
-        for indicator in self.MICRO_INDICATORS:
-            # Don't count generic question words if we already have context-specific indicators
-            if indicator in query_lower and not (
-                indicator in ["what", "who", "when", "where"]
-                and (macro_score > 0 or meso_score > 0)
-            ):
-                micro_score += 1
-
-        # Question words that start queries and ask for specific facts
-        if query.startswith(("Who is", "When did", "What is", "What's")) and any(
-            word in query_lower for word in ["email", "phone", "address", "name"]
-        ):
-            micro_score += 2
-
-        # Determine level based on highest score
-        if macro_score > meso_score and macro_score > micro_score:
-            return ZoomLevel.MACRO
-        elif meso_score > micro_score:
-            return ZoomLevel.MESO
-        else:
-            return ZoomLevel.MICRO
-
-    async def _semantic_search(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Perform semantic search via Graphiti.
-
-        Combines two search strategies:
-        1. Entity search - finds matching entity nodes (people, orgs, etc.)
-        2. Edge search - finds matching facts/relationships
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with combined search results.
-        """
-        if not self.graphiti:
-            logger.warning(
-                "[SWELL] Graphiti client not available for semantic search",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
-            return SearchResponse(query=query, search_type=SearchType.SEMANTIC)
+            return self._create_empty_response(msg, "No query provided")
 
-        search_results: list[SearchResult] = []
-
-        try:
-            # 1. Search entity nodes (people, organizations, etc.)
-            entity_results = await self.graphiti.search_entities(query, limit=5, trace_id=trace_id)
-            for r in entity_results:
-                search_results.append(
-                    SearchResult(
-                        content=r.content or "",
-                        source="entity",
-                        source_id=r.uuid,
-                        confidence=r.score,
-                    )
-                )
-
-            # 2. Search edges/facts via Graphiti
-            edge_results = await self.graphiti.search(query, limit=5)
-            for r in edge_results:
-                search_results.append(
-                    SearchResult(
-                        content=r.fact if hasattr(r, "fact") else str(r),
-                        source="graphiti",
-                        source_id=str(r.uuid) if hasattr(r, "uuid") else None,
-                        confidence=r.score if hasattr(r, "score") else 0.5,
-                    )
-                )
-
-            # Sort by confidence/score descending
-            search_results.sort(key=lambda x: x.confidence, reverse=True)
-
-            logger.info(
-                f"[BEACON] Search returned {len(search_results)} results",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-
-            return SearchResponse(
-                query=query,
-                search_type=SearchType.SEMANTIC,
-                results=search_results[:10],  # Limit combined results
-            )
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Semantic search failed: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            return SearchResponse(query=query, search_type=SearchType.SEMANTIC)
-
-    async def _structural_search(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Perform graph traversal search using Cypher.
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with structural query results.
-        """
-        if not self.neo4j:
-            logger.warning(
-                "[SWELL] Neo4j client not available for structural search",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return SearchResponse(query=query, search_type=SearchType.STRUCTURAL)
-
-        # Extract entity name from query patterns
-        entity_name = self._extract_entity_name(query)
-
-        if not entity_name:
-            # Fall back to semantic search if we can't parse structure
-            logger.debug(
-                "[WHISPER] Could not extract entity, falling back to semantic",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return await self._semantic_search(query, trace_id)
-
-        # Determine relationship type from query
-        cypher, params = self._build_structural_query(query, entity_name)
-
-        try:
-            records = await self.neo4j.execute_query(cypher, params, trace_id=trace_id)
-
-            search_results = [
-                SearchResult(
-                    content=self._format_record(record),
-                    source="neo4j",
-                    confidence=1.0,
-                )
-                for record in records
-            ]
-
-            return SearchResponse(
-                query=query,
-                search_type=SearchType.STRUCTURAL,
-                results=search_results,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Structural search failed: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            return SearchResponse(query=query, search_type=SearchType.STRUCTURAL)
-
-    async def _temporal_search(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Perform time-filtered search.
-
-        Args:
-            query: Search query with temporal reference.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with time-filtered results.
-        """
-        if not self.neo4j:
-            logger.warning(
-                "[SWELL] Neo4j client not available for temporal search",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return SearchResponse(query=query, search_type=SearchType.TEMPORAL)
-
-        # Parse time reference from query
-        time_filter = self._parse_time_reference(query)
-
-        if not time_filter:
-            logger.debug(
-                "[WHISPER] Could not parse time reference",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return SearchResponse(query=query, search_type=SearchType.TEMPORAL)
-
-        # Build temporal query
-        cypher = """
-        MATCH (n)
-        WHERE n.created_at >= $start AND n.created_at <= $end
-        RETURN n, labels(n) as type
-        LIMIT 10
-        """
-
-        try:
-            records = await self.neo4j.execute_query(cypher, time_filter, trace_id=trace_id)
-
-            search_results = [
-                SearchResult(
-                    content=self._format_record(record),
-                    source="neo4j",
-                    confidence=1.0,
-                    temporal_context=f"Between {time_filter['start']} and {time_filter['end']}",
-                )
-                for record in records
-            ]
-
-            return SearchResponse(
-                query=query,
-                search_type=SearchType.TEMPORAL,
-                results=search_results,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Temporal search failed: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            return SearchResponse(query=query, search_type=SearchType.TEMPORAL)
-
-    async def _hybrid_search(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Combine semantic and structural search strategies.
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with combined results.
-        """
-        semantic = await self._semantic_search(query, trace_id)
-        structural = await self._structural_search(query, trace_id)
-
-        combined_results = semantic.results + structural.results
-
-        return SearchResponse(
-            query=query,
-            search_type=SearchType.HYBRID,
-            results=combined_results,
+        logger.info(
+            "[CHART] Researcher processing query",
+            extra={"trace_id": trace_id, "query": query[:100]},
         )
 
-    def _extract_entity_name(self, query: str) -> str | None:
+        try:
+            start_time = time.time()
+
+            # Step 1: Plan search strategies using Opus
+            plan = await self._plan_search(query, context, trace_id)
+
+            planning_time = (time.time() - start_time) * 1000
+            logger.info(
+                "[BEACON] Search plan ready",
+                extra={
+                    "trace_id": trace_id,
+                    "strategies": len(plan.strategies),
+                    "planning_ms": planning_time,
+                },
+            )
+
+            # Step 2: Execute search strategies in parallel
+            exec_start = time.time()
+            results_by_technique = await self._execute_search_plan(plan, trace_id)
+            execution_time = (time.time() - exec_start) * 1000
+
+            # Step 3: Aggregate and score results
+            aggregated = self._aggregate_results(results_by_technique, max_results)
+
+            logger.info(
+                "[BEACON] Search execution complete",
+                extra={
+                    "trace_id": trace_id,
+                    "raw_results": sum(len(r) for r in results_by_technique.values()),
+                    "aggregated": len(aggregated),
+                    "execution_ms": execution_time,
+                },
+            )
+
+            # Step 4: Synthesize report using Opus
+            synth_start = time.time()
+            report = await self._synthesize_report(query, aggregated, plan, trace_id)
+            synthesis_time = (time.time() - synth_start) * 1000
+
+            total_time = (time.time() - start_time) * 1000
+            logger.info(
+                "[ANCHOR] Research complete",
+                extra={
+                    "trace_id": trace_id,
+                    "total_ms": total_time,
+                    "confidence": report.confidence,
+                },
+            )
+
+            return self._create_response(
+                msg,
+                report,
+                raw_count=len(aggregated),
+                search_ms=execution_time,
+                synthesis_ms=synthesis_time,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Research failed: {e}",
+                extra={"trace_id": trace_id},
+                exc_info=True,
+            )
+            return self._create_empty_response(msg, f"Research failed: {e}")
+
+    # =========================================================================
+    # Search Planning (Opus)
+    # =========================================================================
+
+    async def _plan_search(
+        self,
+        query: str,
+        context: dict[str, Any],
+        trace_id: str,
+    ) -> SearchPlan:
         """
-        Extract entity name from query patterns.
+        Use Opus to analyze query and generate search plan.
 
         Args:
-            query: Search query.
+            query: User's search query.
+            context: Additional context (captain_uuid, recent_messages).
+            trace_id: Request trace ID.
 
         Returns:
-            Entity name or None if not found.
+            SearchPlan with strategies to execute.
         """
-        query_lower = query.lower()
+        logger.debug(
+            "[WHISPER] Planning search strategy",
+            extra={"trace_id": trace_id},
+        )
 
-        # Match queries like "who is John" or "who did Sarah"
-        match = re.search(r"who (?:is|does|did|was) (\w+)", query_lower)
-        if match:
-            return match.group(1).title()
+        prompt = PLANNING_PROMPT.format(
+            query=query,
+            captain_uuid=context.get("captain_uuid", "unknown"),
+            current_time=datetime.now(UTC).isoformat(),
+        )
 
-        # Match queries like "what does John do"
-        match = re.search(r"what (?:does|did|is|was) (\w+)", query_lower)
-        if match:
-            return match.group(1).title()
+        try:
+            response = await asyncio.wait_for(
+                self._call_opus(prompt, self.planning_model, trace_id),
+                timeout=self.planning_timeout,
+            )
 
-        # Match queries like "John works at Acme"
-        match = re.search(r"(\w+) (?:works?|worked) (?:at|for)", query_lower)
-        if match:
-            return match.group(1).title()
+            # Extract JSON from response
+            json_str = self._extract_json(response)
+            plan = SearchPlan.model_validate_json(json_str)
 
-        return None
+            logger.debug(
+                "[WHISPER] Search plan parsed",
+                extra={
+                    "trace_id": trace_id,
+                    "strategies": [s.technique.value for s in plan.strategies],
+                },
+            )
 
-    def _build_structural_query(self, query: str, entity_name: str) -> tuple[str, dict[str, Any]]:
+            return plan
+
+        except TimeoutError:
+            logger.warning(
+                "[SWELL] Planning timeout, using fallback",
+                extra={"trace_id": trace_id},
+            )
+            return self._fallback_plan(query)
+
+        except (ValidationError, json.JSONDecodeError) as e:
+            logger.warning(
+                f"[SWELL] Plan parsing failed: {e}, using fallback",
+                extra={"trace_id": trace_id},
+            )
+            return self._fallback_plan(query)
+
+    def _fallback_plan(self, query: str) -> SearchPlan:
         """
-        Build Cypher query for structural search.
+        Generate fallback search plan when LLM planning fails.
+
+        Uses both vector and entity search for broad coverage.
+        """
+        return SearchPlan(
+            original_query=query,
+            reasoning="Fallback plan: LLM planning unavailable",
+            strategies=[
+                SearchStrategy(
+                    technique=SearchTechnique.VECTOR,
+                    query=query,
+                    limit=self.default_limit,
+                    rationale="Semantic search fallback",
+                ),
+                SearchStrategy(
+                    technique=SearchTechnique.ENTITY_FULLTEXT,
+                    query=query,
+                    limit=5,
+                    rationale="Entity lookup fallback",
+                ),
+            ],
+            expected_result_type="general information",
+            zoom_level="micro",
+        )
+
+    # =========================================================================
+    # Parallel Search Execution
+    # =========================================================================
+
+    async def _execute_search_plan(
+        self,
+        plan: SearchPlan,
+        trace_id: str,
+    ) -> dict[str, list[RawSearchResult]]:
+        """
+        Execute all search strategies in parallel.
 
         Args:
-            query: Search query.
-            entity_name: Extracted entity name.
+            plan: SearchPlan with strategies to execute.
+            trace_id: Request trace ID.
 
         Returns:
-            Tuple of (cypher_query, parameters).
+            Results grouped by technique label.
         """
-        query_lower = query.lower()
+        logger.debug(
+            "[ANCHOR] Launching parallel searches",
+            extra={"trace_id": trace_id, "count": len(plan.strategies)},
+        )
 
-        if "work" in query_lower:
+        # Build coroutines for each strategy
+        tasks: list[asyncio.Task] = []
+        labels: list[str] = []
+
+        for i, strategy in enumerate(plan.strategies[: self.max_parallel]):
+            label = f"{strategy.technique.value}:{i}"
+            labels.append(label)
+
+            task: asyncio.Task
+            match strategy.technique:
+                case SearchTechnique.VECTOR:
+                    task = asyncio.create_task(
+                        self._execute_vector_search(
+                            strategy.query or plan.original_query,
+                            strategy.limit,
+                            trace_id,
+                        )
+                    )
+                case SearchTechnique.ENTITY_FULLTEXT:
+                    task = asyncio.create_task(
+                        self._execute_entity_search(
+                            strategy.query or plan.original_query,
+                            strategy.limit,
+                            trace_id,
+                        )
+                    )
+                case SearchTechnique.STRUCTURAL:
+                    task = asyncio.create_task(
+                        self._execute_structural_search(
+                            strategy.cypher_pattern,
+                            strategy.params,
+                            strategy.consider_strength,
+                            strategy.limit,
+                            trace_id,
+                        )
+                    )
+                case SearchTechnique.TEMPORAL:
+                    task = asyncio.create_task(
+                        self._execute_temporal_search(
+                            strategy.query or plan.original_query,
+                            strategy.time_range,
+                            strategy.limit,
+                            trace_id,
+                        )
+                    )
+
+            tasks.append(task)
+
+        # Execute all in parallel with timeout
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=self.execution_timeout,
+            )
+        except TimeoutError:
+            logger.warning(
+                "[SWELL] Search execution timeout",
+                extra={"trace_id": trace_id},
+            )
+            # Cancel remaining tasks
+            for task in tasks:
+                task.cancel()
+            results = [[] for _ in tasks]
+
+        # Map results by label
+        results_by_technique: dict[str, list[RawSearchResult]] = {}
+        for label, result in zip(labels, results, strict=False):
+            if isinstance(result, Exception):
+                logger.warning(
+                    f"[SWELL] Strategy {label} failed: {result}",
+                    extra={"trace_id": trace_id},
+                )
+                results_by_technique[label] = []
+            else:
+                typed_result: list[RawSearchResult] = result  # type: ignore[assignment]
+                results_by_technique[label] = typed_result
+                logger.debug(
+                    f"[WHISPER] Strategy {label} returned {len(typed_result)} results",
+                    extra={"trace_id": trace_id},
+                )
+
+        return results_by_technique
+
+    # =========================================================================
+    # Individual Search Implementations
+    # =========================================================================
+
+    async def _execute_vector_search(
+        self,
+        query: str,
+        limit: int,
+        trace_id: str,
+    ) -> list[RawSearchResult]:
+        """Execute semantic search via Graphiti."""
+        if not self.graphiti:
+            logger.debug(
+                "[WHISPER] Graphiti not available for vector search",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+        try:
+            results = await self.graphiti.search(query, limit=limit)
+            return [
+                RawSearchResult(
+                    content=r.fact if hasattr(r, "fact") else str(r),
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id=str(r.uuid) if hasattr(r, "uuid") else None,
+                    vector_score=r.score if hasattr(r, "score") else None,
+                )
+                for r in results
+            ]
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Vector search failed: {e}",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+    async def _execute_entity_search(
+        self,
+        query: str,
+        limit: int,
+        trace_id: str,
+    ) -> list[RawSearchResult]:
+        """Execute entity fulltext search via Graphiti."""
+        if not self.graphiti:
+            logger.debug(
+                "[WHISPER] Graphiti not available for entity search",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+        try:
+            results = await self.graphiti.search_entities(query, limit=limit, trace_id=trace_id)
+            return [
+                RawSearchResult(
+                    content=(
+                        f"{r.name}: {r.content}"
+                        if hasattr(r, "content") and r.content
+                        else str(r.name or "Unknown")
+                    ),
+                    source_technique=SearchTechnique.ENTITY_FULLTEXT,
+                    source_id=r.uuid if hasattr(r, "uuid") else None,
+                    vector_score=r.score if hasattr(r, "score") else None,
+                )
+                for r in results
+            ]
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Entity search failed: {e}",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+    async def _execute_structural_search(
+        self,
+        cypher_pattern: str | None,
+        params: dict[str, Any],
+        consider_strength: bool,
+        limit: int,
+        trace_id: str,
+    ) -> list[RawSearchResult]:
+        """
+        Execute structural search via Cypher.
+
+        Supports both predefined patterns and custom Cypher queries.
+        """
+        if not self.neo4j:
+            logger.debug(
+                "[WHISPER] Neo4j not available for structural search",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+        if not cypher_pattern:
+            return []
+
+        try:
+            # Check if this is a raw Cypher query (starts with MATCH)
+            if cypher_pattern.strip().upper().startswith("MATCH"):
+                # LLM-generated custom Cypher - use directly
+                cypher = cypher_pattern
+                query_params = {**params, "limit": limit}
+            elif cypher_pattern.upper() in STRUCTURAL_QUERIES:
+                # Predefined pattern
+                cypher = STRUCTURAL_QUERIES[cypher_pattern.upper()]
+                query_params = {**params, "limit": limit}
+            else:
+                logger.warning(
+                    f"[SWELL] Unknown cypher pattern: {cypher_pattern}",
+                    extra={"trace_id": trace_id},
+                )
+                return []
+
+            records = await self.neo4j.execute_query(cypher, query_params, trace_id=trace_id)
+
+            results = []
+            for record in records:
+                # Extract strength if present
+                strengths = []
+                if consider_strength:
+                    for key in ["strength", "weight", "closeness"]:
+                        if key in record and record[key] is not None:
+                            strengths.append(float(record[key]))
+
+                # Format record content
+                content = self._format_record(record)
+
+                # Extract temporal context if present
+                temporal = None
+                if "created_at" in record:
+                    temporal = TemporalContext(
+                        created_at=record.get("created_at", 0),
+                        expired_at=record.get("expired_at"),
+                        is_current=record.get("expired_at") is None,
+                    )
+
+                results.append(
+                    RawSearchResult(
+                        content=content,
+                        source_technique=SearchTechnique.STRUCTURAL,
+                        source_id=record.get("uuid") or record.get("person_uuid"),
+                        relationship_strengths=strengths,
+                        temporal_context=temporal,
+                    )
+                )
+
+            return results
+
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Structural search failed: {e}",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+    async def _execute_temporal_search(
+        self,
+        query: str,
+        time_range: TimeRange | None,
+        limit: int,
+        trace_id: str,
+    ) -> list[RawSearchResult]:
+        """Execute time-filtered search."""
+        if not self.neo4j:
+            logger.debug(
+                "[WHISPER] Neo4j not available for temporal search",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+        # Parse time range if not provided
+        if not time_range:
+            time_range = self._parse_time_reference(query)
+
+        if not time_range or (time_range.start is None and time_range.end is None):
+            return []
+
+        try:
             cypher = """
-            MATCH (p:Person {name: $name})-[r:WORKS_AT]->(o:Organization)
-            WHERE r.expired_at IS NULL
-            RETURN p.name as person, o.name as org, r.title as title
+            MATCH (n)
+            WHERE n.created_at >= $start AND n.created_at <= $end
+            RETURN n, labels(n) as labels
+            ORDER BY n.created_at DESC
+            LIMIT $limit
             """
-        elif "report" in query_lower:
-            cypher = """
-            MATCH (p:Person {name: $name})-[r:REPORTS_TO]->(m:Person)
-            WHERE r.expired_at IS NULL
-            RETURN p.name as person, m.name as manager
-            """
-        elif "block" in query_lower:
-            cypher = """
-            MATCH (t:Task)-[r:BLOCKS]->(blocked:Task)
-            RETURN t.action as blocker, blocked.action as blocked_task
-            """
+
+            params = {
+                "start": time_range.start or 0,
+                "end": time_range.end or datetime.now(UTC).timestamp(),
+                "limit": limit,
+            }
+
+            records = await self.neo4j.execute_query(cypher, params, trace_id=trace_id)
+
+            return [
+                RawSearchResult(
+                    content=self._format_node(record),
+                    source_technique=SearchTechnique.TEMPORAL,
+                    source_id=record.get("n", {}).get("uuid"),
+                    temporal_context=TemporalContext(
+                        created_at=record.get("n", {}).get("created_at", 0),
+                        is_current=True,
+                        human_readable=time_range.relative,
+                    ),
+                )
+                for record in records
+            ]
+
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Temporal search failed: {e}",
+                extra={"trace_id": trace_id},
+            )
+            return []
+
+    # =========================================================================
+    # Result Aggregation and Scoring
+    # =========================================================================
+
+    def _aggregate_results(
+        self,
+        results_by_technique: dict[str, list[RawSearchResult]],
+        max_results: int,
+    ) -> list[RawSearchResult]:
+        """
+        Aggregate results from all techniques with deduplication and scoring.
+
+        Args:
+            results_by_technique: Results grouped by technique.
+            max_results: Maximum results to return.
+
+        Returns:
+            Deduplicated, scored, and sorted results.
+        """
+        all_results: list[RawSearchResult] = []
+        seen_ids: set[str] = set()
+        seen_content: set[str] = set()
+
+        for technique_results in results_by_technique.values():
+            for result in technique_results:
+                # Deduplicate by source_id
+                if result.source_id and result.source_id in seen_ids:
+                    continue
+                if result.source_id:
+                    seen_ids.add(result.source_id)
+
+                # Also deduplicate by content (for results without IDs)
+                content_key = result.content[:100].lower()
+                if content_key in seen_content:
+                    continue
+                seen_content.add(content_key)
+
+                all_results.append(result)
+
+        # Sort by composite score (strength-aware)
+        all_results.sort(key=self._calculate_result_score, reverse=True)
+
+        return all_results[:max_results]
+
+    def _calculate_result_score(self, result: RawSearchResult) -> float:
+        """
+        Calculate composite score with relationship strength boost.
+
+        Formula: final_score = base_score * (1 + avg_strength * strength_boost_factor)
+        """
+        base_score: float = result.vector_score if result.vector_score is not None else 0.5
+
+        if result.relationship_strengths:
+            avg_strength = sum(result.relationship_strengths) / len(result.relationship_strengths)
+            boost = 1 + (avg_strength * self.strength_boost_factor)
         else:
-            # Generic entity lookup
-            cypher = """
-            MATCH (n {name: $name})
-            RETURN n, labels(n) as type
-            LIMIT 5
-            """
+            boost = 1.0
 
-        return cypher, {"name": entity_name}
+        return float(base_score * boost)
 
-    def _parse_time_reference(self, query: str) -> dict[str, float] | None:
+    # =========================================================================
+    # Report Synthesis (Opus)
+    # =========================================================================
+
+    async def _synthesize_report(
+        self,
+        query: str,
+        results: list[RawSearchResult],
+        plan: SearchPlan,
+        trace_id: str,
+    ) -> GraphIntelligenceReport:
         """
-        Parse time references from query into timestamp range.
+        Use Opus to synthesize results into a Graph Intelligence Report.
 
         Args:
-            query: Search query with temporal reference.
+            query: Original user query.
+            results: Aggregated search results.
+            plan: The search plan that was executed.
+            trace_id: Request trace ID.
 
         Returns:
-            Dict with 'start' and 'end' timestamps, or None if no time found.
+            GraphIntelligenceReport with synthesized answer.
         """
+        if not results:
+            return GraphIntelligenceReport(
+                query=query,
+                direct_answer="I don't have any information about that in The Locker.",
+                confidence=0.0,
+                confidence_level=ConfidenceLevel.UNCERTAIN,
+                as_of_date=datetime.now(UTC).strftime("%Y-%m-%d"),
+                search_techniques_used=[s.technique for s in plan.strategies],
+                result_count=0,
+                gaps_identified=["No matching information found"],
+            )
+
+        # Format results for the prompt
+        formatted_results = self._format_results_for_synthesis(results)
+        techniques_used = list({r.source_technique.value for r in results})
+
+        prompt = SYNTHESIS_PROMPT.format(
+            query=query,
+            plan_reasoning=plan.reasoning,
+            techniques=", ".join(techniques_used),
+            formatted_results=formatted_results,
+            current_date=datetime.now(UTC).strftime("%Y-%m-%d"),
+        )
+
+        try:
+            response = await asyncio.wait_for(
+                self._call_opus(prompt, self.synthesis_model, trace_id),
+                timeout=self.synthesis_timeout,
+            )
+
+            json_str = self._extract_json(response)
+            report = GraphIntelligenceReport.model_validate_json(json_str)
+
+            # Ensure search metadata is accurate
+            report.search_techniques_used = [SearchTechnique(t) for t in techniques_used]
+            report.result_count = len(results)
+
+            return report
+
+        except TimeoutError:
+            logger.warning(
+                "[SWELL] Synthesis timeout, using fallback",
+                extra={"trace_id": trace_id},
+            )
+            return self._fallback_report(query, results, plan)
+
+        except (ValidationError, json.JSONDecodeError) as e:
+            logger.warning(
+                f"[SWELL] Report parsing failed: {e}, using fallback",
+                extra={"trace_id": trace_id},
+            )
+            return self._fallback_report(query, results, plan)
+
+    def _fallback_report(
+        self,
+        query: str,
+        results: list[RawSearchResult],
+        plan: SearchPlan,
+    ) -> GraphIntelligenceReport:
+        """Generate fallback report when synthesis fails."""
+        # Calculate confidence from results
+        confidence, level = self._calculate_confidence(results)
+
+        # Extract key content
+        direct_answer = "Here's what I found:\n" + "\n".join(
+            f"- {r.content[:200]}" for r in results[:5]
+        )
+
+        return GraphIntelligenceReport(
+            query=query,
+            direct_answer=direct_answer,
+            confidence=confidence,
+            confidence_level=level,
+            evidence=[
+                EvidenceItem(
+                    fact=r.content[:200],
+                    relationship=r.source_technique.value,
+                    source=r.source_id or "unknown",
+                    confidence=r.vector_score or 0.5,
+                )
+                for r in results[:5]
+            ],
+            key_entities=[],
+            as_of_date=datetime.now(UTC).strftime("%Y-%m-%d"),
+            search_techniques_used=[s.technique for s in plan.strategies],
+            result_count=len(results),
+        )
+
+    def _calculate_confidence(
+        self,
+        results: list[RawSearchResult],
+    ) -> tuple[float, ConfidenceLevel]:
+        """Calculate confidence score from results."""
+        if not results:
+            return 0.0, ConfidenceLevel.UNCERTAIN
+
+        # Factor 1: Number of sources (diminishing returns)
+        source_factor = min(len(results) / 5, 1.0)
+
+        # Factor 2: Average vector score
+        scores = [r.vector_score for r in results if r.vector_score]
+        avg_score = sum(scores) / len(scores) if scores else 0.5
+
+        # Factor 3: Technique diversity
+        techniques = len({r.source_technique for r in results})
+        diversity = min(techniques / 3, 1.0)
+
+        # Factor 4: Strength signals
+        strengths = [s for r in results for s in r.relationship_strengths]
+        avg_strength = sum(strengths) / len(strengths) if strengths else 0.5
+
+        # Weighted combination
+        confidence = (
+            source_factor * 0.25 + avg_score * 0.30 + diversity * 0.20 + avg_strength * 0.25
+        )
+
+        # Map to level
+        if confidence >= 0.8:
+            level = ConfidenceLevel.HIGH
+        elif confidence >= 0.5:
+            level = ConfidenceLevel.MEDIUM
+        elif confidence >= 0.3:
+            level = ConfidenceLevel.LOW
+        else:
+            level = ConfidenceLevel.UNCERTAIN
+
+        return confidence, level
+
+    # =========================================================================
+    # Opus LLM Interface
+    # =========================================================================
+
+    async def _call_opus(
+        self,
+        prompt: str,
+        model: str,
+        trace_id: str,
+    ) -> str:
+        """
+        Call Claude Opus for reasoning.
+
+        Args:
+            prompt: The prompt to send.
+            model: Model ID to use.
+            trace_id: Request trace ID.
+
+        Returns:
+            Model response text.
+        """
+        logger.debug(
+            f"[WHISPER] Calling {model}",
+            extra={"trace_id": trace_id, "prompt_len": len(prompt)},
+        )
+
+        response = await self.anthropic_client.messages.create(
+            model=model,
+            max_tokens=4096,
+            temperature=self.temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        return str(response.content[0].text)
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def _extract_json(self, text: str) -> str:
+        """Extract JSON from LLM response (handles markdown code blocks)."""
+        # Try to find JSON in code blocks first
+        json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
+        if json_match:
+            return json_match.group(1).strip()
+
+        # Try to find raw JSON object
+        brace_match = re.search(r"\{[\s\S]*\}", text)
+        if brace_match:
+            return brace_match.group(0)
+
+        # Return as-is and let JSON parser handle errors
+        return text
+
+    def _format_record(self, record: dict[str, Any]) -> str:
+        """Format a Neo4j record for display."""
+        parts = []
+        for key, value in record.items():
+            if value is not None and key not in ["uuid", "labels", "type"]:
+                if isinstance(value, float):
+                    parts.append(f"{key}: {value:.2f}")
+                else:
+                    parts.append(f"{key}: {value}")
+        return ", ".join(parts) if parts else str(record)
+
+    def _format_node(self, record: dict[str, Any]) -> str:
+        """Format a node record for display."""
+        node = record.get("n", {})
+        labels = record.get("labels", [])
+        label_str = ":".join(labels) if labels else "Node"
+
+        if isinstance(node, dict):
+            name = node.get("name") or node.get("action") or node.get("content", "")[:50]
+            return f"[{label_str}] {name}"
+        return f"[{label_str}] {node}"
+
+    def _format_results_for_synthesis(self, results: list[RawSearchResult]) -> str:
+        """Format results for the synthesis prompt."""
+        lines = []
+        for i, r in enumerate(results[:20], 1):
+            line = f"{i}. [{r.source_technique.value}] {r.content}"
+            if r.vector_score:
+                line += f" (score: {r.vector_score:.2f})"
+            if r.relationship_strengths:
+                avg = sum(r.relationship_strengths) / len(r.relationship_strengths)
+                line += f" (strength: {avg:.2f})"
+            if r.temporal_context and r.temporal_context.human_readable:
+                line += f" ({r.temporal_context.human_readable})"
+            lines.append(line)
+        return "\n".join(lines)
+
+    def _parse_time_reference(self, query: str) -> TimeRange | None:
+        """Parse time references from query into TimeRange."""
         query_lower = query.lower()
-        now = datetime.now()
+        now = datetime.now(UTC)
 
         if "yesterday" in query_lower:
             start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0)
             end = start.replace(hour=23, minute=59, second=59)
+            relative = "yesterday"
         elif "last week" in query_lower:
             start = now - timedelta(days=7)
             end = now
+            relative = "last week"
         elif "last month" in query_lower:
             start = now - timedelta(days=30)
             end = now
+            relative = "last month"
         elif "last year" in query_lower:
             start = now - timedelta(days=365)
             end = now
+            relative = "last year"
         else:
-            # Try to extract "X days/weeks/months ago"
-            match = re.search(r"(\d+) (day|week|month)s? ago", query_lower)
+            # Try "X days/weeks/months ago"
+            match = re.search(r"(\d+)\s*(day|week|month)s?\s*ago", query_lower)
             if match:
                 count = int(match.group(1))
                 unit = match.group(2)
@@ -638,300 +1063,74 @@ class Researcher(BaseAgent):
                     start = now - timedelta(days=count)
                 elif unit == "week":
                     start = now - timedelta(weeks=count)
-                elif unit == "month":
-                    start = now - timedelta(days=count * 30)
                 else:
-                    return None
+                    start = now - timedelta(days=count * 30)
                 end = now
+                relative = f"{count} {unit}s ago"
             else:
                 return None
 
-        return {
-            "start": start.timestamp(),
-            "end": end.timestamp(),
-        }
+        return TimeRange(
+            start=start.timestamp(),
+            end=end.timestamp(),
+            relative=relative,
+        )
 
-    def _format_record(self, record: dict[str, Any]) -> str:
-        """
-        Format a Neo4j record for display.
-
-        Args:
-            record: Neo4j query result record.
-
-        Returns:
-            Formatted string representation.
-        """
-        # Simple formatting - convert dict to readable string
-        parts = []
-        for key, value in record.items():
-            if value is not None and key not in ["type"]:
-                parts.append(f"{key}: {value}")
-        return ", ".join(parts) if parts else str(record)
-
-    async def _search_macro(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Macro-level search: Knowledge Island summaries.
-
-        Used for broad questions like "What are my priorities?"
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with Community/Island summaries.
-        """
-        if not self.neo4j:
-            logger.warning(
-                "[SWELL] Neo4j client not available for macro search",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return SearchResponse(
-                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MACRO
-            )
-
-        try:
-            # Query Community nodes (Knowledge Islands)
-            cypher = """
-            MATCH (c:Community)
-            WHERE EXISTS((c)<-[:PART_OF_ISLAND]-())
-
-            // Get pending task count per island
-            OPTIONAL MATCH (c)<-[:PART_OF_ISLAND]-(t:Task {status: 'todo'})
-
-            WITH c, count(t) as pending_tasks
-
-            RETURN c.name as island_name,
-                   c.theme as theme,
-                   c.summary as summary,
-                   c.node_count as member_count,
-                   pending_tasks
-            ORDER BY pending_tasks DESC
-            LIMIT 10
-            """
-
-            records = await self.neo4j.execute_query(cypher, {}, trace_id=trace_id)
-
-            search_results = [
-                SearchResult(
-                    content=f"{record['island_name']} ({record['theme']}): {record['summary']} - {record['pending_tasks']} pending tasks",
-                    source="community",
-                    confidence=1.0,
-                )
-                for record in records
-            ]
-
-            return SearchResponse(
-                query=query,
-                search_type=SearchType.SEMANTIC,
-                results=search_results,
-                zoom_level=ZoomLevel.MACRO,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Macro search failed: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            return SearchResponse(
-                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MACRO
-            )
-
-    async def _search_meso(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Meso-level search: Note and Project context.
-
-        Used for thread-level queries like "Status of Q1 budget?"
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with Note/Project results.
-        """
-        if not self.graphiti or not self.neo4j:
-            logger.warning(
-                "[SWELL] Clients not available for meso search",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return SearchResponse(
-                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MESO
-            )
-
-        try:
-            search_results: list[SearchResult] = []
-
-            # Search for relevant Notes via Graphiti
-            # Note: Graphiti search will find notes based on content
-            graphiti_results = await self.graphiti.search(query, limit=5)
-            for r in graphiti_results:
-                search_results.append(
-                    SearchResult(
-                        content=r.fact if hasattr(r, "fact") else str(r),
-                        source="note",
-                        source_id=str(r.uuid) if hasattr(r, "uuid") else None,
-                        confidence=r.score if hasattr(r, "score") else 0.5,
-                    )
-                )
-
-            # Also query Project nodes directly if available
-            cypher = """
-            MATCH (p:Project)
-            WHERE toLower(p.name) CONTAINS toLower($query)
-               OR toLower(p.description) CONTAINS toLower($query)
-
-            OPTIONAL MATCH (p)-[:CONTRIBUTES_TO]->(g:Goal)
-            OPTIONAL MATCH (t:Task)-[:PART_OF]->(p)
-            WHERE t.status = 'todo'
-
-            WITH p, g, count(t) as pending_tasks
-
-            RETURN p.name as project_name,
-                   p.status as status,
-                   g.description as goal,
-                   pending_tasks
-            LIMIT 5
-            """
-
-            project_records = await self.neo4j.execute_query(
-                cypher, {"query": query}, trace_id=trace_id
-            )
-
-            for record in project_records:
-                content = (
-                    f"Project: {record['project_name']} (status: {record.get('status', 'unknown')})"
-                )
-                if record.get("goal"):
-                    content += f" - Goal: {record['goal']}"
-                if record.get("pending_tasks"):
-                    content += f" - {record['pending_tasks']} pending tasks"
-
-                search_results.append(
-                    SearchResult(
-                        content=content,
-                        source="project",
-                        confidence=1.0,
-                    )
-                )
-
-            # Sort by confidence
-            search_results.sort(key=lambda x: x.confidence, reverse=True)
-
-            return SearchResponse(
-                query=query,
-                search_type=SearchType.SEMANTIC,
-                results=search_results[:10],
-                zoom_level=ZoomLevel.MESO,
-            )
-
-        except Exception as e:
-            logger.error(
-                f"[STORM] Meso search failed: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-                exc_info=True,
-            )
-            return SearchResponse(
-                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MESO
-            )
-
-    async def _search_micro(self, query: str, trace_id: str) -> SearchResponse:
-        """
-        Micro-level search: Entity facts and specific details.
-
-        This is the existing semantic search behavior - precise fact retrieval.
-
-        Args:
-            query: Search query.
-            trace_id: Request trace ID.
-
-        Returns:
-            SearchResponse with entity facts.
-        """
-        # Use existing semantic search for micro-level queries
-        response = await self._semantic_search(query, trace_id)
-        response.zoom_level = ZoomLevel.MICRO
-        return response
-
-    async def search_with_zoom(
-        self,
-        query: str,
-        zoom_level: ZoomLevel = ZoomLevel.AUTO,
-        trace_id: str | None = None,
-    ) -> SearchResponse:
-        """
-        Search the knowledge graph with zoom level awareness.
-
-        Args:
-            query: The search query.
-            zoom_level: MACRO (islands), MESO (projects/notes), MICRO (entity facts), or AUTO.
-            trace_id: For logging.
-
-        Returns:
-            SearchResponse with results at the requested zoom level.
-        """
-        if trace_id is None:
-            trace_id = f"search-{time.time()}"
-
-        # Auto-detect zoom level if requested
-        if zoom_level == ZoomLevel.AUTO:
-            zoom_level = self._detect_zoom_level(query)
-            logger.debug(
-                f"[WHISPER] Auto-detected zoom level: {zoom_level.value}",
-                extra={"trace_id": trace_id, "query": query[:50]},
-            )
-
-        # Execute appropriate search based on zoom level
-        if zoom_level == ZoomLevel.MACRO:
-            return await self._search_macro(query, trace_id)
-        elif zoom_level == ZoomLevel.MESO:
-            return await self._search_meso(query, trace_id)
-        else:  # MICRO
-            return await self._search_micro(query, trace_id)
+    # =========================================================================
+    # Response Creation
+    # =========================================================================
 
     def _create_response(
-        self, original_msg: AgentMessage, search_response: SearchResponse
+        self,
+        original_msg: AgentMessage,
+        report: GraphIntelligenceReport,
+        raw_count: int,
+        search_ms: float,
+        synthesis_ms: float,
     ) -> AgentMessage:
-        """
-        Create response message for Orchestrator.
-
-        Args:
-            original_msg: Original request message.
-            search_response: SearchResponse with results.
-
-        Returns:
-            AgentMessage with formatted response.
-        """
-        # Format results for display
-        if search_response.results:
-            result_text = "\n".join([r.content for r in search_response.results[:5]])
-        else:
-            result_text = ""
-
-        payload = {
-            "result": result_text,
-            "results": [r.model_dump() for r in search_response.results],
-            "search_type": search_response.search_type.value,
-            "count": len(search_response.results),
-        }
-
-        # Include zoom_level if present
-        if search_response.zoom_level is not None:
-            payload["zoom_level"] = search_response.zoom_level.value
-
+        """Create response message with GraphIntelligenceReport."""
         return AgentMessage(
             trace_id=original_msg.trace_id,
             source_agent=self.name,
             target_agent=original_msg.source_agent,
             intent="search_response",
-            payload=payload,
+            payload={
+                "report": report.model_dump(),
+                "raw_result_count": raw_count,
+                "search_latency_ms": search_ms,
+                "synthesis_latency_ms": synthesis_ms,
+            },
             timestamp=time.time(),
         )
 
+    def _create_empty_response(
+        self,
+        original_msg: AgentMessage,
+        reason: str,
+    ) -> AgentMessage:
+        """Create empty response for error cases."""
+        report = GraphIntelligenceReport(
+            query=original_msg.payload.get("query", ""),
+            direct_answer=reason,
+            confidence=0.0,
+            confidence_level=ConfidenceLevel.UNCERTAIN,
+            as_of_date=datetime.now(UTC).strftime("%Y-%m-%d"),
+            result_count=0,
+        )
+        return self._create_response(original_msg, report, 0, 0.0, 0.0)
+
 
 # ===========================================================================
-# Export
+# Exports
 # ===========================================================================
 
-__all__ = ["Researcher", "SearchResponse", "SearchResult", "SearchType", "ZoomLevel"]
+__all__ = [
+    "Researcher",
+    # Re-export models for convenience
+    "SearchTechnique",
+    "ConfidenceLevel",
+    "ZoomLevel",
+    "GraphIntelligenceReport",
+    "RawSearchResult",
+    "SearchPlan",
+]

@@ -323,6 +323,83 @@ class CypherQueries:
     """
 
     # ===========================================================================
+    # STRENGTH-AWARE QUERIES (for Intelligent Researcher)
+    # ===========================================================================
+
+    FIND_KNOWS_WITH_STRENGTH = """
+    MATCH (a:Person)-[r:KNOWS]->(b:Person)
+    WHERE toLower(a.name) CONTAINS toLower($name)
+      AND r.expired_at IS NULL
+    RETURN a.uuid as source_uuid, a.name as source_name,
+           b.uuid as target_uuid, b.name as target_name,
+           r.strength as strength, r.context as context,
+           r.created_at as created_at
+    ORDER BY r.strength DESC NULLS LAST
+    LIMIT $limit
+    """
+
+    FIND_FRIEND_OF_WITH_STRENGTH = """
+    MATCH (a:Person)-[r:FRIEND_OF]->(b:Person)
+    WHERE toLower(a.name) CONTAINS toLower($name)
+      AND r.expired_at IS NULL
+    RETURN a.uuid as source_uuid, a.name as source_name,
+           b.uuid as target_uuid, b.name as target_name,
+           r.strength as strength, r.how_met as how_met,
+           r.since as since, r.created_at as created_at
+    ORDER BY r.strength DESC NULLS LAST
+    LIMIT $limit
+    """
+
+    FIND_WORKS_AT_WITH_TEMPORAL = """
+    MATCH (p:Person)-[r:WORKS_AT]->(o:Organization)
+    WHERE toLower(p.name) CONTAINS toLower($name)
+      AND r.created_at <= $as_of_timestamp
+      AND (r.expired_at IS NULL OR r.expired_at > $as_of_timestamp)
+    RETURN p.uuid as person_uuid, p.name as person_name,
+           o.uuid as org_uuid, o.name as org_name,
+           r.title as title, r.department as department,
+           r.created_at as started_at, r.expired_at as ended_at
+    ORDER BY r.created_at DESC
+    LIMIT $limit
+    """
+
+    FIND_CONTRIBUTES_TO_WITH_WEIGHT = """
+    MATCH (proj:Project)-[r:CONTRIBUTES_TO]->(goal:Goal)
+    WHERE toLower(proj.name) CONTAINS toLower($name)
+      AND r.expired_at IS NULL
+    RETURN proj.uuid as project_uuid, proj.name as project_name,
+           goal.uuid as goal_uuid, goal.description as goal_description,
+           r.weight as weight, r.how as contribution_how,
+           r.created_at as created_at
+    ORDER BY r.weight DESC NULLS LAST
+    LIMIT $limit
+    """
+
+    FIND_REPORTS_TO_CHAIN = """
+    MATCH path = (p:Person)-[:REPORTS_TO*1..5]->(top:Person)
+    WHERE toLower(p.name) CONTAINS toLower($name)
+    WITH p, top, path, length(path) as chain_length
+    RETURN p.name as person, top.name as top_manager,
+           [node in nodes(path) | node.name] as chain,
+           chain_length
+    ORDER BY chain_length
+    LIMIT $limit
+    """
+
+    FIND_BLOCKED_TASKS_WITH_REASON = """
+    MATCH (blocker:Task)-[r:BLOCKS]->(blocked:Task)
+    WHERE (toLower(blocker.action) CONTAINS toLower($query)
+           OR toLower(blocked.action) CONTAINS toLower($query))
+      AND blocked.status <> 'done'
+    RETURN blocker.uuid as blocker_uuid, blocker.action as blocker_task,
+           blocker.status as blocker_status,
+           blocked.uuid as blocked_uuid, blocked.action as blocked_task,
+           blocked.status as blocked_status,
+           r.reason as block_reason, r.created_at as blocked_since
+    LIMIT $limit
+    """
+
+    # ===========================================================================
     # RELATIONSHIP TRAVERSAL
     # ===========================================================================
 

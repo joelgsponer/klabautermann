@@ -202,7 +202,19 @@ class TestIntentHandlerDelegation:
     @pytest.mark.asyncio
     async def test_handle_search_delegates_to_researcher(self, orchestrator: Orchestrator) -> None:
         """_handle_search delegates to Researcher when available."""
-        mock_researcher = MockSubAgent("researcher", {"result": "John works at Acme Corp"})
+        # Use the new GraphIntelligenceReport format expected by _handle_search
+        mock_researcher = MockSubAgent(
+            "researcher",
+            {
+                "report": {
+                    "direct_answer": "John works at Acme Corp as a software engineer.",
+                    "confidence": 0.9,
+                    "confidence_level": "high",
+                    "result_count": 1,
+                    "evidence": [{"fact": "John is employed at Acme Corp"}],
+                }
+            },
+        )
         orchestrator.agent_registry = {"researcher": mock_researcher}
 
         # Start mock researcher
@@ -215,18 +227,14 @@ class TestIntentHandlerDelegation:
                 query="who is John?",
             )
 
-            # Mock _call_claude since search results are now processed through Claude
-            with patch.object(orchestrator, "_call_claude", new_callable=AsyncMock) as mock_claude:
-                mock_claude.return_value = "John works at Acme Corp as a software engineer."
+            result = await orchestrator._handle_search(intent, None, "trace-123")
 
-                result = await orchestrator._handle_search(intent, None, "trace-123")
-
-                assert result == "John works at Acme Corp as a software engineer."
-                assert len(mock_researcher.received_messages) == 1
-                # Verify Claude was called with search results
-                mock_claude.assert_called_once()
-                call_args = mock_claude.call_args[0][0]
-                assert "John works at Acme Corp" in call_args[0]["content"]
+            # Now returns direct_answer with evidence when confidence >= 0.5
+            assert "John works at Acme Corp as a software engineer." in result
+            assert len(mock_researcher.received_messages) == 1
+            # Verify evidence is included in response (confidence >= 0.5)
+            assert "Supporting evidence" in result
+            assert "John is employed at Acme Corp" in result
 
         finally:
             await mock_researcher.stop()
