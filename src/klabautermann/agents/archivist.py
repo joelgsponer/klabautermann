@@ -25,6 +25,7 @@ from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.agents.summarization import summarize_thread
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage, ThreadSummary
+from klabautermann.memory.note_queries import create_note_with_links
 
 
 if TYPE_CHECKING:
@@ -354,8 +355,8 @@ class Archivist(BaseAgent):
         """
         Create a Note node from the thread summary.
 
-        STUB: This will be implemented in T041 - Note Node Creation Query.
-        For now, just generate a UUID and log.
+        Creates the Note node in Neo4j, links it to the Thread via [:SUMMARY_OF],
+        and links any mentioned entities via [:MENTIONED_IN].
 
         Args:
             thread_uuid: UUID of the thread being archived
@@ -365,27 +366,34 @@ class Archivist(BaseAgent):
         Returns:
             UUID of the created Note node
         """
-        note_uuid = str(uuid.uuid4())
+        if not self.neo4j:
+            # Fallback to stub behavior if no neo4j client
+            note_uuid = str(uuid.uuid4())
+            logger.warning(
+                f"[SWELL] Cannot create Note: Neo4j client not configured, returning stub UUID {note_uuid[:8]}...",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return note_uuid
+
+        result = await create_note_with_links(
+            neo4j=self.neo4j,
+            thread_uuid=thread_uuid,
+            summary=summary,
+            trace_id=trace_id,
+        )
 
         logger.debug(
-            f"[WHISPER] STUB: Creating summary note {note_uuid[:8]}... for thread {thread_uuid[:8]}...",
+            f"[WHISPER] Created summary note {result['note_uuid'][:8]}... for thread {thread_uuid[:8]}...",
             extra={
                 "trace_id": trace_id,
                 "agent_name": self.name,
-                "note_uuid": note_uuid,
+                "note_uuid": result["note_uuid"],
                 "thread_uuid": thread_uuid,
-                "summary_length": len(summary.summary),
-                "topics_count": len(summary.topics),
+                "entity_link_count": result.get("entity_link_count", 0),
             },
         )
 
-        # TODO (T041): Implement actual Note node creation in Neo4j
-        # - Create Note node with summary content
-        # - Link to Thread with [:SUMMARY_OF]
-        # - Link to Day node with [:ON_DAY]
-        # - Store topics, action_items, new_facts as properties
-
-        return note_uuid
+        return str(result["note_uuid"])
 
     async def _prune_messages(
         self,
@@ -395,26 +403,34 @@ class Archivist(BaseAgent):
         """
         Prune original messages from an archived thread.
 
-        STUB: This will be implemented in T043 - Message Pruning Query.
-        For now, just log.
+        Deletes all Message nodes linked to the thread after verifying the thread
+        has been safely archived with a summary Note.
 
         Args:
             thread_uuid: UUID of the thread to prune
             trace_id: Trace ID for logging
         """
+        if not self.thread_manager:
+            logger.warning(
+                "[SWELL] Cannot prune messages: ThreadManager not configured",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return
+
+        count = await self.thread_manager.prune_thread_messages(
+            thread_uuid=thread_uuid,
+            trace_id=trace_id,
+        )
+
         logger.debug(
-            f"[WHISPER] STUB: Pruning messages for thread {thread_uuid[:8]}...",
+            f"[WHISPER] Pruned {count} messages from thread {thread_uuid[:8]}...",
             extra={
                 "trace_id": trace_id,
                 "agent_name": self.name,
                 "thread_uuid": thread_uuid,
+                "message_count": count,
             },
         )
-
-        # TODO (T043): Implement actual message pruning
-        # - Delete all Message nodes linked to this thread
-        # - Remove [:CONTAINS] and [:PRECEDES] relationships
-        # - Keep Thread node with archived status
 
 
 # ===========================================================================

@@ -39,6 +39,7 @@ class TestScanForInactiveThreads:
         mock.get_context_window = AsyncMock()
         mock.mark_archived = AsyncMock()
         mock.reactivate_thread = AsyncMock()
+        mock.prune_thread_messages = AsyncMock(return_value=5)  # Return count of pruned messages
         return mock
 
     @pytest.fixture
@@ -134,6 +135,7 @@ class TestArchiveThread:
         mock.get_context_window = AsyncMock()
         mock.mark_archived = AsyncMock(return_value=True)
         mock.reactivate_thread = AsyncMock(return_value=True)
+        mock.prune_thread_messages = AsyncMock(return_value=5)  # Return count of pruned messages
         return mock
 
     @pytest.fixture
@@ -334,6 +336,7 @@ class TestProcessArchivalQueue:
         mock.get_context_window = AsyncMock()
         mock.mark_archived = AsyncMock(return_value=True)
         mock.reactivate_thread = AsyncMock()
+        mock.prune_thread_messages = AsyncMock(return_value=5)  # Return count of pruned messages
         return mock
 
     @pytest.fixture
@@ -442,6 +445,7 @@ class TestProcessMessage:
         mock.get_context_window = AsyncMock()
         mock.mark_archived = AsyncMock(return_value=True)
         mock.reactivate_thread = AsyncMock()
+        mock.prune_thread_messages = AsyncMock(return_value=5)  # Return count of pruned messages
         return mock
 
     @pytest.fixture

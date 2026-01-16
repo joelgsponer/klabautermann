@@ -294,6 +294,30 @@ Example responses:
         # Generate trace ID if not provided
         trace_id = trace_id or f"orch-{uuid.uuid4().hex[:8]}"
 
+        # Parse thread_id to extract channel_type and external_id
+        # Format: "channel-uuid" (e.g., "cli-abc123", "telegram-12345")
+        if "-" in thread_id:
+            parts = thread_id.split("-", 1)
+            channel_type = parts[0]
+            external_id = parts[1] if len(parts) > 1 else thread_id
+        else:
+            channel_type = "cli"
+            external_id = thread_id
+
+        # Create thread BEFORE routing to v1/v2 workflow
+        if self.thread_manager:
+            try:
+                await self.thread_manager.get_or_create_thread(
+                    external_id=external_id,
+                    channel_type=channel_type,
+                    trace_id=trace_id,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[SWELL] Failed to create/get thread: {e}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
         # Check config for v2 workflow flag
         use_v2 = self.config.get("use_v2_workflow", True) if self.config else True
 
@@ -871,7 +895,6 @@ Example responses:
             "[CHART] All background tasks cancelled",
             extra={"agent_name": self.name},
         )
-
 
     # =========================================================================
     # Intent Classification (T020) - LLM-based with structured output
@@ -2197,6 +2220,21 @@ Analyze this message and return a JSON task plan.
                     "entity_count": len(context.recent_entities),
                 },
             )
+
+            # Store user message in thread
+            if self.thread_manager:
+                try:
+                    await self.thread_manager.add_message(
+                        thread_uuid=thread_uuid,
+                        role="user",
+                        content=text,
+                        trace_id=trace_id,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[SWELL] Failed to store user message: {e}",
+                        extra={"trace_id": trace_id, "agent_name": self.name},
+                    )
 
             # 2. Think: Plan tasks (fallback to direct response on failure)
             plan_start = time.time()
