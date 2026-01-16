@@ -43,6 +43,15 @@ class SearchType(str, Enum):
     HYBRID = "hybrid"
 
 
+class ZoomLevel(str, Enum):
+    """Zoom levels for retrieval granularity."""
+
+    AUTO = "auto"  # Let researcher decide
+    MACRO = "macro"  # Knowledge Islands, broad themes
+    MESO = "meso"  # Projects, Notes, mid-level context
+    MICRO = "micro"  # Entity facts, specific details
+
+
 class SearchResult(BaseModel):
     """Single search result from the knowledge graph."""
 
@@ -60,6 +69,7 @@ class SearchResponse(BaseModel):
     search_type: SearchType
     results: list[SearchResult] = Field(default_factory=list)
     summary: str | None = None
+    zoom_level: ZoomLevel | None = None
 
 
 # ===========================================================================
@@ -98,6 +108,45 @@ class Researcher(BaseAgent):
         r"in \d{4}",
         r"(?:on|before|after) (?:january|february|march|april|may|june|july|august|september|october|november|december)",
         r"(?:\d+) (?:days?|weeks?|months?) ago",
+    ]
+
+    # Zoom level detection patterns (from MEMORY.md Section 9.5)
+    MACRO_INDICATORS: ClassVar[list[str]] = [
+        "overview",
+        "summary",
+        "themes",
+        "big picture",
+        "main areas",
+        "life",
+        "everything",
+        "all",
+        "priorities",
+        "focus",
+    ]
+
+    MESO_INDICATORS: ClassVar[list[str]] = [
+        "project",
+        "status",
+        "progress",
+        "discussed",
+        "meeting",
+        "notes",
+        "recent",
+        "working on",
+        "update",
+    ]
+
+    MICRO_INDICATORS: ClassVar[list[str]] = [
+        "who",
+        "what",
+        "when",
+        "where",
+        "exactly",
+        "specific",
+        "email",
+        "phone",
+        "address",
+        "date",
     ]
 
     def __init__(
@@ -147,24 +196,35 @@ class Researcher(BaseAgent):
             )
 
         try:
-            # Classify search type
-            search_type = self._classify_search_type(query)
+            # Check if zoom_level is specified in payload
+            zoom_level_str = msg.payload.get("zoom_level", "auto")
+            try:
+                zoom_level = ZoomLevel(zoom_level_str)
+            except ValueError:
+                zoom_level = ZoomLevel.AUTO
 
-            logger.debug(
-                f"[WHISPER] Search type: {search_type.value}",
-                extra={"trace_id": msg.trace_id, "query": query[:50]},
-            )
-
-            # Execute appropriate search strategy
-            if search_type == SearchType.SEMANTIC:
-                response = await self._semantic_search(query, msg.trace_id)
-            elif search_type == SearchType.STRUCTURAL:
-                response = await self._structural_search(query, msg.trace_id)
-            elif search_type == SearchType.TEMPORAL:
-                response = await self._temporal_search(query, msg.trace_id)
+            # If zoom level is specified (not AUTO), use zoom-aware search
+            if zoom_level != ZoomLevel.AUTO or zoom_level_str != "auto":
+                response = await self.search_with_zoom(query, zoom_level, msg.trace_id)
             else:
-                # Hybrid: try both semantic and structural
-                response = await self._hybrid_search(query, msg.trace_id)
+                # Legacy behavior: classify search type and execute
+                search_type = self._classify_search_type(query)
+
+                logger.debug(
+                    f"[WHISPER] Search type: {search_type.value}",
+                    extra={"trace_id": msg.trace_id, "query": query[:50]},
+                )
+
+                # Execute appropriate search strategy
+                if search_type == SearchType.SEMANTIC:
+                    response = await self._semantic_search(query, msg.trace_id)
+                elif search_type == SearchType.STRUCTURAL:
+                    response = await self._structural_search(query, msg.trace_id)
+                elif search_type == SearchType.TEMPORAL:
+                    response = await self._temporal_search(query, msg.trace_id)
+                else:
+                    # Hybrid: try both semantic and structural
+                    response = await self._hybrid_search(query, msg.trace_id)
 
             logger.info(
                 f"[BEACON] Search returned {len(response.results)} results",
@@ -219,6 +279,46 @@ class Researcher(BaseAgent):
             return SearchType.TEMPORAL
         else:
             return SearchType.SEMANTIC
+
+    def _detect_zoom_level(self, query: str) -> ZoomLevel:
+        """
+        Auto-detect appropriate zoom level from query.
+
+        Args:
+            query: User's search query.
+
+        Returns:
+            ZoomLevel enum value (MACRO, MESO, or MICRO).
+        """
+        query_lower = query.lower()
+
+        # Count indicators - give higher weight to longer/more specific indicators
+        macro_score = sum(2 for indicator in self.MACRO_INDICATORS if indicator in query_lower)
+        meso_score = sum(2 for indicator in self.MESO_INDICATORS if indicator in query_lower)
+        micro_score = 0
+
+        # Only count micro indicators if they're not already matched by meso/macro
+        for indicator in self.MICRO_INDICATORS:
+            # Don't count generic question words if we already have context-specific indicators
+            if indicator in query_lower and not (
+                indicator in ["what", "who", "when", "where"]
+                and (macro_score > 0 or meso_score > 0)
+            ):
+                micro_score += 1
+
+        # Question words that start queries and ask for specific facts
+        if query.startswith(("Who is", "When did", "What is", "What's")) and any(
+            word in query_lower for word in ["email", "phone", "address", "name"]
+        ):
+            micro_score += 2
+
+        # Determine level based on highest score
+        if macro_score > meso_score and macro_score > micro_score:
+            return ZoomLevel.MACRO
+        elif meso_score > micro_score:
+            return ZoomLevel.MESO
+        else:
+            return ZoomLevel.MICRO
 
     async def _semantic_search(self, query: str, trace_id: str) -> SearchResponse:
         """
@@ -568,6 +668,228 @@ class Researcher(BaseAgent):
                 parts.append(f"{key}: {value}")
         return ", ".join(parts) if parts else str(record)
 
+    async def _search_macro(self, query: str, trace_id: str) -> SearchResponse:
+        """
+        Macro-level search: Knowledge Island summaries.
+
+        Used for broad questions like "What are my priorities?"
+
+        Args:
+            query: Search query.
+            trace_id: Request trace ID.
+
+        Returns:
+            SearchResponse with Community/Island summaries.
+        """
+        if not self.neo4j:
+            logger.warning(
+                "[SWELL] Neo4j client not available for macro search",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return SearchResponse(
+                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MACRO
+            )
+
+        try:
+            # Query Community nodes (Knowledge Islands)
+            cypher = """
+            MATCH (c:Community)
+            WHERE EXISTS((c)<-[:PART_OF_ISLAND]-())
+
+            // Get pending task count per island
+            OPTIONAL MATCH (c)<-[:PART_OF_ISLAND]-(t:Task {status: 'todo'})
+
+            WITH c, count(t) as pending_tasks
+
+            RETURN c.name as island_name,
+                   c.theme as theme,
+                   c.summary as summary,
+                   c.node_count as member_count,
+                   pending_tasks
+            ORDER BY pending_tasks DESC
+            LIMIT 10
+            """
+
+            records = await self.neo4j.execute_query(cypher, {}, trace_id=trace_id)
+
+            search_results = [
+                SearchResult(
+                    content=f"{record['island_name']} ({record['theme']}): {record['summary']} - {record['pending_tasks']} pending tasks",
+                    source="community",
+                    confidence=1.0,
+                )
+                for record in records
+            ]
+
+            return SearchResponse(
+                query=query,
+                search_type=SearchType.SEMANTIC,
+                results=search_results,
+                zoom_level=ZoomLevel.MACRO,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Macro search failed: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+                exc_info=True,
+            )
+            return SearchResponse(
+                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MACRO
+            )
+
+    async def _search_meso(self, query: str, trace_id: str) -> SearchResponse:
+        """
+        Meso-level search: Note and Project context.
+
+        Used for thread-level queries like "Status of Q1 budget?"
+
+        Args:
+            query: Search query.
+            trace_id: Request trace ID.
+
+        Returns:
+            SearchResponse with Note/Project results.
+        """
+        if not self.graphiti or not self.neo4j:
+            logger.warning(
+                "[SWELL] Clients not available for meso search",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return SearchResponse(
+                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MESO
+            )
+
+        try:
+            search_results: list[SearchResult] = []
+
+            # Search for relevant Notes via Graphiti
+            # Note: Graphiti search will find notes based on content
+            graphiti_results = await self.graphiti.search(query, limit=5)
+            for r in graphiti_results:
+                search_results.append(
+                    SearchResult(
+                        content=r.fact if hasattr(r, "fact") else str(r),
+                        source="note",
+                        source_id=str(r.uuid) if hasattr(r, "uuid") else None,
+                        confidence=r.score if hasattr(r, "score") else 0.5,
+                    )
+                )
+
+            # Also query Project nodes directly if available
+            cypher = """
+            MATCH (p:Project)
+            WHERE toLower(p.name) CONTAINS toLower($query)
+               OR toLower(p.description) CONTAINS toLower($query)
+
+            OPTIONAL MATCH (p)-[:CONTRIBUTES_TO]->(g:Goal)
+            OPTIONAL MATCH (t:Task)-[:PART_OF]->(p)
+            WHERE t.status = 'todo'
+
+            WITH p, g, count(t) as pending_tasks
+
+            RETURN p.name as project_name,
+                   p.status as status,
+                   g.description as goal,
+                   pending_tasks
+            LIMIT 5
+            """
+
+            project_records = await self.neo4j.execute_query(
+                cypher, {"query": query}, trace_id=trace_id
+            )
+
+            for record in project_records:
+                content = (
+                    f"Project: {record['project_name']} (status: {record.get('status', 'unknown')})"
+                )
+                if record.get("goal"):
+                    content += f" - Goal: {record['goal']}"
+                if record.get("pending_tasks"):
+                    content += f" - {record['pending_tasks']} pending tasks"
+
+                search_results.append(
+                    SearchResult(
+                        content=content,
+                        source="project",
+                        confidence=1.0,
+                    )
+                )
+
+            # Sort by confidence
+            search_results.sort(key=lambda x: x.confidence, reverse=True)
+
+            return SearchResponse(
+                query=query,
+                search_type=SearchType.SEMANTIC,
+                results=search_results[:10],
+                zoom_level=ZoomLevel.MESO,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Meso search failed: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+                exc_info=True,
+            )
+            return SearchResponse(
+                query=query, search_type=SearchType.SEMANTIC, zoom_level=ZoomLevel.MESO
+            )
+
+    async def _search_micro(self, query: str, trace_id: str) -> SearchResponse:
+        """
+        Micro-level search: Entity facts and specific details.
+
+        This is the existing semantic search behavior - precise fact retrieval.
+
+        Args:
+            query: Search query.
+            trace_id: Request trace ID.
+
+        Returns:
+            SearchResponse with entity facts.
+        """
+        # Use existing semantic search for micro-level queries
+        response = await self._semantic_search(query, trace_id)
+        response.zoom_level = ZoomLevel.MICRO
+        return response
+
+    async def search_with_zoom(
+        self,
+        query: str,
+        zoom_level: ZoomLevel = ZoomLevel.AUTO,
+        trace_id: str | None = None,
+    ) -> SearchResponse:
+        """
+        Search the knowledge graph with zoom level awareness.
+
+        Args:
+            query: The search query.
+            zoom_level: MACRO (islands), MESO (projects/notes), MICRO (entity facts), or AUTO.
+            trace_id: For logging.
+
+        Returns:
+            SearchResponse with results at the requested zoom level.
+        """
+        if trace_id is None:
+            trace_id = f"search-{time.time()}"
+
+        # Auto-detect zoom level if requested
+        if zoom_level == ZoomLevel.AUTO:
+            zoom_level = self._detect_zoom_level(query)
+            logger.debug(
+                f"[WHISPER] Auto-detected zoom level: {zoom_level.value}",
+                extra={"trace_id": trace_id, "query": query[:50]},
+            )
+
+        # Execute appropriate search based on zoom level
+        if zoom_level == ZoomLevel.MACRO:
+            return await self._search_macro(query, trace_id)
+        elif zoom_level == ZoomLevel.MESO:
+            return await self._search_meso(query, trace_id)
+        else:  # MICRO
+            return await self._search_micro(query, trace_id)
+
     def _create_response(
         self, original_msg: AgentMessage, search_response: SearchResponse
     ) -> AgentMessage:
@@ -587,17 +909,23 @@ class Researcher(BaseAgent):
         else:
             result_text = ""
 
+        payload = {
+            "result": result_text,
+            "results": [r.model_dump() for r in search_response.results],
+            "search_type": search_response.search_type.value,
+            "count": len(search_response.results),
+        }
+
+        # Include zoom_level if present
+        if search_response.zoom_level is not None:
+            payload["zoom_level"] = search_response.zoom_level.value
+
         return AgentMessage(
             trace_id=original_msg.trace_id,
             source_agent=self.name,
             target_agent=original_msg.source_agent,
             intent="search_response",
-            payload={
-                "result": result_text,
-                "results": [r.model_dump() for r in search_response.results],
-                "search_type": search_response.search_type.value,
-                "count": len(search_response.results),
-            },
+            payload=payload,
             timestamp=time.time(),
         )
 
@@ -606,4 +934,4 @@ class Researcher(BaseAgent):
 # Export
 # ===========================================================================
 
-__all__ = ["Researcher", "SearchResponse", "SearchResult", "SearchType"]
+__all__ = ["Researcher", "SearchResponse", "SearchResult", "SearchType", "ZoomLevel"]

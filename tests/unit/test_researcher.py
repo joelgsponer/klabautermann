@@ -14,6 +14,7 @@ from klabautermann.agents.researcher import (
     SearchResponse,
     SearchResult,
     SearchType,
+    ZoomLevel,
 )
 from klabautermann.core.models import AgentMessage
 
@@ -572,3 +573,251 @@ class TestNeverFabricates:
         assert response is not None
         assert response.payload["result"] == ""
         assert response.payload["count"] == 0
+
+
+# ===========================================================================
+# Test Zoom Level Detection
+# ===========================================================================
+
+
+class TestZoomLevelDetection:
+    """Tests for _detect_zoom_level method."""
+
+    def test_detect_macro_overview_query(self, researcher: Researcher) -> None:
+        """Query with 'overview' → MACRO."""
+        query = "Give me an overview of my priorities"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MACRO
+
+    def test_detect_macro_themes_query(self, researcher: Researcher) -> None:
+        """Query with 'themes' → MACRO."""
+        query = "What are the main themes in my life?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MACRO
+
+    def test_detect_macro_big_picture_query(self, researcher: Researcher) -> None:
+        """Query with 'big picture' → MACRO."""
+        query = "Show me the big picture of my focus areas"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MACRO
+
+    def test_detect_meso_project_query(self, researcher: Researcher) -> None:
+        """Query with 'project' → MESO."""
+        query = "What's the status of the Q1 budget project?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MESO
+
+    def test_detect_meso_progress_query(self, researcher: Researcher) -> None:
+        """Query with 'progress' → MESO."""
+        query = "What progress have I made on the marketing campaign?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MESO
+
+    def test_detect_meso_notes_query(self, researcher: Researcher) -> None:
+        """Query with 'notes' → MESO."""
+        query = "What did my recent notes discuss?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MESO
+
+    def test_detect_micro_who_query(self, researcher: Researcher) -> None:
+        """Query starting with 'Who' → MICRO."""
+        query = "Who is Sarah?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MICRO
+
+    def test_detect_micro_email_query(self, researcher: Researcher) -> None:
+        """Query with 'email' → MICRO."""
+        query = "What's Sarah's email address?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MICRO
+
+    def test_detect_micro_specific_query(self, researcher: Researcher) -> None:
+        """Query with 'specific' → MICRO."""
+        query = "What specific date did John join?"
+        zoom_level = researcher._detect_zoom_level(query)
+        assert zoom_level == ZoomLevel.MICRO
+
+
+# ===========================================================================
+# Test Zoom Level Searches
+# ===========================================================================
+
+
+class TestZoomLevelSearches:
+    """Tests for zoom-level specific searches."""
+
+    @pytest.mark.asyncio
+    async def test_search_macro_returns_island_summaries(
+        self, researcher: Researcher, mock_neo4j: MagicMock
+    ) -> None:
+        """Macro search returns Knowledge Island summaries."""
+        # Mock Community node results
+        mock_neo4j.execute_query.return_value = [
+            {
+                "island_name": "Work Island",
+                "theme": "professional",
+                "summary": "Career and work-related activities",
+                "member_count": 150,
+                "pending_tasks": 12,
+            },
+            {
+                "island_name": "Family Island",
+                "theme": "family",
+                "summary": "Family relationships and events",
+                "member_count": 45,
+                "pending_tasks": 3,
+            },
+        ]
+
+        response = await researcher._search_macro("What are my priorities?", "trace-123")
+
+        assert response.zoom_level == ZoomLevel.MACRO
+        assert len(response.results) == 2
+        assert "Work Island" in response.results[0].content
+        assert response.results[0].source == "community"
+
+    @pytest.mark.asyncio
+    async def test_search_meso_returns_notes_and_projects(
+        self, researcher: Researcher, mock_graphiti: MagicMock, mock_neo4j: MagicMock
+    ) -> None:
+        """Meso search returns Note and Project results."""
+        # Mock Graphiti note results
+        mock_graphiti.search.return_value = [
+            MagicMock(
+                fact="Discussed Q1 budget with Sarah",
+                uuid="note-1",
+                score=0.9,
+            )
+        ]
+
+        # Mock Neo4j project results
+        mock_neo4j.execute_query.return_value = [
+            {
+                "project_name": "Q1 Budget",
+                "status": "in_progress",
+                "goal": "Finalize Q1 financial planning",
+                "pending_tasks": 5,
+            }
+        ]
+
+        response = await researcher._search_meso("Status of Q1 budget?", "trace-123")
+
+        assert response.zoom_level == ZoomLevel.MESO
+        assert len(response.results) >= 1
+        # Should have results from both notes and projects
+
+    @pytest.mark.asyncio
+    async def test_search_micro_returns_entity_facts(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Micro search returns specific entity facts."""
+        mock_graphiti.search.return_value = [
+            MagicMock(
+                fact="Sarah's email is sarah@example.com",
+                uuid="entity-1",
+                score=0.95,
+            )
+        ]
+        mock_graphiti.search_entities.return_value = []
+
+        response = await researcher._search_micro("What's Sarah's email?", "trace-123")
+
+        assert response.zoom_level == ZoomLevel.MICRO
+        assert len(response.results) >= 1
+
+    @pytest.mark.asyncio
+    async def test_search_with_zoom_auto_detects_macro(
+        self, researcher: Researcher, mock_neo4j: MagicMock
+    ) -> None:
+        """search_with_zoom with AUTO correctly detects MACRO."""
+        mock_neo4j.execute_query.return_value = []
+
+        response = await researcher.search_with_zoom(
+            "What are my main priorities?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
+        )
+
+        assert response.zoom_level == ZoomLevel.MACRO
+
+    @pytest.mark.asyncio
+    async def test_search_with_zoom_auto_detects_meso(
+        self, researcher: Researcher, mock_graphiti: MagicMock, mock_neo4j: MagicMock
+    ) -> None:
+        """search_with_zoom with AUTO correctly detects MESO."""
+        mock_graphiti.search.return_value = []
+        mock_neo4j.execute_query.return_value = []
+
+        response = await researcher.search_with_zoom(
+            "What's the status of my project?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
+        )
+
+        assert response.zoom_level == ZoomLevel.MESO
+
+    @pytest.mark.asyncio
+    async def test_search_with_zoom_auto_detects_micro(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """search_with_zoom with AUTO correctly detects MICRO."""
+        mock_graphiti.search.return_value = []
+        mock_graphiti.search_entities.return_value = []
+
+        response = await researcher.search_with_zoom(
+            "Who is Sarah?", zoom_level=ZoomLevel.AUTO, trace_id="trace-123"
+        )
+
+        assert response.zoom_level == ZoomLevel.MICRO
+
+    @pytest.mark.asyncio
+    async def test_search_with_zoom_explicit_macro(
+        self, researcher: Researcher, mock_neo4j: MagicMock
+    ) -> None:
+        """search_with_zoom with explicit MACRO level."""
+        mock_neo4j.execute_query.return_value = []
+
+        response = await researcher.search_with_zoom(
+            "Some query", zoom_level=ZoomLevel.MACRO, trace_id="trace-123"
+        )
+
+        assert response.zoom_level == ZoomLevel.MACRO
+
+    @pytest.mark.asyncio
+    async def test_process_message_with_zoom_level_parameter(
+        self, researcher: Researcher, mock_neo4j: MagicMock
+    ) -> None:
+        """process_message handles zoom_level in payload."""
+        mock_neo4j.execute_query.return_value = []
+
+        msg = AgentMessage(
+            trace_id="trace-123",
+            source_agent="orchestrator",
+            target_agent="researcher",
+            intent="search",
+            payload={"query": "My priorities", "zoom_level": "macro"},
+        )
+
+        response = await researcher.process_message(msg)
+
+        assert response is not None
+        assert "zoom_level" in response.payload
+        assert response.payload["zoom_level"] == "macro"
+
+    @pytest.mark.asyncio
+    async def test_process_message_backward_compatible(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """process_message works without zoom_level (backward compatible)."""
+        mock_graphiti.search.return_value = []
+        mock_graphiti.search_entities.return_value = []
+
+        msg = AgentMessage(
+            trace_id="trace-123",
+            source_agent="orchestrator",
+            target_agent="researcher",
+            intent="search",
+            payload={"query": "Who is Sarah?"},
+        )
+
+        response = await researcher.process_message(msg)
+
+        # Should work fine without zoom_level parameter
+        assert response is not None
+        assert response.payload["count"] >= 0
