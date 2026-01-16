@@ -101,7 +101,7 @@ class SearchPlan(BaseModel):
 class TemporalContext(BaseModel):
     """Temporal validity of a fact."""
 
-    created_at: float | str  # Accept both Unix timestamp and ISO date string
+    created_at: float | str | None = None  # Accept Unix timestamp, ISO date, or None
     expired_at: float | str | None = None
     is_current: bool = True
     human_readable: str | None = Field(default=None, description="e.g., 'since March 2024'")
@@ -132,7 +132,9 @@ class EvidenceItem(BaseModel):
     fact: str
     relationship: str = Field(default="", description="Relationship type that supports this")
     source: str = Field(default="", description="Episode or node ID")
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    confidence: float = Field(
+        default=0.5, ge=0.0
+    )  # No upper bound - Graphiti scores can exceed 1.0
     temporal_note: str | None = None
 
 
