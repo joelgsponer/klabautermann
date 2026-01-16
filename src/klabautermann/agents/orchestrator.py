@@ -457,10 +457,11 @@ Example responses:
 
             # Fire-and-forget ingestion only for INGESTION intent (don't pollute graph with queries)
             if self.graphiti and intent.type == IntentType.INGESTION:
-                task = asyncio.create_task(self._ingest_conversation(text, response_text, trace_id))
-                # Store reference to prevent garbage collection
-                self._background_tasks.add(task)
-                task.add_done_callback(self._background_tasks.discard)
+                self._track_background_task(
+                    self._ingest_conversation(text, response_text, trace_id),
+                    trace_id=trace_id,
+                    task_name=f"ingest-v1-{trace_id}",
+                )
 
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(
@@ -780,6 +781,97 @@ Example responses:
                 extra={"agent_name": self.name},
             )
         return has
+
+    # =========================================================================
+    # Background Task Tracking (T074)
+    # =========================================================================
+
+    def _track_background_task(
+        self,
+        coro: Any,
+        trace_id: str,
+        task_name: str = "background_task",
+    ) -> asyncio.Task[Any]:
+        """
+        Create and track a background task to prevent garbage collection.
+
+        This ensures fire-and-forget tasks don't get GC'd before completion
+        and provides monitoring of task lifecycle.
+
+        Args:
+            coro: Coroutine to run in background.
+            trace_id: Request trace ID for logging.
+            task_name: Human-readable task name for debugging.
+
+        Returns:
+            The created asyncio.Task.
+        """
+        task = asyncio.create_task(coro, name=task_name)
+        self._background_tasks.add(task)
+
+        def _on_done(t: asyncio.Task[Any]) -> None:
+            """Callback when task completes or fails."""
+            self._background_tasks.discard(t)
+            if t.exception():
+                logger.warning(
+                    f"[SWELL] Background task failed: {t.get_name()}",
+                    extra={
+                        "trace_id": trace_id,
+                        "agent_name": self.name,
+                        "error": str(t.exception()),
+                    },
+                )
+            else:
+                logger.debug(
+                    f"[WHISPER] Background task completed: {t.get_name()}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+        task.add_done_callback(_on_done)
+        return task
+
+    def _get_background_task_count(self) -> int:
+        """
+        Get count of currently running background tasks.
+
+        Used for health checks and monitoring.
+
+        Returns:
+            Number of background tasks currently tracked.
+        """
+        return len(self._background_tasks)
+
+    async def shutdown(self) -> None:
+        """
+        Cancel all background tasks and clean up on shutdown.
+
+        This ensures graceful shutdown by cancelling any pending
+        fire-and-forget tasks and waiting for them to complete.
+        """
+        if not self._background_tasks:
+            logger.info(
+                "[CHART] No background tasks to cancel",
+                extra={"agent_name": self.name},
+            )
+            return
+
+        logger.info(
+            f"[CHART] Cancelling {len(self._background_tasks)} background tasks",
+            extra={"agent_name": self.name},
+        )
+
+        # Cancel all tasks
+        for task in self._background_tasks:
+            task.cancel()
+
+        # Wait for cancellation with exceptions suppressed
+        await asyncio.gather(*self._background_tasks, return_exceptions=True)
+
+        logger.info(
+            "[CHART] All background tasks cancelled",
+            extra={"agent_name": self.name},
+        )
+
 
     # =========================================================================
     # Intent Classification (T020) - LLM-based with structured output
@@ -1784,10 +1876,11 @@ Analyze this message and return a JSON task plan.
                 )
             else:
                 # Fire-and-forget for non-blocking tasks (ingestion)
-                bg_task = asyncio.create_task(self._dispatch_task_fire_and_forget(task, trace_id))
-                # Track to prevent garbage collection
-                self._background_tasks.add(bg_task)
-                bg_task.add_done_callback(self._background_tasks.discard)
+                self._track_background_task(
+                    self._dispatch_task_fire_and_forget(task, trace_id),
+                    trace_id=trace_id,
+                    task_name=f"{task.task_type}-{task.agent}-{trace_id}",
+                )
                 logger.info(
                     f"[WHISPER] Fire-and-forget task started: {task.task_type} -> {task.agent}",
                     extra={"trace_id": trace_id, "description": task.description[:50]},
