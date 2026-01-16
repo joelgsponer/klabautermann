@@ -22,7 +22,7 @@ import pytest
 from klabautermann.agents.executor import Executor
 from klabautermann.agents.ingestor import Ingestor
 from klabautermann.agents.orchestrator import Orchestrator
-from klabautermann.agents.researcher import Researcher, SearchType
+from klabautermann.agents.researcher import Researcher
 from klabautermann.config.manager import ConfigManager
 from klabautermann.core.models import (
     AgentMessage,
@@ -441,8 +441,17 @@ class TestEntityExtraction:
 # ====================
 
 
+@pytest.mark.skip(
+    reason="SearchType API removed - Researcher now uses LLM-based planning (see test_researcher.py)"
+)
 class TestHybridSearch:
-    """Test hybrid search classification in Researcher."""
+    """
+    Test hybrid search classification in Researcher.
+
+    DEPRECATED: The _classify_search_type method was removed in the
+    Intelligent Researcher refactor (Sprint 4). Search technique selection
+    is now done via LLM-based planning. See test_researcher.py for new tests.
+    """
 
     @pytest.fixture
     def researcher(
@@ -459,23 +468,19 @@ class TestHybridSearch:
 
     def test_search_type_semantic(self, researcher: Researcher) -> None:
         """Generic query classified as semantic."""
-        search_type = researcher._classify_search_type("What was that budget thing?")
-        assert search_type == SearchType.SEMANTIC
+        pytest.skip("_classify_search_type removed in v2")
 
     def test_search_type_structural(self, researcher: Researcher) -> None:
         """Relationship query classified as structural."""
-        search_type = researcher._classify_search_type("Who does Sarah work for?")
-        assert search_type == SearchType.STRUCTURAL
+        pytest.skip("_classify_search_type removed in v2")
 
     def test_search_type_temporal(self, researcher: Researcher) -> None:
         """Time-based query classified as temporal."""
-        search_type = researcher._classify_search_type("What happened last week?")
-        assert search_type == SearchType.TEMPORAL
+        pytest.skip("_classify_search_type removed in v2")
 
     def test_search_type_hybrid_works_at(self, researcher: Researcher) -> None:
         """Query with relationship and time classified as hybrid."""
-        search_type = researcher._classify_search_type("Who worked at Acme last month?")
-        assert search_type == SearchType.HYBRID
+        pytest.skip("_classify_search_type removed in v2")
 
 
 # ====================
