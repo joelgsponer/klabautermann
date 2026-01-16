@@ -1,0 +1,27 @@
+[package]
+name = "klabautermann-tui"
+version = "0.1.0"
+edition = "2021"
+description = "Nautical-themed TUI for Klabautermann PKM"
+
+[[bin]]
+name = "klabautermann-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1.44", features = ["full"] }
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tui-textarea = "0.7"
+clap = { version = "4.5", features = ["derive"] }
+uuid = { version = "1.11", features = ["v4"] }
+textwrap = "0.16"
+chrono = "0.4"
+
+[profile.release]
+lto = true
+strip = true
