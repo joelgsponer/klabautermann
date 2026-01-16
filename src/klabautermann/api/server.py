@@ -78,7 +78,10 @@ async def handle_chat_message(websocket: WebSocket, message: dict[str, Any]) -> 
             return
 
         # Process through orchestrator
-        response = await _orchestrator.process(content, thread_id=thread_id)
+        response = await _orchestrator.handle_user_input_v2(
+            text=content,
+            thread_uuid=thread_id or "default",
+        )
 
         # Send response
         await websocket.send_json({"type": "response", "content": response})

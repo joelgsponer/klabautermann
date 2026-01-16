@@ -1,6 +1,6 @@
 //! Event handler for terminal and application events.
 
-use crossterm::event::{Event, EventStream, KeyEvent};
+use crossterm::event::{Event, EventStream, KeyEvent, MouseEvent};
 use futures_util::StreamExt;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -13,6 +13,8 @@ use crate::ws::ServerMessage;
 pub enum AppEvent {
     /// Keyboard input
     Key(KeyEvent),
+    /// Mouse input
+    Mouse(MouseEvent),
     /// Terminal resize
     Resize(u16, u16),
     /// WebSocket message received
@@ -44,6 +46,7 @@ impl EventHandler {
             while let Some(Ok(event)) = reader.next().await {
                 let app_event = match event {
                     Event::Key(key) => AppEvent::Key(key),
+                    Event::Mouse(mouse) => AppEvent::Mouse(mouse),
                     Event::Resize(w, h) => AppEvent::Resize(w, h),
                     _ => continue,
                 };

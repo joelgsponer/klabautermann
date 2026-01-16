@@ -4,7 +4,9 @@
 
 use clap::Parser;
 use crossterm::{
-    event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers},
+    event::{
+        DisableMouseCapture, EnableMouseCapture, KeyCode, KeyModifiers, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -149,6 +151,17 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 }
                             }
                         }
+                    }
+                }
+                AppEvent::Mouse(mouse) => {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => {
+                            app.scroll_up(3);
+                        }
+                        MouseEventKind::ScrollDown => {
+                            app.scroll_down(3);
+                        }
+                        _ => {}
                     }
                 }
                 AppEvent::Resize(w, h) => {
