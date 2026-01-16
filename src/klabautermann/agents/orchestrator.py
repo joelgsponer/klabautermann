@@ -279,6 +279,8 @@ Example responses:
         Main entry point: process user input and return response.
 
         This is the primary interface for channels to interact with the Orchestrator.
+        Routes to either v1 (intent-based) or v2 (Think-Dispatch-Synthesize) workflow
+        based on the use_v2_workflow config flag.
 
         Args:
             thread_id: Thread identifier from channel.
@@ -291,10 +293,56 @@ Example responses:
         """
         # Generate trace ID if not provided
         trace_id = trace_id or f"orch-{uuid.uuid4().hex[:8]}"
+
+        # Check config for v2 workflow flag
+        use_v2 = self.config.get("use_v2_workflow", True) if self.config else True
+
+        if use_v2:
+            logger.info(
+                "[CHART] Using v2 workflow (Think-Dispatch-Synthesize)",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return await self.handle_user_input_v2(
+                text=text,
+                thread_uuid=thread_id,
+                trace_id=trace_id,
+            )
+
+        # Legacy v1 workflow (intent-based routing)
+        return await self._handle_user_input_v1(
+            thread_id=thread_id,
+            text=text,
+            context=context,
+            trace_id=trace_id,
+        )
+
+    async def _handle_user_input_v1(
+        self,
+        thread_id: str,
+        text: str,
+        context: ThreadContext | None = None,
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Legacy v1 workflow: single-intent classification and routing.
+
+        DEPRECATED: This workflow is kept for rollback purposes.
+        New code should use handle_user_input_v2() directly.
+
+        Args:
+            thread_id: Thread identifier from channel.
+            text: User's message content.
+            context: Optional pre-loaded context window.
+            trace_id: Request trace ID for logging.
+
+        Returns:
+            Response text to send back to user.
+        """
+        trace_id = trace_id or f"orch-{uuid.uuid4().hex[:8]}"
         start_time = time.time()
 
         logger.info(
-            "[CHART] Processing user input",
+            "[CHART] Processing user input (v1 workflow)",
             extra={
                 "trace_id": trace_id,
                 "agent_name": self.name,
@@ -412,7 +460,7 @@ Example responses:
 
             elapsed_ms = (time.time() - start_time) * 1000
             logger.info(
-                "[BEACON] Response generated",
+                "[BEACON] Response generated (v1)",
                 extra={
                     "trace_id": trace_id,
                     "agent_name": self.name,

@@ -1,6 +1,10 @@
 # Orchestrator Configuration
 # The "CEO" agent that routes intents and coordinates sub-agents
 
+# V2 Workflow: Think-Dispatch-Synthesize pattern (Sprint 4)
+# When true, uses parallel multi-intent processing instead of single-intent routing
+use_v2_workflow: true
+
 model:
   primary: claude-sonnet-4-20250514
   fallback: claude-3-haiku-20240307

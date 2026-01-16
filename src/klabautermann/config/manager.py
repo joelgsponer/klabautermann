@@ -158,6 +158,10 @@ class OrchestratorConfig(AgentConfigBase):
     personality: PersonalityConfig = Field(default_factory=PersonalityConfig)
     intent_classification: IntentConfig = Field(default_factory=IntentConfig)
     delegation: DelegationConfig = Field(default_factory=DelegationConfig)
+    use_v2_workflow: bool = Field(
+        default=True,
+        description="Use Think-Dispatch-Synthesize pattern (v2) instead of single-intent routing",
+    )
 
 
 class IngestorConfig(AgentConfigBase):
