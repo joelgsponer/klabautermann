@@ -21,6 +21,7 @@ clap = { version = "4.5", features = ["derive"] }
 uuid = { version = "1.11", features = ["v4"] }
 textwrap = "0.16"
 chrono = "0.4"
+pulldown-cmark = "0.12"
 
 [profile.release]
 lto = true

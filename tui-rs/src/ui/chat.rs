@@ -8,6 +8,7 @@ use ratatui::{
 };
 use textwrap::wrap;
 
+use super::markdown::render_markdown;
 use crate::app::App;
 use crate::theme::Styles;
 
@@ -30,24 +31,36 @@ pub fn render_chat(frame: &mut Frame, area: Rect, app: &mut App) {
             ("\u{2693} Klabautermann: ", Styles::bot_label())
         };
 
-        // Wrap content to fit terminal width
-        let wrapped = wrap(&msg.content, wrap_width.saturating_sub(18));
+        if msg.is_user {
+            // User messages: simple text wrapping
+            let wrapped = wrap(&msg.content, wrap_width.saturating_sub(18));
 
-        for (i, line_text) in wrapped.iter().enumerate() {
-            if i == 0 {
-                // First line with label
-                lines.push(Line::from(vec![
-                    Span::styled(label, label_style),
-                    Span::styled(line_text.to_string(), Styles::message()),
-                ]));
-            } else {
-                // Continuation lines (indented)
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled(line_text.to_string(), Styles::message()),
-                ]));
+            for (i, line_text) in wrapped.iter().enumerate() {
+                if i == 0 {
+                    lines.push(Line::from(vec![
+                        Span::styled(label, label_style),
+                        Span::styled(line_text.to_string(), Styles::message()),
+                    ]));
+                } else {
+                    lines.push(Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled(line_text.to_string(), Styles::message()),
+                    ]));
+                }
+            }
+        } else {
+            // Bot messages: render with markdown
+            lines.push(Line::from(Span::styled(label, label_style)));
+
+            let md_lines = render_markdown(&msg.content, Styles::message());
+            for md_line in md_lines {
+                // Indent markdown content
+                let mut indented_spans = vec![Span::raw("  ")];
+                indented_spans.extend(md_line.spans);
+                lines.push(Line::from(indented_spans));
             }
         }
+
         // Add spacing between messages
         lines.push(Line::from(""));
     }

@@ -6,5 +6,6 @@ mod header;
 mod input;
 mod layout;
 mod loading;
+mod markdown;
 
 pub use layout::render;
