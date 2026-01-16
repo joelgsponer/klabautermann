@@ -309,6 +309,10 @@ Example responses:
             )
 
         # Legacy v1 workflow (intent-based routing)
+        logger.info(
+            "[CHART] Using v1 workflow (intent-based routing)",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
         return await self._handle_user_input_v1(
             thread_id=thread_id,
             text=text,
