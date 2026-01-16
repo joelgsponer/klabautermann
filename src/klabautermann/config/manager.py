@@ -223,6 +223,7 @@ class OrchestratorV2Config(BaseModel):
     # Model configuration (plain strings instead of ModelConfig object)
     model: str = "claude-opus-4-5-20251101"
     synthesis_model: str = "claude-opus-4-5-20251101"
+    fallback_model: str | None = "claude-sonnet-4-20250514"
 
     # Orchestrator v2 specific configs
     context: ContextConfig = Field(default_factory=ContextConfig)

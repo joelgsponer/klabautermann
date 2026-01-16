@@ -1439,27 +1439,116 @@ Analyze this message and return a JSON task plan.
 
         return "\n".join(parts) or "No additional context available."
 
-    async def _call_opus_for_planning(self, prompt: str, trace_id: str) -> str:
-        """Call Claude Opus with JSON mode for task planning."""
+    async def _call_llm_with_fallback(
+        self,
+        prompt: str,
+        trace_id: str,
+        primary_model: str | None = None,
+        fallback_model: str | None = None,
+        max_tokens: int = 2000,
+    ) -> str:
+        """
+        Call LLM with automatic fallback on failure.
+
+        Tries primary model first with timeout, falls back to fallback model if:
+        - Primary model times out
+        - Primary model raises an exception
+        - Fallback model is configured (not None)
+
+        Args:
+            prompt: The prompt to send to the LLM
+            trace_id: Request trace ID for logging
+            primary_model: Override primary model (defaults to config_v2.model)
+            fallback_model: Override fallback model (defaults to config_v2.fallback_model)
+            max_tokens: Maximum tokens in response
+
+        Returns:
+            Response text from LLM
+
+        Raises:
+            Exception: If primary fails and no fallback configured, or if fallback also fails
+        """
+        # Load v2 config
+        config = self._load_v2_config()
+
+        # Determine models to use
+        primary = primary_model or config.get("model", "claude-opus-4-5-20251101")
+        fallback = fallback_model or config.get("fallback_model")
+
+        # Get timeout from config
+        timeout = config.get("timeouts", {}).get("llm_call", 60.0)
+
         loop = asyncio.get_event_loop()
 
-        def _sync_call() -> str:
+        def _sync_call(model: str) -> str:
             response = self.anthropic.messages.create(
-                model="claude-opus-4-5-20251101",
-                max_tokens=2000,
+                model=model,
+                max_tokens=max_tokens,
                 messages=[{"role": "user", "content": prompt}],
             )
             text: str = response.content[0].text
             return text
 
-        logger.debug(
-            "[WHISPER] Calling Claude Opus for task planning",
-            extra={"trace_id": trace_id, "agent_name": self.name},
-        )
+        # Try primary model
+        try:
+            logger.debug(
+                f"[WHISPER] Calling primary model ({primary})",
+                extra={"trace_id": trace_id, "agent_name": self.name, "model": primary},
+            )
 
-        return await loop.run_in_executor(None, _sync_call)
+            response = await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: _sync_call(primary)), timeout=timeout
+            )
 
-    def _parse_task_plan(self, response: str, _trace_id: str) -> TaskPlan:
+            return response
+
+        except (TimeoutError, Exception) as e:
+            # Log the failure
+            logger.warning(
+                f"[SWELL] Primary model failed: {type(e).__name__}: {e}",
+                extra={"trace_id": trace_id, "error": str(e), "primary_model": primary},
+            )
+
+            # If no fallback configured, re-raise
+            if not fallback:
+                logger.error(
+                    "[STORM] No fallback model configured, propagating error",
+                    extra={"trace_id": trace_id},
+                )
+                raise
+
+            # Try fallback model
+            logger.warning(
+                f"[SWELL] Attempting fallback to {fallback}",
+                extra={"trace_id": trace_id, "fallback_model": fallback},
+            )
+
+            try:
+                response = await loop.run_in_executor(None, lambda: _sync_call(fallback))
+
+                logger.info(
+                    "[BEACON] Fallback model succeeded",
+                    extra={"trace_id": trace_id, "fallback_model": fallback},
+                )
+
+                return response
+
+            except Exception as fallback_error:
+                logger.error(
+                    f"[STORM] Fallback model also failed: {fallback_error}",
+                    extra={"trace_id": trace_id, "fallback_model": fallback},
+                )
+                raise
+
+    async def _call_opus_for_planning(self, prompt: str, trace_id: str) -> str:
+        """
+        Call Claude Opus with JSON mode for task planning.
+
+        Uses _call_llm_with_fallback for automatic fallback to Sonnet if Opus fails.
+        """
+        return await self._call_llm_with_fallback(prompt=prompt, trace_id=trace_id, max_tokens=2000)
+
+    def _parse_task_plan(self, response: str, trace_id: str) -> TaskPlan:
         """Parse LLM response into TaskPlan model."""
         import json as json_module
         import re
@@ -1479,7 +1568,159 @@ Analyze this message and return a JSON task plan.
                 raise ValueError("No JSON found in response")
 
         data = json_module.loads(json_str)
-        return TaskPlan.model_validate(data)
+        task_plan = TaskPlan.model_validate(data)
+
+        # Apply deduplication to tasks (T072)
+        if task_plan.tasks:
+            task_plan.tasks = self._deduplicate_tasks(task_plan.tasks, trace_id)
+
+        return task_plan
+
+    # =========================================================================
+    # Orchestrator v2 Task Deduplication (T072)
+    # =========================================================================
+
+    def _deduplicate_tasks(self, tasks: list[PlannedTask], trace_id: str) -> list[PlannedTask]:
+        """
+        Merge similar tasks to avoid redundant work.
+
+        Rules:
+        - Never dedupe ingest tasks (each fact is unique)
+        - Merge similar research queries (same entity/topic)
+        - Merge execute tasks only if same action type
+        - Log when deduplication occurs
+
+        Args:
+            tasks: List of planned tasks from LLM
+            trace_id: For logging
+
+        Returns:
+            Deduplicated list of tasks
+
+        Reference: T072 - Task Deduplication
+        """
+        if len(tasks) <= 1:
+            return tasks
+
+        deduplicated = []
+        seen_queries: dict[str, int] = {}  # key -> index in deduplicated list
+
+        for task in tasks:
+            # Never dedupe ingestion - each fact matters
+            if task.task_type == "ingest":
+                deduplicated.append(task)
+                continue
+
+            # Generate a key for similarity check
+            key = self._task_similarity_key(task)
+
+            if key in seen_queries:
+                # Merge with existing task
+                existing_idx = seen_queries[key]
+                deduplicated[existing_idx] = self._merge_tasks(deduplicated[existing_idx], task)
+                logger.debug(
+                    f"[WHISPER] Merged duplicate task: {task.description[:50]}",
+                    extra={"trace_id": trace_id, "similarity_key": key},
+                )
+            else:
+                seen_queries[key] = len(deduplicated)
+                deduplicated.append(task)
+
+        if len(deduplicated) < len(tasks):
+            logger.info(
+                f"[WHISPER] Deduplicated {len(tasks)} -> {len(deduplicated)} tasks",
+                extra={
+                    "trace_id": trace_id,
+                    "original_count": len(tasks),
+                    "deduplicated_count": len(deduplicated),
+                },
+            )
+
+        return deduplicated
+
+    def _task_similarity_key(self, task: PlannedTask) -> str:
+        """
+        Generate a similarity key for task deduplication.
+
+        For research tasks: Extract main entity/topic from query
+        For execute tasks: Use action type
+        For ingest tasks: Use unique ID (never dedupe)
+
+        Args:
+            task: PlannedTask to generate key for
+
+        Returns:
+            Similarity key string
+        """
+        if task.task_type == "research":
+            query = task.payload.get("query", "") if task.payload else ""
+            # Normalize query: lowercase, strip whitespace
+            normalized_query = query.lower().strip()
+
+            # Remove common query prefixes to extract the main entity/topic
+            for prefix in ["search for", "find", "look up", "get", "what about", "tell me about"]:
+                if normalized_query.startswith(prefix):
+                    normalized_query = normalized_query[len(prefix) :].strip()
+                    break
+
+            # Extract first word as the primary entity identifier
+            # This allows "Sarah" and "Sarah Johnson" to match
+            words = normalized_query.split()
+            topic = words[0] if words else "unknown"
+            return f"research:{topic}"
+
+        elif task.task_type == "execute":
+            action = task.payload.get("action", "") if task.payload else ""
+            # Normalize action type
+            normalized_action = action.lower().strip()
+            # Extract action verb (first word typically)
+            action_verb = normalized_action.split()[0] if normalized_action else "unknown"
+            return f"execute:{action_verb}"
+
+        # Fallback: use task object ID (ensures uniqueness)
+        return f"{task.task_type}:{id(task)}"
+
+    def _merge_tasks(self, task1: PlannedTask, task2: PlannedTask) -> PlannedTask:
+        """
+        Merge two similar tasks into one.
+
+        Strategy:
+        - Keep longer/more detailed description
+        - Merge payloads (prefer non-None values from task2)
+        - Preserve blocking status (if either is blocking, result is blocking)
+
+        Args:
+            task1: First task (existing)
+            task2: Second task (to merge in)
+
+        Returns:
+            Merged PlannedTask
+        """
+        # Choose longer description as it's likely more detailed
+        merged_description = (
+            task1.description
+            if len(task1.description) >= len(task2.description)
+            else task2.description
+        )
+
+        # Merge payloads: start with task1, update with non-None values from task2
+        merged_payload = task1.payload.copy() if task1.payload else {}
+        if task2.payload:
+            for key, value in task2.payload.items():
+                # Only override if task2's value is not None or if task1 doesn't have it
+                if value is not None or key not in merged_payload:
+                    merged_payload[key] = value
+
+        # If either task is blocking, the merged task should be blocking
+        merged_blocking = task1.blocking or task2.blocking
+
+        return PlannedTask(
+            task_type=task1.task_type,
+            description=merged_description,
+            agent=task1.agent,
+            payload=merged_payload,
+            blocking=merged_blocking,
+        )
 
     # =========================================================================
     # Orchestrator v2 Parallel Execution (T055)
@@ -1772,20 +2013,19 @@ Analyze this message and return a JSON task plan.
 
         return "\n\n".join(parts)
 
-    async def _call_opus_for_synthesis(self, prompt: str, _trace_id: str) -> str:
-        """Call Claude Opus for response synthesis."""
-        loop = asyncio.get_event_loop()
+    async def _call_opus_for_synthesis(self, prompt: str, trace_id: str) -> str:
+        """
+        Call Claude Opus for response synthesis.
 
-        response = await loop.run_in_executor(
-            None,
-            lambda: self.anthropic.messages.create(
-                model="claude-opus-4-5-20251101",
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}],
-            ),
+        Uses _call_llm_with_fallback for automatic fallback to Sonnet if Opus fails.
+        Can use a different model via synthesis_model config.
+        """
+        config = self._load_v2_config()
+        synthesis_model = config.get("synthesis_model", "claude-opus-4-5-20251101")
+
+        return await self._call_llm_with_fallback(
+            prompt=prompt, trace_id=trace_id, primary_model=synthesis_model, max_tokens=1000
         )
-
-        return str(response.content[0].text)
 
     def _build_fallback_response(self, results: dict[str, Any]) -> str:
         """Build a basic response when synthesis fails."""
