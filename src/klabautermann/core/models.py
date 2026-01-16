@@ -12,7 +12,7 @@ from __future__ import annotations
 import time
 import uuid
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -581,6 +581,120 @@ class ThreadSummary(BaseModel):
 
 
 # ===========================================================================
+# Orchestrator v2 Models (Think-Dispatch-Synthesize Pattern)
+# ===========================================================================
+
+
+class CommunityContext(BaseModel):
+    """
+    Summary of a Knowledge Island relevant to current context.
+
+    Knowledge Islands are clusters of related entities and activities
+    detected through community detection algorithms in the knowledge graph.
+    Used by Orchestrator v2 for broad context awareness.
+
+    Reference: specs/MAINAGENT.md Section 4.2
+    """
+
+    name: str
+    theme: str
+    summary: str
+    pending_tasks: int = 0
+
+
+class EntityReference(BaseModel):
+    """
+    Reference to a recently mentioned entity.
+
+    Provides lightweight entity context for orchestrator reasoning
+    without loading full entity details. Used in EnrichedContext to
+    track recently active entities from Graphiti.
+
+    Reference: specs/MAINAGENT.md Section 4.2
+    """
+
+    uuid: str
+    name: str
+    entity_type: str  # Person, Organization, Project, etc.
+    created_at: float  # timestamp
+
+
+class EnrichedContext(BaseModel):
+    """
+    Rich context for orchestrator reasoning.
+
+    Integrates multiple memory layers (Short/Mid/Long-Term + Community)
+    to provide comprehensive context for the Think-Dispatch-Synthesize
+    workflow. This replaces simple ThreadContext in Orchestrator v2.
+
+    Memory Layers:
+    - Short-Term: Recent messages in current thread
+    - Mid-Term: Summaries from other recent threads (Note nodes)
+    - Long-Term: Recently mentioned entities (Graphiti)
+    - Community: Knowledge Island context for broad awareness
+
+    Reference: specs/MAINAGENT.md Section 4.2
+    """
+
+    thread_uuid: str
+    channel_type: ChannelType
+
+    # Short-Term Memory: Current conversation
+    messages: list[dict[str, Any]]
+
+    # Mid-Term Memory: Cross-thread summaries
+    recent_summaries: list[ThreadSummary]
+
+    # Active tasks/reminders
+    pending_tasks: list[TaskNode]
+
+    # Long-Term Memory: Recently mentioned entities
+    recent_entities: list[EntityReference]
+
+    # Community: Knowledge Island context
+    relevant_islands: list[CommunityContext] | None = None
+
+
+class PlannedTask(BaseModel):
+    """
+    A task identified by the orchestrator during the Think phase.
+
+    Each task represents a unit of work to be dispatched to a subagent.
+    Tasks can be blocking (wait for result) or non-blocking (fire-and-forget).
+
+    Reference: specs/MAINAGENT.md Section 4.3
+    """
+
+    task_type: Literal["ingest", "research", "execute"]
+    description: str = Field(description="Human-readable description of what this task does")
+    agent: Literal["ingestor", "researcher", "executor"]
+    payload: dict[str, Any] = Field(description="Agent-specific parameters for task execution")
+    blocking: bool = Field(
+        default=True,
+        description="True if orchestrator should wait for result before synthesizing response",
+    )
+
+
+class TaskPlan(BaseModel):
+    """
+    Orchestrator's plan for handling the user message.
+
+    Result of the Think phase - identifies all tasks needed to provide
+    a complete answer. Tasks are dispatched in parallel during the
+    Dispatch phase, then results are synthesized in the Synthesize phase.
+
+    Reference: specs/MAINAGENT.md Section 4.3
+    """
+
+    reasoning: str = Field(description="Why these tasks were chosen (for debugging/logging)")
+    tasks: list[PlannedTask] = Field(default_factory=list, description="All tasks to execute")
+    direct_response: str | None = Field(
+        default=None,
+        description="If no tasks needed, respond directly with this message",
+    )
+
+
+# ===========================================================================
 # Action Execution Models
 # ===========================================================================
 
@@ -670,6 +784,8 @@ __all__ = [
     "BaseRelation",
     "ChannelConfig",
     "ChannelType",
+    # Orchestrator v2
+    "CommunityContext",
     # Thread summarization
     "ConflictResolution",
     # Analytics
@@ -679,6 +795,8 @@ __all__ = [
     "DuplicateCandidate",
     "EntityExtraction",
     "EntityLabel",
+    "EntityReference",
+    "EnrichedContext",
     "EventNode",
     # Extraction models
     "ExtractedFact",
@@ -704,12 +822,14 @@ __all__ = [
     "OrganizationNode",
     # Core nodes
     "PersonNode",
+    "PlannedTask",
     "ProjectNode",
     "ProjectStatus",
     "RelationshipExtraction",
     "ResourceNode",
     "SearchResult",
     "TaskNode",
+    "TaskPlan",
     "TaskStatus",
     "ThreadContext",
     # System nodes
