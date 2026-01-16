@@ -142,7 +142,7 @@ class TestHandleUserInputV2:
             mock_needs_deeper.assert_called_once()
             mock_synthesize.assert_called_once()
             mock_personality.assert_called_once()
-            mock_store.assert_called_once_with("thread-123", "Sarah studied at Harvard. What do I know about her?", response, "trace-456")
+            mock_store.assert_called_once_with("thread-123", response, "trace-456")
 
             assert "Sarah is a PM at Acme Corp" in response
 
@@ -279,25 +279,13 @@ class TestHandleUserInputV2:
                 trace_id="trace-456",
             )
 
-            # Verify add_message was called twice (user + assistant)
-            assert mock_thread_manager.add_message.call_count == 2
-
-            # Check user message was stored
-            call_args_list = mock_thread_manager.add_message.call_args_list
-            assert call_args_list[0][1] == {
-                "thread_uuid": "thread-123",
-                "role": "user",
-                "content": "Hello!",
-                "trace_id": "trace-456",
-            }
-
-            # Check assistant message was stored
-            assert call_args_list[1][1] == {
-                "thread_uuid": "thread-123",
-                "role": "assistant",
-                "content": response,
-                "trace_id": "trace-456",
-            }
+            # Verify add_message was called once (assistant response only)
+            mock_thread_manager.add_message.assert_called_once_with(
+                thread_uuid="thread-123",
+                role="assistant",
+                content=response,
+                trace_id="trace-456",
+            )
 
     @pytest.mark.asyncio
     async def test_personality_applied_to_response(
@@ -537,33 +525,20 @@ class TestStoreResponse:
 
     @pytest.mark.asyncio
     async def test_stores_response_successfully(self, orchestrator: Orchestrator) -> None:
-        """Successfully stores both user message and assistant response in thread manager."""
+        """Successfully stores assistant response in thread manager."""
         await orchestrator._store_response(
             thread_uuid="thread-123",
-            user_text="Test user message",
             response="Test response",
             trace_id="trace-456",
         )
 
-        # Verify both messages were stored
-        assert orchestrator.thread_manager.add_message.call_count == 2
-
-        # Check user message
-        call_args_list = orchestrator.thread_manager.add_message.call_args_list
-        assert call_args_list[0][1] == {
-            "thread_uuid": "thread-123",
-            "role": "user",
-            "content": "Test user message",
-            "trace_id": "trace-456",
-        }
-
-        # Check assistant response
-        assert call_args_list[1][1] == {
-            "thread_uuid": "thread-123",
-            "role": "assistant",
-            "content": "Test response",
-            "trace_id": "trace-456",
-        }
+        # Verify assistant response was stored
+        orchestrator.thread_manager.add_message.assert_called_once_with(
+            thread_uuid="thread-123",
+            role="assistant",
+            content="Test response",
+            trace_id="trace-456",
+        )
 
     @pytest.mark.asyncio
     async def test_handles_storage_failure_gracefully(self, orchestrator: Orchestrator) -> None:
@@ -573,7 +548,6 @@ class TestStoreResponse:
         # Should not raise exception
         await orchestrator._store_response(
             thread_uuid="thread-123",
-            user_text="Test user message",
             response="Test response",
             trace_id="trace-456",
         )
@@ -586,7 +560,6 @@ class TestStoreResponse:
         # Should not raise exception
         await orchestrator._store_response(
             thread_uuid="thread-123",
-            user_text="Test user message",
             response="Test response",
             trace_id="trace-456",
         )
