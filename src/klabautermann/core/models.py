@@ -777,6 +777,143 @@ class DuplicateCandidate(BaseModel):
 
 
 # ===========================================================================
+# V2 Workflow Metrics
+# ===========================================================================
+
+
+class V2WorkflowMetrics(BaseModel):
+    """
+    Performance metrics for Orchestrator v2 workflow.
+
+    Tracks request counts, latencies per phase, and task distribution
+    to measure success against targets and identify bottlenecks.
+
+    Reference: specs/MAINAGENT.md Section 10
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Request counters
+    request_count: int = 0
+    success_count: int = 0
+    error_count: int = 0
+    direct_response_count: int = 0
+
+    # Latency tracking (in milliseconds)
+    total_latency_sum: float = 0.0
+    context_latency_sum: float = 0.0
+    planning_latency_sum: float = 0.0
+    execution_latency_sum: float = 0.0
+    synthesis_latency_sum: float = 0.0
+
+    # Task distribution
+    task_count_sum: int = 0
+    ingest_task_count: int = 0
+    research_task_count: int = 0
+    execute_task_count: int = 0
+
+    @property
+    def avg_latency_ms(self) -> float:
+        """Average total latency in milliseconds."""
+        if self.request_count == 0:
+            return 0.0
+        return self.total_latency_sum / self.request_count
+
+    @property
+    def success_rate(self) -> float:
+        """Success rate as a ratio (0.0 to 1.0)."""
+        if self.request_count == 0:
+            return 0.0
+        return self.success_count / self.request_count
+
+    @property
+    def direct_response_rate(self) -> float:
+        """Direct response rate as a ratio (0.0 to 1.0)."""
+        if self.request_count == 0:
+            return 0.0
+        return self.direct_response_count / self.request_count
+
+    @property
+    def avg_tasks_per_request(self) -> float:
+        """Average number of tasks generated per request."""
+        if self.request_count == 0:
+            return 0.0
+        return self.task_count_sum / self.request_count
+
+    def record_request(
+        self,
+        success: bool,
+        direct_response: bool,
+        latencies: dict[str, float],
+        task_counts: dict[str, int],
+    ) -> None:
+        """
+        Record metrics for a single request.
+
+        Args:
+            success: Whether the request completed successfully.
+            direct_response: Whether this was a direct response (no tasks).
+            latencies: Dict with keys: total, context, planning, execution, synthesis (in ms).
+            task_counts: Dict with keys: ingest, research, execute.
+        """
+        self.request_count += 1
+        if success:
+            self.success_count += 1
+        else:
+            self.error_count += 1
+
+        if direct_response:
+            self.direct_response_count += 1
+
+        # Record latencies
+        self.total_latency_sum += latencies.get("total", 0.0)
+        self.context_latency_sum += latencies.get("context", 0.0)
+        self.planning_latency_sum += latencies.get("planning", 0.0)
+        self.execution_latency_sum += latencies.get("execution", 0.0)
+        self.synthesis_latency_sum += latencies.get("synthesis", 0.0)
+
+        # Record task distribution
+        ingest = task_counts.get("ingest", 0)
+        research = task_counts.get("research", 0)
+        execute = task_counts.get("execute", 0)
+        self.task_count_sum += ingest + research + execute
+        self.ingest_task_count += ingest
+        self.research_task_count += research
+        self.execute_task_count += execute
+
+    def to_dict(self) -> dict[str, Any]:
+        """Export metrics as a dictionary for monitoring."""
+        return {
+            "requests": {
+                "total": self.request_count,
+                "success": self.success_count,
+                "error": self.error_count,
+                "direct_response": self.direct_response_count,
+            },
+            "rates": {
+                "success_rate": round(self.success_rate, 3),
+                "direct_response_rate": round(self.direct_response_rate, 3),
+            },
+            "latency_ms": {
+                "avg_total": round(self.avg_latency_ms, 2),
+                "sum_context": round(self.context_latency_sum, 2),
+                "sum_planning": round(self.planning_latency_sum, 2),
+                "sum_execution": round(self.execution_latency_sum, 2),
+                "sum_synthesis": round(self.synthesis_latency_sum, 2),
+            },
+            "tasks": {
+                "total": self.task_count_sum,
+                "avg_per_request": round(self.avg_tasks_per_request, 2),
+                "by_type": {
+                    "ingest": self.ingest_task_count,
+                    "research": self.research_task_count,
+                    "execute": self.execute_task_count,
+                },
+            },
+        }
+
+
+# ===========================================================================
 # Export
 # ===========================================================================
 
@@ -849,6 +986,8 @@ __all__ = [
     "ThreadNode",
     "ThreadStatus",
     "ThreadSummary",
+    # V2 Metrics
+    "V2WorkflowMetrics",
     "WorksAtRelation",
     "current_timestamp",
     # Utilities
