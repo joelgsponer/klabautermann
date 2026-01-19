@@ -28,6 +28,8 @@ sys.path.insert(0, str(src_path))
 
 async def main(host: str, port: int) -> None:
     """Initialize and run the API server."""
+    import os
+
     import uvicorn
 
     from klabautermann.agents.orchestrator import Orchestrator
@@ -35,12 +37,29 @@ async def main(host: str, port: int) -> None:
     from klabautermann.config.manager import ConfigManager
     from klabautermann.core.logger import logger
     from klabautermann.memory.graphiti_client import GraphitiClient
+    from klabautermann.memory.neo4j_client import Neo4jClient
+    from klabautermann.memory.thread_manager import ThreadManager
 
     logger.info("[CHART] Starting Klabautermann API server...")
 
     # Load configuration
     config_dir = Path(__file__).parent.parent / "config" / "agents"
     config_manager = ConfigManager(config_dir)
+
+    # Initialize Neo4j client for thread management
+    neo4j_client = Neo4jClient(
+        uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+        username=os.getenv("NEO4J_USERNAME", "neo4j"),
+        password=os.getenv("NEO4J_PASSWORD", ""),
+    )
+    try:
+        await neo4j_client.connect()
+        thread_manager = ThreadManager(neo4j_client)
+        logger.info("[BEACON] Thread management enabled")
+    except Exception as e:
+        logger.warning(f"[SWELL] Neo4j connection failed: {e}")
+        thread_manager = None
+        neo4j_client = None
 
     # Initialize Graphiti client
     graphiti_client = GraphitiClient()
@@ -54,7 +73,7 @@ async def main(host: str, port: int) -> None:
     orchestrator_config = config_manager.get("orchestrator")
     orchestrator = Orchestrator(
         graphiti=graphiti_client,
-        thread_manager=None,  # Thread management disabled
+        thread_manager=thread_manager,
         config=orchestrator_config.model_dump() if orchestrator_config else {},
     )
 
@@ -77,6 +96,8 @@ async def main(host: str, port: int) -> None:
     finally:
         if graphiti_client:
             await graphiti_client.disconnect()
+        if neo4j_client:
+            await neo4j_client.disconnect()
 
 
 if __name__ == "__main__":

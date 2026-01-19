@@ -32,10 +32,12 @@ if str(src_path) not in sys.path:
 
 from dotenv import load_dotenv  # noqa: E402
 
+from klabautermann.agents.archivist import Archivist  # noqa: E402
 from klabautermann.agents.executor import Executor  # noqa: E402
 from klabautermann.agents.ingestor import Ingestor  # noqa: E402
 from klabautermann.agents.orchestrator import Orchestrator  # noqa: E402
 from klabautermann.agents.researcher import Researcher  # noqa: E402
+from klabautermann.agents.scribe import Scribe  # noqa: E402
 from klabautermann.channels.cli_driver import CLIDriver  # noqa: E402
 from klabautermann.config.manager import ConfigManager  # noqa: E402
 from klabautermann.config.quartermaster import Quartermaster  # noqa: E402
@@ -43,6 +45,7 @@ from klabautermann.core.exceptions import GraphConnectionError, StartupError  # 
 from klabautermann.core.logger import logger  # noqa: E402
 from klabautermann.memory.graphiti_client import GraphitiClient  # noqa: E402
 from klabautermann.memory.neo4j_client import Neo4jClient  # noqa: E402
+from klabautermann.memory.thread_manager import ThreadManager  # noqa: E402
 from klabautermann.utils.scheduler import (  # noqa: E402
     create_scheduler,
     register_scheduled_jobs,
@@ -72,6 +75,8 @@ class Klabautermann:
         # Shared clients
         self.neo4j: Neo4jClient | None = None
         self.graphiti: GraphitiClient | None = None
+        self.thread_manager: ThreadManager | None = None
+        self.google_bridge: Any = None
 
         # LLM client (lazy init)
         self._anthropic: Any = None
@@ -122,6 +127,10 @@ class Klabautermann:
         )
         await self.neo4j.connect()
 
+        # Initialize ThreadManager (for thread/message persistence)
+        logger.info("[CHART] Initializing ThreadManager...")
+        self.thread_manager = ThreadManager(self.neo4j)
+
         # Initialize Graphiti (optional - may fail if OpenAI key not set)
         if os.getenv("OPENAI_API_KEY"):
             try:
@@ -140,6 +149,24 @@ class Klabautermann:
                 self.graphiti = None
         else:
             logger.warning("[SWELL] OPENAI_API_KEY not set - entity extraction disabled")
+
+        # Initialize Google Workspace Bridge (optional - for Gmail/Calendar access)
+        self.google_bridge = None
+        if os.getenv("GOOGLE_REFRESH_TOKEN"):
+            try:
+                from klabautermann.mcp.google_workspace import GoogleWorkspaceBridge
+
+                logger.info("[CHART] Initializing Google Workspace Bridge...")
+                self.google_bridge = GoogleWorkspaceBridge()
+                await self.google_bridge.start()
+                logger.info("[BEACON] Google Workspace Bridge connected")
+            except Exception as e:
+                logger.warning(
+                    f"[SWELL] Google Workspace initialization failed (email/calendar disabled): {e}"
+                )
+                self.google_bridge = None
+        else:
+            logger.warning("[SWELL] GOOGLE_REFRESH_TOKEN not set - email/calendar disabled")
 
         # Create agents
         await self._create_agents()
@@ -179,7 +206,7 @@ class Klabautermann:
         # Create Orchestrator - uses Sonnet model
         self.agents["orchestrator"] = Orchestrator(
             graphiti=self.graphiti,
-            thread_manager=None,  # Will be created in Sprint 3 if needed
+            thread_manager=self.thread_manager,
             config=get_config_dict("orchestrator"),
         )
 
@@ -206,6 +233,21 @@ class Klabautermann:
             name="executor",
             config=get_config_dict("executor"),
             google_bridge=self.google_bridge if hasattr(self, "google_bridge") else None,
+        )
+
+        # Create Archivist - summarizes and archives inactive threads
+        self.agents["archivist"] = Archivist(
+            name="archivist",
+            config=get_config_dict("archivist"),
+            thread_manager=self.thread_manager,
+            neo4j_client=self.neo4j,
+        )
+
+        # Create Scribe - generates daily reflections/journal entries
+        self.agents["scribe"] = Scribe(
+            name="scribe",
+            config=get_config_dict("scribe"),
+            neo4j_client=self.neo4j,
         )
 
         logger.info(f"[CHART] Created {len(self.agents)} agents")

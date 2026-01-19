@@ -205,6 +205,7 @@ class ChannelType(str, Enum):
     """Valid channel types for Thread nodes."""
 
     CLI = "cli"
+    TUI = "tui"
     TELEGRAM = "telegram"
     DISCORD = "discord"
     TEST = "test"

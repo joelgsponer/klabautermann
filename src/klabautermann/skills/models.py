@@ -10,13 +10,10 @@ Reference: https://docs.anthropic.com/en/docs/claude-code/skills
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class PayloadField(BaseModel):

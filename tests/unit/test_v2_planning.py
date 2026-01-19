@@ -49,7 +49,7 @@ def mock_task_plan_response(
 @pytest.fixture
 def mock_orchestrator():
     """Create an Orchestrator instance with mocked dependencies."""
-    with patch.object(Orchestrator, "__init__", lambda _: None):  # noqa: ARG005
+    with patch.object(Orchestrator, "__init__", lambda _: None):
         orch = Orchestrator()
         orch.config = MagicMock()
         orch.config_v2 = MagicMock()
@@ -58,11 +58,12 @@ def mock_orchestrator():
         orch.TASK_PLANNING_PROMPT = Orchestrator.TASK_PLANNING_PROMPT
         # Mock the LLM call method
         orch._call_opus_for_planning = AsyncMock()
+        # Mock skill planner (returns None for no skill match)
+        orch._skill_planner = MagicMock()
+        orch._skill_planner.match_and_plan = MagicMock(return_value=None)
         # Use real parsing and formatting methods
         orch._parse_task_plan = Orchestrator._parse_task_plan.__get__(orch)
-        orch._format_context_for_planning = Orchestrator._format_context_for_planning.__get__(
-            orch
-        )
+        orch._format_context_for_planning = Orchestrator._format_context_for_planning.__get__(orch)
         return orch
 
 
@@ -397,11 +398,8 @@ class TestTaskPlanning:
     @pytest.mark.asyncio
     async def test_timeout_triggers_fallback(self, mock_orchestrator, empty_context):
         """LLM timeout should trigger fallback plan."""
-        import asyncio
 
-        mock_orchestrator._call_opus_for_planning.side_effect = asyncio.TimeoutError(
-            "LLM took too long"
-        )
+        mock_orchestrator._call_opus_for_planning.side_effect = TimeoutError("LLM took too long")
 
         plan = await mock_orchestrator._plan_tasks(
             "Test message",

@@ -264,7 +264,7 @@ class TestHandleUserInputV2:
         mock_context: EnrichedContext,
         mock_task_plan_direct_response: TaskPlan,
     ) -> None:
-        """Response is stored in thread manager."""
+        """Both user message and assistant response are stored in thread manager."""
         mock_thread_manager = AsyncMock()
         orchestrator.thread_manager = mock_thread_manager
 
@@ -279,13 +279,22 @@ class TestHandleUserInputV2:
                 trace_id="trace-456",
             )
 
-            # Verify add_message was called once (assistant response only)
-            mock_thread_manager.add_message.assert_called_once_with(
-                thread_uuid="thread-123",
-                role="assistant",
-                content=response,
-                trace_id="trace-456",
-            )
+            # Verify add_message was called twice (user message + assistant response)
+            assert mock_thread_manager.add_message.call_count == 2
+
+            # First call: user message
+            first_call = mock_thread_manager.add_message.call_args_list[0]
+            assert first_call.kwargs["thread_uuid"] == "thread-123"
+            assert first_call.kwargs["role"] == "user"
+            assert first_call.kwargs["content"] == "Hello!"
+            assert first_call.kwargs["trace_id"] == "trace-456"
+
+            # Second call: assistant response
+            second_call = mock_thread_manager.add_message.call_args_list[1]
+            assert second_call.kwargs["thread_uuid"] == "thread-123"
+            assert second_call.kwargs["role"] == "assistant"
+            assert second_call.kwargs["content"] == response
+            assert second_call.kwargs["trace_id"] == "trace-456"
 
     @pytest.mark.asyncio
     async def test_personality_applied_to_response(

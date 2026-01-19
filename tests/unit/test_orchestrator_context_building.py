@@ -64,10 +64,16 @@ async def test_build_context_parallel_execution(orchestrator, mock_thread_manage
 
     # Mock all query functions
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         # Set up return values
         mock_thread_manager.get_context_window = AsyncMock(
@@ -111,10 +117,16 @@ async def test_build_context_partial_failure(orchestrator, mock_thread_manager):
 
     # Mock queries - one will fail, others succeed
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         # Set up - summaries will fail, others succeed
         mock_thread_manager.get_context_window = AsyncMock(
@@ -169,10 +181,18 @@ async def test_build_context_config_driven(orchestrator, mock_thread_manager):
         }
 
         with (
-            patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-            patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-            patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-            patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+            patch(
+                "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+            ) as mock_summaries,
+            patch(
+                "klabautermann.agents.orchestrator._orchestrator.get_pending_tasks"
+            ) as mock_tasks,
+            patch(
+                "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+            ) as mock_entities,
+            patch(
+                "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+            ) as mock_islands,
         ):
             mock_thread_manager.get_context_window = AsyncMock(
                 return_value=ThreadContext(
@@ -206,10 +226,16 @@ async def test_build_context_trace_id_propagation(orchestrator, mock_thread_mana
     thread_uuid = "thread-abc"
 
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         mock_thread_manager.get_context_window = AsyncMock(
             return_value=ThreadContext(
@@ -255,10 +281,16 @@ async def test_build_context_without_neo4j_client(mock_thread_manager):
     thread_uuid = "thread-abc"
 
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         mock_thread_manager.get_context_window = AsyncMock(
             return_value=ThreadContext(
@@ -300,10 +332,16 @@ async def test_build_context_without_thread_manager(mock_neo4j_client):
     thread_uuid = "thread-abc"
 
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         mock_summaries.return_value = []
         mock_tasks.return_value = []
@@ -332,10 +370,16 @@ async def test_build_context_full_payload(orchestrator, mock_thread_manager):
     thread_uuid = "thread-abc"
 
     with (
-        patch("klabautermann.agents.orchestrator.get_recent_summaries") as mock_summaries,
-        patch("klabautermann.agents.orchestrator.get_pending_tasks") as mock_tasks,
-        patch("klabautermann.agents.orchestrator.get_recent_entities") as mock_entities,
-        patch("klabautermann.agents.orchestrator.get_relevant_islands") as mock_islands,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries"
+        ) as mock_summaries,
+        patch("klabautermann.agents.orchestrator._orchestrator.get_pending_tasks") as mock_tasks,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities"
+        ) as mock_entities,
+        patch(
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands"
+        ) as mock_islands,
     ):
         # Set up rich data from all layers
         mock_thread_manager.get_context_window = AsyncMock(

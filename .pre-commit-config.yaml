@@ -89,3 +89,16 @@ repos:
         name: Prevent use of eval()
       - id: python-use-type-annotations
         name: Enforce type annotations over comments
+
+  # ===========================================================================
+  # Smoke Tests - Quick sanity checks before commit
+  # ===========================================================================
+  - repo: local
+    hooks:
+      - id: smoke-tests
+        name: Run smoke tests
+        entry: bash -c 'source .venv/bin/activate && pytest tests/smoke/ -v --tb=short'
+        language: system
+        types: [python]
+        pass_filenames: false
+        stages: [pre-commit]

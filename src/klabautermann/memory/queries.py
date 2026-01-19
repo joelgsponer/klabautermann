@@ -326,27 +326,33 @@ class CypherQueries:
     # STRENGTH-AWARE QUERIES (for Intelligent Researcher)
     # ===========================================================================
 
+    # NOTE: Graphiti stores semantic relationships as RELATES_TO with a 'name' property
+    # containing the relationship label (e.g., "knows", "friend of", "connected to")
     FIND_KNOWS_WITH_STRENGTH = """
-    MATCH (a:Person)-[r:KNOWS]->(b:Person)
+    MATCH (a:Person)-[r:RELATES_TO]->(b:Person)
     WHERE toLower(a.name) CONTAINS toLower($name)
+      AND r.name =~ '(?i).*(knows|friend|connected|acquainted).*'
       AND r.expired_at IS NULL
     RETURN a.uuid as source_uuid, a.name as source_name,
            b.uuid as target_uuid, b.name as target_name,
-           r.strength as strength, r.context as context,
+           r.name as relationship_name,
+           r.fact as context,
            r.created_at as created_at
-    ORDER BY r.strength DESC NULLS LAST
+    ORDER BY r.created_at DESC
     LIMIT $limit
     """
 
     FIND_FRIEND_OF_WITH_STRENGTH = """
-    MATCH (a:Person)-[r:FRIEND_OF]->(b:Person)
+    MATCH (a:Person)-[r:RELATES_TO]->(b:Person)
     WHERE toLower(a.name) CONTAINS toLower($name)
+      AND r.name =~ '(?i).*(friend|close|best friend).*'
       AND r.expired_at IS NULL
     RETURN a.uuid as source_uuid, a.name as source_name,
            b.uuid as target_uuid, b.name as target_name,
-           r.strength as strength, r.how_met as how_met,
-           r.since as since, r.created_at as created_at
-    ORDER BY r.strength DESC NULLS LAST
+           r.name as relationship_name,
+           r.fact as how_met,
+           r.created_at as created_at
+    ORDER BY r.created_at DESC
     LIMIT $limit
     """
 

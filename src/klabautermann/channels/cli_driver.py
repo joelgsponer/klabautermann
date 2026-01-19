@@ -74,7 +74,10 @@ class CLIDriver(BaseChannel):
         super().__init__(orchestrator, config)
         self.session_id = str(uuid.uuid4())
         self._running = False
-        self.renderer = CLIRenderer()
+        # Check for NO_SPINNER env var to disable animated spinner
+        import os
+        no_spinner = os.getenv("KLABAUTERMANN_NO_SPINNER", "").lower() in ("1", "true", "yes")
+        self.renderer = CLIRenderer(no_spinner=no_spinner)
         self._prompt_session: PromptSession[str] | None = None
 
     @property

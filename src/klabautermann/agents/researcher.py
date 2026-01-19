@@ -86,24 +86,27 @@ STRUCTURAL_QUERIES: dict[str, str] = {
                dep.status as dep_status, r.reason as reason
         LIMIT $limit
     """,
+    # NOTE: Graphiti stores semantic relationships as RELATES_TO with r.name property
     "KNOWS": """
-        MATCH (a:Person)-[r:KNOWS]->(b:Person)
+        MATCH (a:Person)-[r:RELATES_TO]->(b:Person)
         WHERE a.name =~ $name_pattern
+          AND r.name =~ '(?i).*(knows|friend|connected|acquainted).*'
           AND r.expired_at IS NULL
         RETURN a.name as person, b.name as knows,
-               r.strength as strength, r.context as context,
+               r.name as relationship_type, r.fact as context,
                r.created_at as created_at
-        ORDER BY r.strength DESC NULLS LAST
+        ORDER BY r.created_at DESC
         LIMIT $limit
     """,
     "FRIEND_OF": """
-        MATCH (a:Person)-[r:FRIEND_OF]->(b:Person)
+        MATCH (a:Person)-[r:RELATES_TO]->(b:Person)
         WHERE a.name =~ $name_pattern
+          AND r.name =~ '(?i).*(friend|close|best friend).*'
           AND r.expired_at IS NULL
         RETURN a.name as person, b.name as friend,
-               r.strength as strength, r.how_met as how_met,
-               r.since as since
-        ORDER BY r.strength DESC NULLS LAST
+               r.name as relationship_type, r.fact as how_met,
+               r.created_at as since
+        ORDER BY r.created_at DESC
         LIMIT $limit
     """,
     "WORKS_AT_HISTORICAL": """

@@ -423,11 +423,13 @@ class TestStructuralQueries:
         assert "MATCH" in STRUCTURAL_QUERIES["WORKS_AT"]
         assert "$name_pattern" in STRUCTURAL_QUERIES["WORKS_AT"]
 
-    def test_knows_pattern_includes_strength(self) -> None:
-        """KNOWS pattern returns strength."""
+    def test_knows_pattern_uses_relates_to(self) -> None:
+        """KNOWS pattern uses Graphiti's RELATES_TO relationship with name filter."""
         assert "KNOWS" in STRUCTURAL_QUERIES
-        assert "strength" in STRUCTURAL_QUERIES["KNOWS"]
-        assert "ORDER BY r.strength" in STRUCTURAL_QUERIES["KNOWS"]
+        # Graphiti stores semantic relationships as RELATES_TO with r.name property
+        assert "RELATES_TO" in STRUCTURAL_QUERIES["KNOWS"]
+        assert "r.name =~" in STRUCTURAL_QUERIES["KNOWS"]
+        assert "knows" in STRUCTURAL_QUERIES["KNOWS"].lower()
 
     def test_historical_pattern_uses_as_of(self) -> None:
         """WORKS_AT_HISTORICAL uses as_of parameter."""

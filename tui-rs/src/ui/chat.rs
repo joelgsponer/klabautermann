@@ -8,7 +8,7 @@ use ratatui::{
 };
 use textwrap::wrap;
 
-use super::markdown::render_markdown;
+use super::markdown::render_markdown_wrapped;
 use crate::app::App;
 use crate::theme::Styles;
 
@@ -49,10 +49,12 @@ pub fn render_chat(frame: &mut Frame, area: Rect, app: &mut App) {
                 }
             }
         } else {
-            // Bot messages: render with markdown
+            // Bot messages: render with markdown and word wrapping
             lines.push(Line::from(Span::styled(label, label_style)));
 
-            let md_lines = render_markdown(&msg.content, Styles::message());
+            // Account for indentation in wrap width
+            let md_wrap_width = wrap_width.saturating_sub(2);
+            let md_lines = render_markdown_wrapped(&msg.content, Styles::message(), md_wrap_width);
             for md_line in md_lines {
                 // Indent markdown content
                 let mut indented_spans = vec![Span::raw("  ")];

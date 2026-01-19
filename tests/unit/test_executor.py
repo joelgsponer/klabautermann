@@ -49,7 +49,7 @@ def executor(mock_google_bridge):
 
 @pytest.fixture
 def sample_message():
-    """Sample AgentMessage for testing."""
+    """Sample AgentMessage for testing with action_type format."""
     return AgentMessage(
         trace_id="test-trace-123",
         source_agent="orchestrator",
@@ -57,6 +57,7 @@ def sample_message():
         intent="execute_action",
         payload={
             "action": "Send email to Sarah",
+            "action_type": "email_send",  # Structured action type from LLM
             "context": {"email": "sarah@example.com"},
         },
     )
@@ -68,48 +69,65 @@ def sample_message():
 
 
 class TestActionParsing:
-    """Test action string parsing into ActionRequest."""
+    """Test action_type based parsing into ActionRequest.
+
+    Tests verify that action_type from context is used for parsing,
+    not keyword detection from action strings.
+    """
 
     @pytest.mark.asyncio
     async def test_parse_email_send(self, executor):
-        """Test parsing email send action."""
-        request = await executor._parse_action(
-            "Send email to Sarah about the meeting", {}, "trace-123"
-        )
+        """Test parsing email_send action_type."""
+        context = {"action_type": "email_send"}
+        request = await executor._parse_action("legacy action string", context, "trace-123")
         assert request.type == ActionType.EMAIL_SEND
-        assert request.draft_only is False
+        assert request.draft_only is True  # Default is True for safety
 
     @pytest.mark.asyncio
     async def test_parse_email_draft(self, executor):
-        """Test parsing email draft action."""
-        request = await executor._parse_action("Draft email to John about budget", {}, "trace-123")
+        """Test parsing email_send with draft_only flag."""
+        context = {"action_type": "email_send", "draft_only": True}
+        request = await executor._parse_action("draft email", context, "trace-123")
         assert request.type == ActionType.EMAIL_SEND
         assert request.draft_only is True
 
     @pytest.mark.asyncio
     async def test_parse_email_search(self, executor):
-        """Test parsing email search action."""
-        request = await executor._parse_action("Check emails from Sarah", {}, "trace-123")
+        """Test parsing email_search action_type with gmail_query."""
+        context = {"action_type": "email_search", "gmail_query": "from:sarah"}
+        request = await executor._parse_action("check emails", context, "trace-123")
         assert request.type == ActionType.EMAIL_SEARCH
-        assert request.query == "Check emails from Sarah"
+        assert request.query == "from:sarah"
+
+    @pytest.mark.asyncio
+    async def test_parse_email_search_defaults_to_inbox(self, executor):
+        """Test email_search defaults to inbox query when gmail_query not provided."""
+        context = {"action_type": "email_search"}
+        request = await executor._parse_action("any emails?", context, "trace-123")
+        assert request.type == ActionType.EMAIL_SEARCH
+        assert request.query == "in:inbox"
 
     @pytest.mark.asyncio
     async def test_parse_calendar_create(self, executor):
-        """Test parsing calendar event creation."""
-        request = await executor._parse_action("Schedule a meeting with the team", {}, "trace-123")
+        """Test parsing calendar_create action_type."""
+        context = {"action_type": "calendar_create"}
+        request = await executor._parse_action("schedule meeting", context, "trace-123")
         assert request.type == ActionType.CALENDAR_CREATE
 
     @pytest.mark.asyncio
     async def test_parse_calendar_list(self, executor):
-        """Test parsing calendar list action."""
-        request = await executor._parse_action("What's on my calendar today?", {}, "trace-123")
+        """Test parsing calendar_list action_type."""
+        context = {"action_type": "calendar_list"}
+        request = await executor._parse_action("what's on my calendar", context, "trace-123")
         assert request.type == ActionType.CALENDAR_LIST
 
     @pytest.mark.asyncio
-    async def test_parse_ambiguous_defaults_to_search(self, executor):
-        """Test that ambiguous actions default to email search."""
-        request = await executor._parse_action("something vague", {}, "trace-123")
+    async def test_parse_no_action_type_defaults_to_inbox(self, executor):
+        """Test that missing action_type defaults to email search with inbox."""
+        context = {}  # No action_type
+        request = await executor._parse_action("something vague", context, "trace-123")
         assert request.type == ActionType.EMAIL_SEARCH
+        assert request.query == "in:inbox"
 
 
 # ===========================================================================
@@ -508,6 +526,7 @@ class TestMessageProcessing:
             intent="execute_action",
             payload={
                 "action": "Send email to Sarah",
+                "action_type": "email_send",  # Need action_type
                 "context": {},  # No email in context
             },
         )
@@ -530,6 +549,7 @@ class TestMessageProcessing:
             intent="execute_action",
             payload={
                 "action": "Send email to Sarah",
+                "action_type": "email_send",  # Need action_type
                 "context": {"email": "sarah@example.com"},
             },
         )
@@ -590,6 +610,7 @@ class TestSecurityRequirements:
             intent="execute_action",
             payload={
                 "action": "Send email to random person",
+                "action_type": "email_send",  # Need action_type
                 "context": {},  # No email provided
             },
         )
@@ -610,6 +631,7 @@ class TestSecurityRequirements:
             intent="execute_action",
             payload={
                 "action": "Schedule a meeting",
+                "action_type": "calendar_create",  # Need action_type
                 "context": {},  # No time information
             },
         )

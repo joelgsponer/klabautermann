@@ -81,6 +81,18 @@ class TestAppStartup:
             assert "executor" in app.agents, "Executor not created"
             # Ingestor requires Graphiti
             assert "ingestor" in app.agents, "Ingestor not created"
+            # Scheduler agents must be available
+            assert "archivist" in app.agents, "Archivist not created"
+            assert "scribe" in app.agents, "Scribe not created"
+
+            # Verify ThreadManager is wired to Orchestrator
+            orchestrator = app.agents["orchestrator"]
+            assert orchestrator.thread_manager is not None, "ThreadManager not wired to Orchestrator"
+            assert app.thread_manager is not None, "ThreadManager not created"
+
+            # Verify ThreadManager is wired to Archivist
+            archivist = app.agents["archivist"]
+            assert archivist.thread_manager is not None, "ThreadManager not wired to Archivist"
 
     @pytest.mark.asyncio
     async def test_app_initializes_without_graphiti(
@@ -112,6 +124,9 @@ class TestAppStartup:
             assert "executor" in app.agents
             # Ingestor should NOT be created without Graphiti
             assert "ingestor" not in app.agents
+            # Scheduler agents don't depend on Graphiti
+            assert "archivist" in app.agents, "Archivist should work without Graphiti"
+            assert "scribe" in app.agents, "Scribe should work without Graphiti"
 
     @pytest.mark.asyncio
     async def test_agents_have_registry_wired(

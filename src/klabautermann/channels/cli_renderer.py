@@ -17,6 +17,8 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.theme import Theme
 
+from klabautermann.core.logger import restore_console_logging, suppress_console_logging
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,9 +68,14 @@ class CLIRenderer:
 
     VERSION = "0.1.0"
 
-    def __init__(self) -> None:
-        """Initialize renderer with nautical theme."""
+    def __init__(self, no_spinner: bool = False) -> None:
+        """Initialize renderer with nautical theme.
+
+        Args:
+            no_spinner: If True, disable animated spinner (for terminals with issues).
+        """
         self.console = Console(theme=NAUTICAL_THEME)
+        self.no_spinner = no_spinner
 
     def render_banner(self) -> None:
         """Display styled welcome banner."""
@@ -199,22 +206,35 @@ class CLIRenderer:
         self.console.clear()
 
     @contextmanager
-    def spinner(self, message: str = "Charting course...") -> Iterator[Status]:
+    def spinner(self, message: str = "Charting course...") -> Iterator[Status | None]:
         """
         Display a spinner while processing.
+
+        Suppresses console logging during spinner to prevent ANSI escape
+        code corruption when log output interleaves with spinner updates.
 
         Args:
             message: Message to display with spinner.
 
         Yields:
-            Rich Status object for the spinner.
+            Rich Status object for the spinner (or None if disabled).
         """
-        with self.console.status(
-            f"[info]{message}[/]",
-            spinner="dots",
-            spinner_style="cyan",
-        ) as status:
-            yield status
+        if self.no_spinner:
+            # Simple static message instead of animated spinner
+            self.console.print(f"[dim]{message}[/]")
+            yield None
+            return
+
+        suppress_console_logging()
+        try:
+            with self.console.status(
+                f"[info]{message}[/]",
+                spinner="dots",
+                spinner_style="cyan",
+            ) as status:
+                yield status
+        finally:
+            restore_console_logging()
 
     def get_prompt_message(self) -> str:
         """

@@ -65,7 +65,7 @@ class TestBuildContextSafe:
         orchestrator.thread_manager.get_context_window.return_value = mock_thread_context
 
         with patch(
-            "klabautermann.agents.orchestrator.get_recent_summaries",
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries",
             side_effect=Exception("Neo4j connection lost"),
         ):
             context = await orchestrator._build_context_safe("thread-123", "trace-456")
@@ -82,11 +82,11 @@ class TestBuildContextSafe:
 
         with (
             patch(
-                "klabautermann.agents.orchestrator.get_recent_summaries",
+                "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries",
                 side_effect=Exception("DB error 2"),
             ),
             patch(
-                "klabautermann.agents.orchestrator.get_pending_tasks",
+                "klabautermann.agents.orchestrator._orchestrator.get_pending_tasks",
                 side_effect=Exception("DB error 3"),
             ),
         ):
@@ -114,7 +114,7 @@ class TestBuildContextSafe:
 
         # Mock failed summaries
         with patch(
-            "klabautermann.agents.orchestrator.get_recent_summaries",
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries",
             side_effect=Exception("DB error"),
         ):
             context = await orchestrator._build_context_safe("thread-123", "trace-456")
@@ -297,7 +297,8 @@ class TestExecuteParallelSafe:
         ) as mock_execute:
             results = await orchestrator._execute_parallel_safe(task_plan, "trace-456")
 
-            mock_execute.assert_called_once_with(task_plan, "trace-456")
+            # _execute_parallel now takes original_text parameter (defaults to "")
+            mock_execute.assert_called_once_with(task_plan, "trace-456", "")
             assert "Find Sarah" in results
 
     @pytest.mark.asyncio

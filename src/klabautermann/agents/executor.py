@@ -97,9 +97,15 @@ ERROR HANDLING:
             Response message with action result
         """
         action = msg.payload.get("action", "")
+        action_type = msg.payload.get("action_type", "")  # Structured action type from LLM
+        gmail_query = msg.payload.get("gmail_query", "")  # Gmail query for email_search
         context = msg.payload.get("context", {})
 
-        if not action:
+        # Pass structured fields to context for _parse_action
+        context["action_type"] = action_type
+        context["gmail_query"] = gmail_query
+
+        if not action and not action_type:
             return self._create_response(
                 msg, ActionResult(success=False, message="No action specified.")
             )
@@ -139,46 +145,53 @@ ERROR HANDLING:
             )
 
     async def _parse_action(
-        self, action: str, _context: dict[str, Any], _trace_id: str
+        self, action: str, context: dict[str, Any], _trace_id: str
     ) -> ActionRequest:
         """
-        Parse action string into structured request.
+        Parse action payload into structured request.
 
-        Uses keyword detection to classify the action type.
+        Uses action_type from task planner (LLM output) - no keyword detection.
 
         Args:
-            action: User's action request text
-            context: Context from Researcher (entities, search results)
+            action: Legacy action string (fallback only)
+            context: Context containing action_type and gmail_query from LLM
             trace_id: Request trace ID
 
         Returns:
             Parsed ActionRequest
         """
-        action_lower = action.lower()
+        # Get structured action_type from task planner (LLM output)
+        action_type = context.get("action_type", "").lower()
 
-        # Detect action type based on keywords
-        if any(kw in action_lower for kw in ["send email", "email to", "draft email", "compose"]):
+        logger.debug(
+            f"[WHISPER] Parsing action: action_type={action_type}",
+            extra={"action": action, "context_keys": list(context.keys())},
+        )
+
+        # Direct mapping from action_type - no keyword detection
+        if action_type == "email_search":
+            query = context.get("gmail_query") or "in:inbox"
+            return ActionRequest(type=ActionType.EMAIL_SEARCH, query=query)
+
+        elif action_type == "email_send":
             return ActionRequest(
                 type=ActionType.EMAIL_SEND,
-                draft_only="draft" in action_lower,
+                draft_only=context.get("draft_only", True),
             )
-        elif any(
-            kw in action_lower
-            for kw in ["check email", "search email", "emails from", "find email"]
-        ):
-            return ActionRequest(type=ActionType.EMAIL_SEARCH, query=action)
-        elif any(
-            kw in action_lower
-            for kw in ["schedule", "create event", "book meeting", "add to calendar"]
-        ):
-            return ActionRequest(type=ActionType.CALENDAR_CREATE)
-        elif any(
-            kw in action_lower for kw in ["calendar", "what's on", "check schedule", "my day"]
-        ):
+
+        elif action_type == "calendar_list":
             return ActionRequest(type=ActionType.CALENDAR_LIST)
 
-        # Default to email search if unclear
-        return ActionRequest(type=ActionType.EMAIL_SEARCH, query=action)
+        elif action_type == "calendar_create":
+            return ActionRequest(type=ActionType.CALENDAR_CREATE)
+
+        # Fallback: If no action_type provided, default to email search with inbox
+        # This handles legacy payloads or when LLM doesn't follow the schema
+        logger.warning(
+            "[SWELL] No action_type provided, defaulting to email_search (inbox)",
+            extra={"action": action, "action_type": action_type},
+        )
+        return ActionRequest(type=ActionType.EMAIL_SEARCH, query="in:inbox")
 
     async def _validate_request(
         self, request: ActionRequest, context: dict[str, Any], _trace_id: str

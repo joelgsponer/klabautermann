@@ -8,7 +8,85 @@ use ratatui::{
 
 use crate::theme::{colors, Styles};
 
-/// Render markdown text to styled Lines.
+/// Render markdown text to styled Lines with word wrapping.
+pub fn render_markdown_wrapped(text: &str, base_style: Style, width: usize) -> Vec<Line<'static>> {
+    let raw_lines = render_markdown(text, base_style);
+    let mut wrapped_lines: Vec<Line<'static>> = Vec::new();
+
+    for line in raw_lines {
+        let wrapped = wrap_line(line, width);
+        wrapped_lines.extend(wrapped);
+    }
+
+    wrapped_lines
+}
+
+/// Wrap a single Line to fit within width, preserving styles.
+fn wrap_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return vec![line];
+    }
+
+    let mut result: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
+
+    for span in line.spans {
+        let style = span.style;
+        let text = span.content.to_string();
+
+        // Split text into words
+        let mut chars = text.chars().peekable();
+        let mut word = String::new();
+
+        while let Some(c) = chars.next() {
+            if c == ' ' || c == '\t' {
+                // Process accumulated word
+                if !word.is_empty() {
+                    let word_len = word.chars().count();
+                    if current_width + word_len > width && current_width > 0 {
+                        // Wrap to new line
+                        result.push(Line::from(std::mem::take(&mut current_spans)));
+                        current_width = 0;
+                    }
+                    current_spans.push(Span::styled(std::mem::take(&mut word), style));
+                    current_width += word_len;
+                }
+                // Add space if there's room
+                if current_width < width {
+                    current_spans.push(Span::styled(" ", style));
+                    current_width += 1;
+                }
+            } else {
+                word.push(c);
+            }
+        }
+
+        // Process remaining word
+        if !word.is_empty() {
+            let word_len = word.chars().count();
+            if current_width + word_len > width && current_width > 0 {
+                result.push(Line::from(std::mem::take(&mut current_spans)));
+                current_width = 0;
+            }
+            current_spans.push(Span::styled(word, style));
+            current_width += word_len;
+        }
+    }
+
+    // Flush remaining spans
+    if !current_spans.is_empty() {
+        result.push(Line::from(current_spans));
+    }
+
+    if result.is_empty() {
+        result.push(Line::from(""));
+    }
+
+    result
+}
+
+/// Render markdown text to styled Lines (without wrapping).
 pub fn render_markdown(text: &str, base_style: Style) -> Vec<Line<'static>> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_STRIKETHROUGH);

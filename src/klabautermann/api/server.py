@@ -77,10 +77,10 @@ async def handle_chat_message(websocket: WebSocket, message: dict[str, Any]) -> 
             await websocket.send_json({"type": "error", "content": "Orchestrator not initialized"})
             return
 
-        # Process through orchestrator
-        response = await _orchestrator.handle_user_input_v2(
+        # Process through orchestrator (handle_user_input creates thread first)
+        response = await _orchestrator.handle_user_input(
+            thread_id=thread_id or "default",
             text=content,
-            thread_uuid=thread_id or "default",
         )
 
         # Send response

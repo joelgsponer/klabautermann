@@ -106,7 +106,7 @@ async def test_track_background_task_logs_completion(orchestrator):
         await asyncio.sleep(0.01)
         return "done"
 
-    with patch("klabautermann.agents.orchestrator.logger") as mock_logger:
+    with patch("klabautermann.agents.orchestrator._orchestrator.logger") as mock_logger:
         task = orchestrator._track_background_task(
             dummy_coro(),
             trace_id="test-123",
@@ -129,7 +129,7 @@ async def test_track_background_task_logs_failure(orchestrator):
         await asyncio.sleep(0.01)
         raise ValueError("Test error")
 
-    with patch("klabautermann.agents.orchestrator.logger") as mock_logger:
+    with patch("klabautermann.agents.orchestrator._orchestrator.logger") as mock_logger:
         task = orchestrator._track_background_task(
             failing_coro(),
             trace_id="test-123",
@@ -214,7 +214,7 @@ async def test_shutdown_with_no_tasks(orchestrator):
 
     assert orchestrator._get_background_task_count() == 0
 
-    with patch("klabautermann.agents.orchestrator.logger") as mock_logger:
+    with patch("klabautermann.agents.orchestrator._orchestrator.logger") as mock_logger:
         await orchestrator.shutdown()
 
         mock_logger.info.assert_called()

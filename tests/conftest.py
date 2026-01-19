@@ -138,9 +138,9 @@ async def graphiti_client() -> AsyncGenerator[GraphitiClient, None]:
         pytest.skip(f"Could not connect to Graphiti: {e}")
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 async def thread_manager(neo4j_client: Neo4jClient) -> ThreadManager:
-    """ThreadManager for test database."""
+    """ThreadManager for test database (session-scoped to match neo4j_client)."""
     from klabautermann.memory.thread_manager import ThreadManager
 
     return ThreadManager(neo4j_client)

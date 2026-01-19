@@ -28,7 +28,7 @@ AVAILABLE SEARCH TECHNIQUES
    - WORKS_AT: Person → Organization employment
    - REPORTS_TO: Person → Person management chain
    - BLOCKS/DEPENDS_ON: Task dependencies
-   - KNOWS/FRIEND_OF: Interpersonal (has strength property)
+   - KNOWS/FRIEND_OF: Interpersonal relationships (via RELATES_TO)
    - ATTENDED: Event participation
    - CONTRIBUTES_TO: Project → Goal alignment
    - WORKS_AT_HISTORICAL: Employment with time-travel
@@ -36,7 +36,8 @@ AVAILABLE SEARCH TECHNIQUES
    Custom Cypher (use cypher_pattern field with full MATCH query):
    - Write any valid Cypher query for complex traversals
    - Use $param syntax for parameters (defined in params field)
-   - Example: "MATCH (p:Person)-[:KNOWS*2..3]->(friend) WHERE p.name = $name RETURN friend"
+   - IMPORTANT: Graphiti stores semantic relationships as RELATES_TO with r.name property
+   - Example: "MATCH (p:Person)-[r:RELATES_TO]->(friend:Person) WHERE p.name = $name AND r.name =~ '(?i).*knows.*' RETURN friend"
 
 4. TEMPORAL
    When: "last week", "in 2024", "yesterday", historical state
@@ -59,8 +60,10 @@ Node Labels:
 Relationship Types:
 - WORKS_AT (title, department, created_at, expired_at)
 - REPORTS_TO (created_at, expired_at)
-- KNOWS (strength: 0.0-1.0, context, created_at)
-- FRIEND_OF (strength: 0.0-1.0, how_met, since)
+- RELATES_TO (name, fact, created_at, expired_at) — Graphiti's semantic relationship type
+  * r.name contains the relationship label: "knows", "friend of", "works with", etc.
+  * r.fact contains context about the relationship
+  * Use: WHERE r.name =~ '(?i).*knows.*' to filter by relationship type
 - BLOCKS (reason)
 - DEPENDS_ON (reason)
 - PART_OF (role)
@@ -74,16 +77,21 @@ Temporal Properties:
 - expired_at: Unix timestamp when relationship ended (NULL = current)
 
 ═══════════════════════════════════════════════════════════════════════════
-RELATIONSHIP STRENGTHS
+SEMANTIC RELATIONSHIPS (RELATES_TO)
 ═══════════════════════════════════════════════════════════════════════════
 
-These edges have `strength` (0.0-1.0) properties:
-- KNOWS.strength — How well people know each other
-- FRIEND_OF.strength — Closeness of friendship
+Graphiti stores interpersonal and semantic relationships as RELATES_TO edges:
+- r.name: The relationship label ("knows", "friend of", "works with", etc.)
+- r.fact: Descriptive context about the relationship
+- r.created_at: When the relationship was recorded
+- r.expired_at: When the relationship ended (NULL = current)
+
+To find relationships by type, filter on r.name using regex:
+  WHERE r.name =~ '(?i).*(knows|friend).*'
+
+These edges have weight/strength properties:
 - CONTRIBUTES_TO.weight — Project-goal contribution
 - PART_OF_ISLAND.weight — Community centrality
-
-Set consider_strength=true when relationship closeness matters.
 
 ═══════════════════════════════════════════════════════════════════════════
 PLANNING RULES
@@ -132,10 +140,10 @@ Return valid JSON matching this schema:
 Example custom Cypher strategy:
 {{
   "technique": "STRUCTURAL",
-  "cypher_pattern": "MATCH (p:Person)-[r:KNOWS]->(friend:Person)-[:WORKS_AT]->(o:Organization) WHERE p.name =~ $name_pattern AND r.expired_at IS NULL RETURN friend.name as person, o.name as company, r.strength as closeness ORDER BY r.strength DESC LIMIT $limit",
+  "cypher_pattern": "MATCH (p:Person)-[r:RELATES_TO]->(friend:Person)-[:WORKS_AT]->(o:Organization) WHERE p.name =~ $name_pattern AND r.name =~ '(?i).*(knows|friend).*' AND r.expired_at IS NULL RETURN friend.name as person, o.name as company, r.name as relationship, r.fact as context ORDER BY r.created_at DESC LIMIT $limit",
   "params": {{"name_pattern": "(?i).*john.*", "limit": 10}},
-  "consider_strength": true,
-  "rationale": "Find companies where John's friends work, prioritized by relationship strength"
+  "consider_strength": false,
+  "rationale": "Find companies where John's friends/acquaintances work via Graphiti RELATES_TO edges"
 }}
 """
 
@@ -217,7 +225,7 @@ Return valid JSON matching the GraphIntelligenceReport schema:
     {{
       "source_name": "entity name",
       "source_type": "Person|Organization|etc",
-      "relationship_type": "WORKS_AT|KNOWS|etc",
+      "relationship_type": "WORKS_AT|RELATES_TO|etc",
       "target_name": "target entity",
       "target_type": "type",
       "strength": 0.0-1.0 or null,
