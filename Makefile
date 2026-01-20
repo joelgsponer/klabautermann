@@ -2,7 +2,7 @@
 # ======================
 # Common development commands
 
-.PHONY: help venv install dev run api tui tui-build test lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
+.PHONY: help venv install dev run api tui tui-build test test-fast lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
 
 # Default target
 help:
@@ -22,6 +22,7 @@ help:
 	@echo ""
 	@echo "Quality:"
 	@echo "  make test         Run all tests"
+	@echo "  make test-fast    Run tests in parallel (requires pytest-xdist)"
 	@echo "  make test-cov     Run tests with coverage report"
 	@echo "  make lint         Run linter (ruff)"
 	@echo "  make type-check   Run type checker (mypy)"
@@ -75,6 +76,9 @@ tui: tui-build
 
 test:
 	pytest tests/ -v
+
+test-fast:
+	pytest tests/ -v -n auto --dist loadfile
 
 test-unit:
 	pytest tests/unit/ -v -m unit
@@ -171,5 +175,6 @@ clean:
 	rm -rf .ruff_cache/
 	rm -rf htmlcov/
 	rm -rf .coverage
+	rm -f test-results.xml
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
