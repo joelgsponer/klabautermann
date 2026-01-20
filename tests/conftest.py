@@ -429,3 +429,244 @@ def sample_conversation() -> list[tuple[str, str]]:
         ("user", "She's a product manager working on their new AI platform."),
         ("assistant", "That's interesting! I'll remember that Sarah is a PM at Acme."),
     ]
+
+
+# ===========================================================================
+# Channel Test Fixtures
+# ===========================================================================
+
+
+@pytest.fixture
+def mock_cli_input() -> Any:
+    """
+    Mock for CLI input (prompt_toolkit).
+
+    Returns a mock that can be configured to return specific inputs.
+
+    Usage:
+        mock_cli_input.return_value = "Hello"
+        # or for multiple inputs:
+        mock_cli_input.side_effect = ["Hello", "How are you?", "/quit"]
+    """
+    from unittest.mock import AsyncMock
+
+    mock = AsyncMock()
+    mock.return_value = "Test input"
+    return mock
+
+
+@pytest.fixture
+def mock_cli_renderer() -> Any:
+    """
+    Mock for CLI renderer (Rich console output).
+
+    Captures all output for assertions.
+
+    Usage:
+        renderer = mock_cli_renderer
+        # ... do something that calls renderer
+        assert "expected text" in renderer.captured_output
+    """
+    from unittest.mock import MagicMock
+
+    renderer = MagicMock()
+    renderer.captured_output = []
+
+    def capture_print(*args: Any, **kwargs: Any) -> None:
+        renderer.captured_output.append(str(args))
+
+    renderer.print = MagicMock(side_effect=capture_print)
+    renderer.render_assistant_response = MagicMock(side_effect=capture_print)
+    renderer.render_user_input = MagicMock()
+    renderer.render_thinking = MagicMock()
+    renderer.render_error = MagicMock(side_effect=capture_print)
+    renderer.render_system = MagicMock(side_effect=capture_print)
+
+    return renderer
+
+
+@pytest.fixture
+def mock_orchestrator() -> Any:
+    """
+    Mock Orchestrator for channel tests.
+
+    Provides a fully mocked orchestrator with configurable responses.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    orchestrator = MagicMock()
+    orchestrator.process_message = AsyncMock(return_value="Test response")
+    orchestrator.process_input = AsyncMock(return_value="Test response")
+    orchestrator.name = "orchestrator"
+
+    return orchestrator
+
+
+@pytest.fixture
+def cli_driver_factory(
+    mock_orchestrator: Any,
+    mock_cli_renderer: Any,
+) -> Any:
+    """
+    Factory to create CLI driver instances for testing.
+
+    Usage:
+        driver = cli_driver_factory()
+        driver = cli_driver_factory(session_id="custom-session")
+    """
+    from unittest.mock import MagicMock
+
+    def _create_cli_driver(
+        session_id: str | None = None,
+        orchestrator: Any | None = None,
+    ) -> MagicMock:
+        """Create a mocked CLI driver for testing."""
+        driver = MagicMock()
+        driver.session_id = session_id or f"test-session-{uuid_lib.uuid4()}"
+        driver.orchestrator = orchestrator or mock_orchestrator
+        driver.renderer = mock_cli_renderer
+        driver.channel_type = "cli"
+        driver._running = False
+
+        return driver
+
+    return _create_cli_driver
+
+
+@pytest.fixture
+def mock_telegram_update() -> Any:
+    """
+    Mock Telegram Update object for testing.
+
+    Mimics the structure of telegram.Update from python-telegram-bot.
+    """
+    from unittest.mock import MagicMock
+
+    update = MagicMock()
+    update.update_id = 123456789
+    update.message = MagicMock()
+    update.message.message_id = 1
+    update.message.chat = MagicMock()
+    update.message.chat.id = 12345
+    update.message.chat.type = "private"
+    update.message.from_user = MagicMock()
+    update.message.from_user.id = 67890
+    update.message.from_user.username = "testuser"
+    update.message.from_user.first_name = "Test"
+    update.message.text = "Hello, bot!"
+    update.message.date = MagicMock()
+
+    return update
+
+
+@pytest.fixture
+def mock_telegram_context() -> Any:
+    """
+    Mock Telegram CallbackContext for testing.
+
+    Mimics the structure of telegram.ext.CallbackContext.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    context = MagicMock()
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock(return_value=MagicMock(message_id=2))
+    context.bot.send_chat_action = AsyncMock()
+    context.user_data = {}
+    context.chat_data = {}
+
+    return context
+
+
+@pytest.fixture
+def telegram_message_factory() -> Any:
+    """
+    Factory to create mock Telegram messages for testing.
+
+    Usage:
+        msg = telegram_message_factory(text="Hello")
+        msg = telegram_message_factory(chat_id=999, text="Test")
+    """
+    from unittest.mock import MagicMock
+
+    def _create_telegram_message(
+        text: str = "Test message",
+        chat_id: int = 12345,
+        user_id: int = 67890,
+        username: str = "testuser",
+        message_id: int | None = None,
+    ) -> MagicMock:
+        """Create a mock Telegram message."""
+        msg = MagicMock()
+        msg.message_id = message_id or 1
+        msg.text = text
+        msg.chat = MagicMock()
+        msg.chat.id = chat_id
+        msg.chat.type = "private"
+        msg.from_user = MagicMock()
+        msg.from_user.id = user_id
+        msg.from_user.username = username
+        msg.date = MagicMock()
+
+        return msg
+
+    return _create_telegram_message
+
+
+@pytest.fixture
+def agent_message_factory() -> Any:
+    """
+    Factory to create AgentMessage objects for testing channel responses.
+
+    Usage:
+        msg = agent_message_factory(content="Hello from agent")
+    """
+    import time
+
+    from klabautermann.core.models import AgentMessage
+
+    def _create_agent_message(
+        content: str = "Test response",
+        trace_id: str | None = None,
+        source_agent: str = "orchestrator",
+        target_agent: str = "user",
+        intent: str = "response",
+        **payload_kwargs: Any,
+    ) -> AgentMessage:
+        """Create an AgentMessage for testing."""
+        return AgentMessage(
+            trace_id=trace_id or f"test-trace-{uuid_lib.uuid4()}",
+            source_agent=source_agent,
+            target_agent=target_agent,
+            intent=intent,
+            payload={"response": content, **payload_kwargs},
+            timestamp=time.time(),
+        )
+
+    return _create_agent_message
+
+
+@pytest.fixture
+def capture_channel_output() -> Any:
+    """
+    Context manager to capture channel output for assertions.
+
+    Usage:
+        with capture_channel_output() as captured:
+            driver.send_message("Hello")
+        assert "Hello" in captured.output
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _capture():
+        class Captured:
+            output: list[str] = []
+
+            def add(self, text: str) -> None:
+                self.output.append(text)
+
+        captured = Captured()
+        yield captured
+
+    return _capture
