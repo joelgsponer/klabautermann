@@ -635,3 +635,291 @@ class TestFallbackReport:
         assert "what i found" in report.direct_answer.lower()
         assert len(report.evidence) <= 5
         assert report.result_count == len(sample_results)
+
+
+# ===========================================================================
+# Test Vector Search Execution
+# ===========================================================================
+
+
+class TestVectorSearchExecution:
+    """Tests for vector search execution via Graphiti."""
+
+    @pytest.mark.asyncio
+    async def test_vector_search_returns_results(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Vector search returns properly formatted RawSearchResult objects."""
+        # Setup mock to return Graphiti-style results
+        mock_result = MagicMock()
+        mock_result.fact = "Sarah works at TechCorp"
+        mock_result.uuid = "fact-123"
+        mock_result.score = 0.92
+        mock_graphiti.search = AsyncMock(return_value=[mock_result])
+
+        results = await researcher._execute_vector_search(
+            query="Who does Sarah work for?",
+            limit=10,
+            trace_id="test-vector",
+        )
+
+        assert len(results) == 1
+        assert results[0].source_technique == SearchTechnique.VECTOR
+        assert results[0].content == "Sarah works at TechCorp"
+        assert results[0].source_id == "fact-123"
+        assert results[0].vector_score == 0.92
+
+    @pytest.mark.asyncio
+    async def test_vector_search_handles_empty_results(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Vector search returns empty list when no results."""
+        mock_graphiti.search = AsyncMock(return_value=[])
+
+        results = await researcher._execute_vector_search(
+            query="Nonexistent query",
+            limit=10,
+            trace_id="test-empty",
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_vector_search_without_graphiti(self, mock_neo4j: MagicMock) -> None:
+        """Vector search returns empty list when Graphiti not available."""
+        researcher = Researcher(config={}, graphiti=None, neo4j=mock_neo4j)
+
+        results = await researcher._execute_vector_search(
+            query="Test query",
+            limit=10,
+            trace_id="test-no-graphiti",
+        )
+
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_vector_search_handles_exception(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Vector search returns empty list on exception."""
+        mock_graphiti.search = AsyncMock(side_effect=Exception("Connection failed"))
+
+        results = await researcher._execute_vector_search(
+            query="Test query",
+            limit=10,
+            trace_id="test-exception",
+        )
+
+        assert results == []
+
+
+# ===========================================================================
+# Test Entity Search Execution
+# ===========================================================================
+
+
+class TestEntitySearchExecution:
+    """Tests for entity fulltext search execution via Graphiti."""
+
+    @pytest.mark.asyncio
+    async def test_entity_search_returns_results(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Entity search returns properly formatted RawSearchResult objects."""
+        mock_entity = MagicMock()
+        mock_entity.name = "Sarah Chen"
+        mock_entity.content = "Software engineer at TechCorp"
+        mock_entity.uuid = "person-456"
+        mock_entity.score = 0.88
+        mock_graphiti.search_entities = AsyncMock(return_value=[mock_entity])
+
+        results = await researcher._execute_entity_search(
+            query="Sarah",
+            limit=5,
+            trace_id="test-entity",
+        )
+
+        assert len(results) == 1
+        assert results[0].source_technique == SearchTechnique.ENTITY_FULLTEXT
+        assert "Sarah Chen" in results[0].content
+        assert results[0].source_id == "person-456"
+        assert results[0].vector_score == 0.88
+
+    @pytest.mark.asyncio
+    async def test_entity_search_handles_entity_without_content(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Entity search handles entities without content field."""
+        mock_entity = MagicMock()
+        mock_entity.name = "TechCorp"
+        mock_entity.content = None
+        mock_entity.uuid = "org-789"
+        mock_entity.score = 0.75
+        mock_graphiti.search_entities = AsyncMock(return_value=[mock_entity])
+
+        results = await researcher._execute_entity_search(
+            query="TechCorp",
+            limit=5,
+            trace_id="test-no-content",
+        )
+
+        assert len(results) == 1
+        assert results[0].content == "TechCorp"
+
+    @pytest.mark.asyncio
+    async def test_entity_search_without_graphiti(self, mock_neo4j: MagicMock) -> None:
+        """Entity search returns empty list when Graphiti not available."""
+        researcher = Researcher(config={}, graphiti=None, neo4j=mock_neo4j)
+
+        results = await researcher._execute_entity_search(
+            query="Test",
+            limit=5,
+            trace_id="test-no-graphiti",
+        )
+
+        assert results == []
+
+
+# ===========================================================================
+# Test Hybrid Search (Result Fusion)
+# ===========================================================================
+
+
+class TestHybridSearchFusion:
+    """Tests for hybrid search result fusion combining multiple techniques."""
+
+    @pytest.mark.asyncio
+    async def test_hybrid_search_executes_multiple_strategies(
+        self, researcher: Researcher, mock_graphiti: MagicMock
+    ) -> None:
+        """Hybrid search executes both vector and entity strategies in parallel."""
+        # Setup vector search mock
+        vector_result = MagicMock()
+        vector_result.fact = "Sarah is a senior engineer"
+        vector_result.uuid = "fact-1"
+        vector_result.score = 0.85
+        mock_graphiti.search = AsyncMock(return_value=[vector_result])
+
+        # Setup entity search mock
+        entity_result = MagicMock()
+        entity_result.name = "Sarah Chen"
+        entity_result.content = "Person entity"
+        entity_result.uuid = "person-1"
+        entity_result.score = 0.90
+        mock_graphiti.search_entities = AsyncMock(return_value=[entity_result])
+
+        plan = SearchPlan(
+            original_query="Tell me about Sarah",
+            reasoning="Need both semantic and entity search",
+            strategies=[
+                SearchStrategy(
+                    technique=SearchTechnique.VECTOR,
+                    query="Sarah",
+                    limit=5,
+                    rationale="Semantic search",
+                ),
+                SearchStrategy(
+                    technique=SearchTechnique.ENTITY_FULLTEXT,
+                    query="Sarah",
+                    limit=5,
+                    rationale="Entity lookup",
+                ),
+            ],
+            expected_result_type="person info",
+            zoom_level="micro",
+        )
+
+        results_by_technique = await researcher._execute_search_plan(plan, "test-hybrid")
+
+        # Both techniques should have results
+        assert len(results_by_technique) == 2
+        assert "vector:0" in results_by_technique
+        assert "entity_fulltext:1" in results_by_technique
+
+    def test_fusion_combines_and_deduplicates(self, researcher: Researcher) -> None:
+        """Result fusion combines multiple technique results and deduplicates."""
+        results_by_technique = {
+            "vector:0": [
+                RawSearchResult(
+                    content="Sarah works at TechCorp",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id="unique-1",
+                    vector_score=0.85,
+                ),
+                RawSearchResult(
+                    content="Sarah is a software engineer",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id="unique-2",
+                    vector_score=0.75,
+                ),
+            ],
+            "entity:1": [
+                RawSearchResult(
+                    content="Sarah Chen: Person entity",
+                    source_technique=SearchTechnique.ENTITY_FULLTEXT,
+                    source_id="unique-3",
+                    vector_score=0.90,
+                ),
+            ],
+        }
+
+        aggregated = researcher._aggregate_results(results_by_technique, max_results=10)
+
+        # All unique results should be included
+        assert len(aggregated) == 3
+        # Highest score first (entity result with 0.90)
+        assert aggregated[0].vector_score == 0.90
+
+    def test_fusion_prefers_strength_boosted_results(self, researcher: Researcher) -> None:
+        """Result fusion ranks strength-boosted results higher."""
+        results_by_technique = {
+            "vector:0": [
+                RawSearchResult(
+                    content="Low score but high strength",
+                    source_technique=SearchTechnique.STRUCTURAL,
+                    source_id="strong-rel",
+                    vector_score=0.6,
+                    relationship_strengths=[1.0],  # High strength
+                ),
+            ],
+            "entity:1": [
+                RawSearchResult(
+                    content="High score no strength",
+                    source_technique=SearchTechnique.ENTITY_FULLTEXT,
+                    source_id="no-strength",
+                    vector_score=0.7,  # Higher base score
+                ),
+            ],
+        }
+
+        aggregated = researcher._aggregate_results(results_by_technique, max_results=10)
+
+        # Strength-boosted result should rank higher
+        # 0.6 * (1 + 1.0 * 0.3) = 0.78 vs 0.7
+        assert aggregated[0].source_id == "strong-rel"
+
+    def test_fusion_content_deduplication(self, researcher: Researcher) -> None:
+        """Result fusion deduplicates by content when no source_id."""
+        results_by_technique = {
+            "vector:0": [
+                RawSearchResult(
+                    content="Sarah works at TechCorp",
+                    source_technique=SearchTechnique.VECTOR,
+                    source_id=None,  # No ID
+                    vector_score=0.85,
+                ),
+            ],
+            "entity:1": [
+                RawSearchResult(
+                    content="Sarah works at TechCorp",  # Same content
+                    source_technique=SearchTechnique.ENTITY_FULLTEXT,
+                    source_id=None,  # No ID
+                    vector_score=0.80,
+                ),
+            ],
+        }
+
+        aggregated = researcher._aggregate_results(results_by_technique, max_results=10)
+
+        # Should be deduplicated to 1 result
+        assert len(aggregated) == 1
