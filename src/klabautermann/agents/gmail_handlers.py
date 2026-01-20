@@ -363,6 +363,7 @@ class EmailFormatter:
         include_snippet: bool = True,
         include_body: bool = False,
         body_max_length: int = 500,
+        total_available: int | None = None,
     ) -> str:
         """
         Format list of emails for display.
@@ -373,6 +374,7 @@ class EmailFormatter:
             include_snippet: Whether to include preview snippets
             include_body: Whether to include full body content (preferred over snippet)
             body_max_length: Maximum length for body content truncation
+            total_available: Max emails that could be fetched (hints if more exist)
 
         Returns:
             Formatted string for display
@@ -385,7 +387,16 @@ class EmailFormatter:
         if not emails:
             return "No emails found."
 
-        lines = [f"Found {len(emails)} email(s):"]
+        # Header with count info
+        displayed = min(len(emails), max_display)
+        if len(emails) == displayed and (total_available is None or len(emails) < total_available):
+            # Showing all fetched, but more may exist
+            lines = [f"Showing {displayed} email(s):"]
+        elif len(emails) > max_display:
+            # More fetched than displayed
+            lines = [f"Showing {displayed} of {len(emails)} email(s):"]
+        else:
+            lines = [f"Found {len(emails)} email(s):"]
 
         for i, email in enumerate(emails[:max_display]):
             lines.append("")  # Blank line between emails
@@ -414,7 +425,12 @@ class EmailFormatter:
         # Add overflow indicator
         if len(emails) > max_display:
             lines.append("")
-            lines.append(f"... and {len(emails) - max_display} more")
+            lines.append(f"... and {len(emails) - max_display} more in results")
+
+        # Hint if there may be more emails not fetched
+        if total_available and len(emails) >= total_available:
+            lines.append("")
+            lines.append("(More emails may exist - ask for more results if needed)")
 
         return "\n".join(lines)
 
