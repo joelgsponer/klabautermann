@@ -102,3 +102,9 @@ Thumbs.db
 # === Documentation Build ===
 docs/_build/
 site/
+
+# Ignore AI agent-specific directories
+.claude/
+
+# Ignore git worktrees directory
+worktrees/
