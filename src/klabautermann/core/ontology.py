@@ -85,8 +85,85 @@ class EmailType(BaseModel):
     is_unread: bool = Field(description="Whether email is unread", default=False)
 
 
+# ===========================================================================
+# Personal Life Entity Types
+# ===========================================================================
+
+
+class HobbyType(BaseModel):
+    """A leisure activity, interest, hobby, sport, or pastime."""
+
+    category: str | None = Field(
+        description="Category of hobby: sports, arts, music, gaming, outdoors, crafts, etc.",
+        default=None,
+    )
+    skill_level: str | None = Field(
+        description="Skill level: beginner, intermediate, advanced, expert", default=None
+    )
+    frequency: str | None = Field(
+        description="How often practiced: daily, weekly, monthly, occasionally", default=None
+    )
+
+
+class HealthMetricType(BaseModel):
+    """A health measurement, vital sign, fitness metric, or medical data point."""
+
+    metric_type: str | None = Field(
+        description="Type of metric: weight, blood_pressure, heart_rate, steps, sleep, glucose, etc.",
+        default=None,
+    )
+    value: float | None = Field(description="Numeric value of the measurement", default=None)
+    unit: str | None = Field(
+        description="Unit of measurement: kg, lbs, mmHg, bpm, steps, hours, mg/dL, etc.",
+        default=None,
+    )
+    recorded_at: str | None = Field(
+        description="When the measurement was taken (date/time)", default=None
+    )
+
+
+class PetType(BaseModel):
+    """An animal companion, pet, or domestic animal."""
+
+    species: str | None = Field(
+        description="Species of pet: dog, cat, bird, fish, rabbit, hamster, etc.", default=None
+    )
+    breed: str | None = Field(description="Breed or variety of the pet", default=None)
+    birth_date: str | None = Field(description="Pet's birth date or approximate age", default=None)
+    adoption_date: str | None = Field(description="When the pet was adopted", default=None)
+
+
+class MilestoneType(BaseModel):
+    """A personal achievement, life event, anniversary, or significant accomplishment."""
+
+    category: str | None = Field(
+        description="Category: career, education, personal, health, relationship, financial, etc.",
+        default=None,
+    )
+    significance: str | None = Field(
+        description="Level of significance: minor, moderate, major, life_changing", default=None
+    )
+    achieved_at: str | None = Field(
+        description="When the milestone was achieved (date)", default=None
+    )
+
+
+class RoutineType(BaseModel):
+    """A recurring activity, habit, schedule, or regular practice."""
+
+    frequency: str | None = Field(
+        description="How often: daily, weekly, monthly, weekdays, weekends", default=None
+    )
+    time_of_day: str | None = Field(
+        description="When during the day: morning, afternoon, evening, night", default=None
+    )
+    duration_minutes: int | None = Field(description="Typical duration in minutes", default=None)
+    is_active: bool = Field(description="Whether the routine is currently active", default=True)
+
+
 # Entity types dict for Graphiti's add_episode()
 ENTITY_TYPES: dict[str, type[BaseModel]] = {
+    # Core Entities
     "Person": PersonType,
     "Organization": OrganizationType,
     "Project": ProjectType,
@@ -94,6 +171,12 @@ ENTITY_TYPES: dict[str, type[BaseModel]] = {
     "Event": EventType,
     "Task": TaskType,
     "Email": EmailType,
+    # Personal Life Entities
+    "Hobby": HobbyType,
+    "HealthMetric": HealthMetricType,
+    "Pet": PetType,
+    "Milestone": MilestoneType,
+    "Routine": RoutineType,
 }
 
 
@@ -393,7 +476,7 @@ VECTOR_INDEXES: list[str] = [
 # ===========================================================================
 
 __all__ = [
-    # Entity type models for Graphiti
+    # Entity type models for Graphiti - Core
     "ENTITY_TYPES",
     "PersonType",
     "OrganizationType",
@@ -402,6 +485,12 @@ __all__ = [
     "EventType",
     "TaskType",
     "EmailType",
+    # Entity type models for Graphiti - Personal Life
+    "HobbyType",
+    "HealthMetricType",
+    "PetType",
+    "MilestoneType",
+    "RoutineType",
     # Enums
     "NodeLabel",
     "RelationType",
