@@ -25,6 +25,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 
 from klabautermann.channels.base_channel import BaseChannel
 from klabautermann.channels.cli_renderer import CLIRenderer
+from klabautermann.channels.sanitization import InputSanitizer
 from klabautermann.core.logger import (
     logger,
     restore_console_logging,
@@ -74,6 +75,7 @@ class CLIDriver(BaseChannel):
         super().__init__(orchestrator, config)
         self.session_id = str(uuid.uuid4())
         self._running = False
+        self._sanitizer = InputSanitizer()
         # Check for NO_SPINNER env var to disable animated spinner
         import os
 
@@ -226,6 +228,7 @@ class CLIDriver(BaseChannel):
         Process incoming message from user.
 
         Forwards to orchestrator with progress spinner and returns response.
+        Sanitizes input before processing for security.
 
         Args:
             thread_id: Thread identifier.
@@ -238,12 +241,17 @@ class CLIDriver(BaseChannel):
         if not self._orchestrator:
             return "[Error] Orchestrator not initialized."
 
+        # Sanitize input before processing
+        trace_id = f"cli-{self.session_id[:8]}"
+        sanitized_content = self._sanitizer.sanitize_message(content, trace_id=trace_id)
+        sanitized_thread_id = self._sanitizer.sanitize_thread_id(thread_id, trace_id=trace_id)
+
         try:
             # Show spinner during processing
             with self.renderer.spinner("Charting course..."):
                 response = await self._orchestrator.handle_user_input(
-                    thread_id=thread_id,
-                    text=content,
+                    thread_id=sanitized_thread_id,
+                    text=sanitized_content,
                 )
             return response
         except Exception as e:
@@ -268,7 +276,8 @@ class CLIDriver(BaseChannel):
         if self._prompt_session is None:
             self._prompt_session = self._create_prompt_session()
 
-        return (await self._prompt_session.prompt_async(prompt)).strip()
+        result: str = (await self._prompt_session.prompt_async(prompt)).strip()
+        return result
 
 
 # ===========================================================================

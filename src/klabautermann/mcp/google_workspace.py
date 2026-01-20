@@ -370,9 +370,7 @@ class GoogleWorkspaceBridge:
 
         def do_trash() -> str:
             try:
-                self._gmail_service.users().messages().trash(
-                    userId="me", id=message_id
-                ).execute()
+                self._gmail_service.users().messages().trash(userId="me", id=message_id).execute()
                 return message_id
             except HttpError as e:
                 raise ExternalServiceError("gmail", f"Trash failed: {e}") from e
@@ -383,9 +381,7 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Email trashed: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
-            return EmailOperationResult(
-                success=True, message_id=result_id, operation="trash"
-            )
+            return EmailOperationResult(success=True, message_id=result_id, operation="trash")
         except Exception as e:
             logger.error(
                 f"[STORM] Email trash failed: {e}",
@@ -415,9 +411,7 @@ class GoogleWorkspaceBridge:
 
         def do_delete() -> str:
             try:
-                self._gmail_service.users().messages().delete(
-                    userId="me", id=message_id
-                ).execute()
+                self._gmail_service.users().messages().delete(userId="me", id=message_id).execute()
                 return message_id
             except HttpError as e:
                 raise ExternalServiceError("gmail", f"Delete failed: {e}") from e
@@ -428,9 +422,7 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Email permanently deleted: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
-            return EmailOperationResult(
-                success=True, message_id=result_id, operation="delete"
-            )
+            return EmailOperationResult(success=True, message_id=result_id, operation="delete")
         except Exception as e:
             logger.error(
                 f"[STORM] Email delete failed: {e}",
@@ -476,9 +468,7 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Email archived: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
-            return EmailOperationResult(
-                success=True, message_id=result_id, operation="archive"
-            )
+            return EmailOperationResult(success=True, message_id=result_id, operation="archive")
         except Exception as e:
             logger.error(
                 f"[STORM] Email archive failed: {e}",
@@ -525,9 +515,7 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Labels added to email: {result_id[:8]}...",
                 extra={"message_id": message_id, "labels": label_ids},
             )
-            return EmailOperationResult(
-                success=True, message_id=result_id, operation="label"
-            )
+            return EmailOperationResult(success=True, message_id=result_id, operation="label")
         except Exception as e:
             logger.error(
                 f"[STORM] Add label failed: {e}",
@@ -574,9 +562,7 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Labels removed from email: {result_id[:8]}...",
                 extra={"message_id": message_id, "labels": label_ids},
             )
-            return EmailOperationResult(
-                success=True, message_id=result_id, operation="unlabel"
-            )
+            return EmailOperationResult(success=True, message_id=result_id, operation="unlabel")
         except Exception as e:
             logger.error(
                 f"[STORM] Remove label failed: {e}",
@@ -605,7 +591,8 @@ class GoogleWorkspaceBridge:
         def do_list_labels() -> list[dict[str, Any]]:
             try:
                 results = self._gmail_service.users().labels().list(userId="me").execute()
-                return results.get("labels", [])
+                labels: list[dict[str, Any]] = results.get("labels", [])
+                return labels
             except HttpError as e:
                 raise ExternalServiceError("gmail", f"List labels failed: {e}") from e
 
