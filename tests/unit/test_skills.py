@@ -394,3 +394,91 @@ class TestSkillAwarePlanner:
         assert "send-email" in context
         assert "research" in context
         assert "execute" in context
+
+
+class TestScheduleMeetingSkill:
+    """Tests for the schedule-meeting skill."""
+
+    @pytest.fixture
+    def planner_with_schedule_skill(self, tmp_path: Path) -> SkillAwarePlanner:
+        """Create planner with schedule-meeting skill loaded."""
+        skill_dir = tmp_path / "schedule-meeting"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: schedule-meeting
+            description: Schedule a calendar meeting. Use when user says "schedule meeting", "book meeting", "set up meeting".
+            klabautermann-task-type: execute
+            klabautermann-agent: executor
+            klabautermann-blocking: true
+            klabautermann-requires-confirmation: true
+            klabautermann-payload-schema:
+              action_type:
+                type: string
+                required: true
+                default: calendar_create
+              title:
+                type: string
+                required: true
+                extract-from: user-message
+              start_time:
+                type: string
+                required: true
+                extract-from: user-message
+            ---
+
+            # Schedule Meeting
+
+            Schedule calendar meetings.
+        """).strip()
+        )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        return SkillAwarePlanner(loader)
+
+    def test_match_schedule_meeting(self, planner_with_schedule_skill: SkillAwarePlanner) -> None:
+        """Test matching schedule-meeting skill by description pattern."""
+        skill = planner_with_schedule_skill.match_skill("schedule a meeting with Sarah tomorrow")
+        assert skill is not None
+        assert skill.name == "schedule-meeting"
+
+    def test_match_book_meeting(self, planner_with_schedule_skill: SkillAwarePlanner) -> None:
+        """Test matching by 'book meeting' pattern."""
+        skill = planner_with_schedule_skill.match_skill("book a meeting for Monday 10am")
+        assert skill is not None
+        assert skill.name == "schedule-meeting"
+
+    def test_match_by_command(self, planner_with_schedule_skill: SkillAwarePlanner) -> None:
+        """Test matching by explicit /schedule-meeting command."""
+        skill = planner_with_schedule_skill.match_skill("/schedule-meeting Team standup")
+        assert skill is not None
+        assert skill.name == "schedule-meeting"
+
+    def test_skill_config(self, planner_with_schedule_skill: SkillAwarePlanner) -> None:
+        """Test schedule-meeting skill configuration."""
+        skill = planner_with_schedule_skill.match_skill("/schedule-meeting")
+        assert skill is not None
+        assert skill.klabautermann.task_type == "execute"
+        assert skill.klabautermann.agent == "executor"
+        assert skill.klabautermann.blocking is True
+        assert skill.klabautermann.requires_confirmation is True
+
+    def test_skill_to_planned_task(self, planner_with_schedule_skill: SkillAwarePlanner) -> None:
+        """Test converting schedule-meeting skill to PlannedTask."""
+        skill = planner_with_schedule_skill.match_skill("/schedule-meeting")
+        assert skill is not None
+
+        task = planner_with_schedule_skill.skill_to_planned_task(
+            skill,
+            {
+                "action_type": "calendar_create",
+                "title": "Team standup",
+                "start_time": "tomorrow at 10am",
+            },
+        )
+        assert task.task_type == "execute"
+        assert task.agent == "executor"
+        assert task.blocking is True
+        assert task.payload["action_type"] == "calendar_create"
+        assert task.payload["title"] == "Team standup"
