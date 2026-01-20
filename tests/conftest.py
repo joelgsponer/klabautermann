@@ -240,3 +240,192 @@ def sample_thread_context() -> dict[str, Any]:
             {"role": "assistant", "content": "Nice to meet Sarah! What does she do at Acme?"},
         ],
     }
+
+
+# ===========================================================================
+# Thread Manager Test Fixtures
+# ===========================================================================
+
+
+@pytest.fixture
+def mock_thread_manager() -> Any:
+    """
+    Mock ThreadManager for unit tests.
+
+    Provides a fully mocked ThreadManager with async methods.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from klabautermann.core.models import (
+        ChannelType,
+        MessageNode,
+        ThreadContext,
+        ThreadNode,
+        ThreadStatus,
+    )
+
+    manager = MagicMock()
+
+    # Default thread for get_or_create_thread
+    default_thread = ThreadNode(
+        uuid="test-thread-uuid",
+        external_id="test-external-id",
+        channel_type=ChannelType.CLI,
+        status=ThreadStatus.ACTIVE,
+        created_at=1234567890.0,
+        updated_at=1234567890.0,
+        last_message_at=1234567890.0,
+    )
+
+    manager.get_or_create_thread = AsyncMock(return_value=default_thread)
+    manager.get_thread = AsyncMock(return_value=default_thread)
+    manager.add_message = AsyncMock(
+        return_value=MessageNode(
+            uuid="test-msg-uuid",
+            role="user",
+            content="Test message",
+            timestamp=1234567890.0,
+        )
+    )
+    manager.get_context_window = AsyncMock(
+        return_value=ThreadContext(
+            thread_uuid="test-thread-uuid",
+            channel_type=ChannelType.CLI,
+            messages=[],
+            max_messages=20,
+        )
+    )
+    manager.update_thread_status = AsyncMock(return_value=default_thread)
+    manager.get_message_count = AsyncMock(return_value=0)
+    manager.get_recent_threads = AsyncMock(return_value=[])
+    manager.mark_archiving = AsyncMock(return_value=True)
+    manager.mark_archived = AsyncMock(return_value=True)
+    manager.reactivate_thread = AsyncMock(return_value=True)
+    manager.get_inactive_threads = AsyncMock(return_value=[])
+
+    return manager
+
+
+@pytest.fixture
+def thread_factory() -> Any:
+    """
+    Factory fixture to create ThreadNode objects for testing.
+
+    Usage:
+        thread = thread_factory()
+        thread = thread_factory(channel_type="telegram", external_id="tg-123")
+    """
+    import time
+
+    from klabautermann.core.models import ChannelType, ThreadNode, ThreadStatus
+
+    def _create_thread(
+        uuid: str | None = None,
+        external_id: str | None = None,
+        channel_type: str | ChannelType = ChannelType.CLI,
+        user_id: str | None = None,
+        status: ThreadStatus = ThreadStatus.ACTIVE,
+        created_at: float | None = None,
+        **kwargs: Any,
+    ) -> ThreadNode:
+        """Create a ThreadNode with test defaults."""
+        now = time.time()
+        thread_uuid = uuid or f"test-thread-{uuid_lib.uuid4()}"
+        ext_id = external_id or f"test-ext-{uuid_lib.uuid4()}"
+
+        if isinstance(channel_type, str):
+            channel_type = ChannelType(channel_type)
+
+        return ThreadNode(
+            uuid=thread_uuid,
+            external_id=ext_id,
+            channel_type=channel_type,
+            user_id=user_id,
+            status=status,
+            created_at=created_at or now,
+            updated_at=created_at or now,
+            last_message_at=created_at or now,
+            **kwargs,
+        )
+
+    return _create_thread
+
+
+@pytest.fixture
+def message_factory() -> Any:
+    """
+    Factory fixture to create MessageNode objects for testing.
+
+    Usage:
+        msg = message_factory(content="Hello")
+        msg = message_factory(role="assistant", content="Hi there!")
+    """
+    import time
+
+    from klabautermann.core.models import MessageNode
+
+    def _create_message(
+        uuid: str | None = None,
+        role: str = "user",
+        content: str = "Test message",
+        timestamp: float | None = None,
+        metadata: dict | None = None,
+    ) -> MessageNode:
+        """Create a MessageNode with test defaults."""
+        msg_uuid = uuid or f"test-msg-{uuid_lib.uuid4()}"
+        return MessageNode(
+            uuid=msg_uuid,
+            role=role,
+            content=content,
+            timestamp=timestamp or time.time(),
+            metadata=metadata,
+        )
+
+    return _create_message
+
+
+@pytest.fixture
+def conversation_factory(message_factory: Any) -> Any:
+    """
+    Factory fixture to create conversation sequences.
+
+    Usage:
+        messages = conversation_factory([
+            ("user", "Hello"),
+            ("assistant", "Hi there!"),
+            ("user", "How are you?"),
+        ])
+    """
+    from klabautermann.core.models import MessageNode
+
+    def _create_conversation(
+        exchanges: list[tuple[str, str]],
+    ) -> list[MessageNode]:
+        """Create a sequence of messages from (role, content) tuples."""
+        import time
+
+        base_time = time.time() - len(exchanges)  # Spread messages over time
+        messages = []
+
+        for i, (role, content) in enumerate(exchanges):
+            msg = message_factory(
+                role=role,
+                content=content,
+                timestamp=base_time + i,
+            )
+            messages.append(msg)
+
+        return messages
+
+    return _create_conversation
+
+
+@pytest.fixture
+def sample_conversation() -> list[tuple[str, str]]:
+    """Sample conversation data for testing."""
+    return [
+        ("user", "Hello, I met Sarah from Acme Corp today."),
+        ("assistant", "Nice to meet Sarah! What does she do at Acme?"),
+        ("user", "She's a product manager working on their new AI platform."),
+        ("assistant", "That's interesting! I'll remember that Sarah is a PM at Acme."),
+    ]
