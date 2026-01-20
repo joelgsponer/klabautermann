@@ -1,0 +1,56 @@
+version: 2
+updates:
+  # Python dependencies (via uv/pip)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    groups:
+      # Group dev dependencies together
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "pre-commit"
+      # Group AI/ML dependencies
+      ai-dependencies:
+        patterns:
+          - "anthropic"
+          - "openai"
+          - "langchain*"
+    labels:
+      - "dependencies"
+      - "type/chore"
+    commit-message:
+      prefix: "chore(deps):"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "type/chore"
+      - "area/infra"
+    commit-message:
+      prefix: "chore(ci):"
+
+  # Docker dependencies
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    labels:
+      - "dependencies"
+      - "type/chore"
+      - "area/infra"
+    commit-message:
+      prefix: "chore(docker):"

@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  PYTHON_VERSION: "3.11"
+  UV_SYSTEM_PYTHON: 1
+
+jobs:
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Build package
+        run: uv build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Optional: Publish to PyPI (uncomment when ready)
+  # publish:
+  #   name: Publish to PyPI
+  #   needs: [build, release]
+  #   runs-on: ubuntu-latest
+  #   environment: pypi
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install uv
+  #       uses: astral-sh/setup-uv@v4
+  #     - name: Download build artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: dist
+  #         path: dist/
+  #     - name: Publish to PyPI
+  #       run: uv publish dist/*
+  #       env:
+  #         UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
