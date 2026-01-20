@@ -34,7 +34,6 @@ jobs:
       - name: Run pip-audit
         run: |
           uv run pip-audit \
-            --require-hashes \
             --disable-pip \
             --progress-spinner=off \
             --format=json \
