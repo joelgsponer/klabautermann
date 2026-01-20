@@ -9,12 +9,15 @@ Reference: specs/architecture/CHANNELS.md, specs/branding/PERSONALITY.md
 
 from __future__ import annotations
 
+import os
+import sys
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.theme import Theme
 
 from klabautermann.core.logger import restore_console_logging, suppress_console_logging
@@ -24,6 +27,22 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from rich.status import Status
+
+
+def _should_use_color() -> bool:
+    """Determine if color output should be used.
+
+    Respects NO_COLOR (https://no-color.org/) and FORCE_COLOR environment variables.
+    Falls back to TTY detection.
+    """
+    # NO_COLOR takes precedence (accessibility standard)
+    if os.getenv("NO_COLOR"):
+        return False
+    # FORCE_COLOR enables color even in non-TTY environments
+    if os.getenv("FORCE_COLOR"):
+        return True
+    # Fall back to TTY detection
+    return sys.stdout.isatty()
 
 
 # Nautical color theme (deeper palette matching Go TUI)
@@ -74,7 +93,15 @@ class CLIRenderer:
         Args:
             no_spinner: If True, disable animated spinner (for terminals with issues).
         """
-        self.console = Console(theme=NAUTICAL_THEME)
+        use_color = _should_use_color()
+        # force_terminal ensures Rich doesn't disable features when stdout isn't a TTY
+        # but FORCE_COLOR is set (e.g., in CI or when user knows terminal supports it)
+        force_terminal = bool(os.getenv("FORCE_COLOR"))
+        self.console = Console(
+            theme=NAUTICAL_THEME,
+            force_terminal=force_terminal,
+            no_color=not use_color,
+        )
         self.no_spinner = no_spinner
 
     def render_banner(self) -> None:
@@ -118,6 +145,15 @@ class CLIRenderer:
 """
         self.console.print(Markdown(help_md))
 
+    def render_user_input(self, content: str) -> None:
+        """
+        Echo user input with distinct styling.
+
+        Args:
+            content: User's input text.
+        """
+        self.console.print(f"[bold cyan]▶[/] [dim]{content}[/]")
+
     def render_response(self, content: str) -> None:
         """
         Render AI response with markdown formatting.
@@ -128,6 +164,8 @@ class CLIRenderer:
         self.console.print()
         self.console.print(Markdown(content))
         self.console.print()
+        # Add subtle separator for readability
+        self.console.print(Rule(style="dim"))
 
     def render_error(self, message: str) -> None:
         """

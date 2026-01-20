@@ -247,6 +247,20 @@ def restore_console_logging() -> None:
         logger.addHandler(_console_handler)
 
 
+def set_cli_log_level() -> None:
+    """Set log level appropriate for CLI mode.
+
+    In CLI mode, only show warnings and errors by default to avoid
+    cluttering the interactive output. Users can override with LOG_LEVEL
+    environment variable or toggle with /logs command.
+    """
+    # Respect explicit LOG_LEVEL setting
+    if os.getenv("LOG_LEVEL"):
+        return
+    # Default CLI mode to WARNING (only [SWELL], [STORM], [SHIPWRECK])
+    logger.setLevel(logging.WARNING)
+
+
 # ===========================================================================
 # Convenience Functions
 # ===========================================================================
@@ -287,6 +301,7 @@ __all__ = [
     "log_with_context",
     "logger",
     "restore_console_logging",
+    "set_cli_log_level",
     "setup_logger",
     "suppress_console_logging",
 ]
