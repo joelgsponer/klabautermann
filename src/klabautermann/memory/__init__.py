@@ -10,6 +10,9 @@ Contains:
 - context_statistics: Context window token/overflow tracking
 - orphan_cleanup: Find and remove orphan messages
 - health_monitor: Memory system health monitoring
+- zoom_search: Multi-level retrieval (macro/meso/micro)
+- entity_merge: Duplicate entity detection and merging
+- temporal_spine: Day-based temporal queries
 """
 
 from klabautermann.memory.context_statistics import (
@@ -17,6 +20,14 @@ from klabautermann.memory.context_statistics import (
     GlobalContextMetrics,
     get_global_context_metrics,
     get_thread_context_metrics,
+)
+from klabautermann.memory.entity_merge import (
+    DuplicateCandidate,
+    MergePreview,
+    MergeResult,
+    find_duplicate_persons,
+    merge_entities,
+    preview_merge,
 )
 from klabautermann.memory.graph_statistics import (
     GraphStatistics,
@@ -37,7 +48,27 @@ from klabautermann.memory.orphan_cleanup import (
     find_orphan_messages,
 )
 from klabautermann.memory.queries import CypherQueries, QueryBuilder, QueryResult
+from klabautermann.memory.temporal_spine import (
+    DayActivity,
+    DayNode,
+    find_entities_by_date,
+    find_entities_in_range,
+    get_day_activities,
+    get_or_create_day,
+    get_weekly_summary,
+    link_to_day,
+)
 from klabautermann.memory.thread_manager import ThreadManager
+from klabautermann.memory.zoom_search import (
+    MacroSearchResult,
+    MesoSearchResult,
+    MicroSearchResult,
+    ZoomLevelSelector,
+    auto_zoom_search,
+    macro_search,
+    meso_search,
+    micro_search,
+)
 
 
 __all__ = [
@@ -67,4 +98,29 @@ __all__ = [
     "MemoryHealthMonitor",
     "MemoryHealthStatus",
     "get_health_monitor",
+    # Zoom Search
+    "MacroSearchResult",
+    "MesoSearchResult",
+    "MicroSearchResult",
+    "ZoomLevelSelector",
+    "auto_zoom_search",
+    "macro_search",
+    "meso_search",
+    "micro_search",
+    # Entity Merge
+    "DuplicateCandidate",
+    "MergePreview",
+    "MergeResult",
+    "find_duplicate_persons",
+    "merge_entities",
+    "preview_merge",
+    # Temporal Spine
+    "DayActivity",
+    "DayNode",
+    "find_entities_by_date",
+    "find_entities_in_range",
+    "get_day_activities",
+    "get_or_create_day",
+    "get_weekly_summary",
+    "link_to_day",
 ]
