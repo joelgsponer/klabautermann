@@ -32,60 +32,76 @@ if TYPE_CHECKING:
 @requires_openai
 class TestGoldenScenario1NewContact:
     """
-    Golden Scenario 1: New Contact
+    Golden Scenario 1: New Contact (#237)
 
     Input: "I met John (john@example.com), PM at Acme"
     Expected: Person node, Organization node, WORKS_AT relationship
 
     This scenario tests the complete ingestion pipeline:
     User input -> Orchestrator -> Ingestor -> Graphiti -> Neo4j
+
+    Acceptance Criteria:
+    - Input contact info
+    - Verify Person created
+    - Verify Org created
+    - Verify WORKS_AT
+
+    Reference: specs/quality/TESTING.md Section 10.2
     """
 
     @pytest.mark.asyncio
-    async def test_creates_person_node(
+    async def test_creates_person_entity(
         self,
         graphiti_client: GraphitiClient,
         neo4j_client: Neo4jClient,
     ) -> None:
-        """'I met X' should create Person node with extracted properties."""
-        # Ingest episode about meeting someone
+        """'I met X' should create Person entity with extracted properties."""
+        # Ingest episode about meeting someone with specific email
         await graphiti_client.add_episode(
             content="I met John Doe (john@example.com). He's a PM at Acme Corp.",
             source="conversation",
-            trace_id="golden-1-person",
+            trace_id="golden-1-person-237",
         )
 
         # Wait for async processing
         await asyncio.sleep(3)
 
-        # Verify Person node created
+        # Verify Person entity created - check both Entity and EntityNode labels
+        # Graphiti uses EntityNode for its internal entities
         result = await neo4j_client.execute_query(
             """
             MATCH (p)
             WHERE (p:Person OR p:Entity OR p:EntityNode)
               AND (toLower(p.name) CONTAINS 'john' OR toLower(p.summary) CONTAINS 'john')
-            RETURN p.name as name, labels(p) as labels
+            RETURN p.name as name, p.summary as summary, labels(p) as labels
             """,
             {},
         )
 
-        # Should find at least one entity for John
-        assert len(result) >= 1 or True, (
-            "Entity extraction for 'John Doe' - Graphiti may or may not extract "
-            "depending on its entity model. This documents expected behavior."
+        # Must find at least one entity for John - this is a strict requirement
+        assert len(result) >= 1, (
+            f"Person entity for 'John Doe' must be created. "
+            f"Found {len(result)} entities. "
+            f"Check if Graphiti is extracting person entities correctly."
         )
 
+        # Verify name or summary contains identifying info
+        found_john = any(
+            "john" in (r.get("name", "") or r.get("summary", "") or "").lower() for r in result
+        )
+        assert found_john, f"Entity must contain 'John' in name/summary. Results: {result}"
+
     @pytest.mark.asyncio
-    async def test_creates_organization_node(
+    async def test_creates_organization_entity(
         self,
         graphiti_client: GraphitiClient,
         neo4j_client: Neo4jClient,
     ) -> None:
-        """'at Acme Corp' should create Organization node."""
+        """'at Acme Corp' should create Organization entity."""
         await graphiti_client.add_episode(
             content="I met Sarah from Acme Corp today. She's their lead engineer.",
             source="conversation",
-            trace_id="golden-1-org",
+            trace_id="golden-1-org-237",
         )
 
         await asyncio.sleep(3)
@@ -96,13 +112,15 @@ class TestGoldenScenario1NewContact:
             MATCH (o)
             WHERE (o:Organization OR o:Entity OR o:EntityNode)
               AND (toLower(o.name) CONTAINS 'acme' OR toLower(o.summary) CONTAINS 'acme')
-            RETURN o.name as name, labels(o) as labels
+            RETURN o.name as name, o.summary as summary, labels(o) as labels
             """,
             {},
         )
 
-        # Document expected behavior
-        assert len(result) >= 0, "Organization 'Acme Corp' entity extraction"
+        # Must find organization entity
+        assert (
+            len(result) >= 1
+        ), f"Organization entity for 'Acme Corp' must be created. Found {len(result)} entities."
 
     @pytest.mark.asyncio
     async def test_creates_works_at_fact(
@@ -113,7 +131,7 @@ class TestGoldenScenario1NewContact:
         await graphiti_client.add_episode(
             content="I met Alice (alice@techcorp.com), a Senior Engineer at TechCorp Inc.",
             source="conversation",
-            trace_id="golden-1-rel",
+            trace_id="golden-1-rel-237",
         )
 
         await asyncio.sleep(3)
@@ -121,8 +139,60 @@ class TestGoldenScenario1NewContact:
         # Search should find the relationship as a fact
         results = await graphiti_client.search("Alice works at TechCorp", limit=5)
 
-        # The fact about Alice working at TechCorp should be searchable
-        assert isinstance(results, list)
+        # Must find searchable facts about Alice at TechCorp
+        assert isinstance(results, list), "Search must return a list"
+        assert len(results) >= 1, (
+            f"WORKS_AT relationship must be searchable. "
+            f"Query 'Alice works at TechCorp' returned {len(results)} results."
+        )
+
+    @pytest.mark.asyncio
+    async def test_works_at_relationship_in_graph(
+        self,
+        graphiti_client: GraphitiClient,
+        neo4j_client: Neo4jClient,
+    ) -> None:
+        """WORKS_AT relationship should exist between Person and Organization nodes."""
+        # Ingest clear employment relationship
+        await graphiti_client.add_episode(
+            content="Michael Johnson is the CEO of NewTech Solutions. He has worked there since 2020.",
+            source="conversation",
+            trace_id="golden-1-workat-237",
+        )
+
+        await asyncio.sleep(3)
+
+        # Check for edge (relationship) between entities in Graphiti's edge format
+        result = await neo4j_client.execute_query(
+            """
+            MATCH (e:Edge)
+            WHERE toLower(e.fact) CONTAINS 'michael'
+              AND (toLower(e.fact) CONTAINS 'newtech' OR toLower(e.fact) CONTAINS 'ceo')
+            RETURN e.fact as fact, e.name as name
+            LIMIT 5
+            """,
+            {},
+        )
+
+        # If Graphiti uses edges, verify relationship fact exists
+        # Alternatively check for direct relationship
+        if len(result) == 0:
+            # Try direct relationship pattern
+            result = await neo4j_client.execute_query(
+                """
+                MATCH (p)-[r]->(o)
+                WHERE (toLower(p.name) CONTAINS 'michael' OR toLower(p.summary) CONTAINS 'michael')
+                  AND (toLower(o.name) CONTAINS 'newtech' OR toLower(o.summary) CONTAINS 'newtech')
+                RETURN type(r) as rel_type, p.name as person, o.name as org
+                LIMIT 5
+                """,
+                {},
+            )
+
+        assert len(result) >= 1, (
+            "WORKS_AT relationship must be stored in graph. "
+            "Expected relationship between Michael and NewTech Solutions."
+        )
 
 
 @pytest.mark.e2e
@@ -192,13 +262,20 @@ class TestGoldenScenario2ContextualRetrieval:
 @requires_openai
 class TestGoldenScenario3BlockedTask:
     """
-    Golden Scenario 3: Blocked Task
+    Golden Scenario 3: Blocked Task (#238)
 
     Input: "Can't finish until John sends stats"
     Expected: Creates BLOCKS or dependency relationship
 
     This scenario tests task/dependency extraction:
     User input -> Ingestor -> Task extraction -> Graph storage
+
+    Acceptance Criteria:
+    - Create blocked task
+    - Verify BLOCKS relationship
+    - Query blocked tasks
+
+    Reference: specs/quality/TESTING.md Section 10.2
     """
 
     @pytest.mark.asyncio
@@ -210,7 +287,7 @@ class TestGoldenScenario3BlockedTask:
         await graphiti_client.add_episode(
             content="I can't finish the Q1 report until Mark sends the statistics. This is blocking my progress.",
             source="conversation",
-            trace_id="golden-3-block",
+            trace_id="golden-3-block-238",
         )
 
         await asyncio.sleep(3)
@@ -218,8 +295,124 @@ class TestGoldenScenario3BlockedTask:
         # Should be able to search for blocking/dependency facts
         results = await graphiti_client.search("Q1 report blocked", limit=5)
 
-        # Document expected behavior - blocking relationships should be extracted
-        assert isinstance(results, list)
+        # Must find searchable facts about blocking relationship
+        assert isinstance(results, list), "Search must return a list"
+        assert len(results) >= 1, (
+            f"Blocking relationship must be searchable. "
+            f"Query 'Q1 report blocked' returned {len(results)} results."
+        )
+
+    @pytest.mark.asyncio
+    async def test_blocks_relationship_in_graph(
+        self,
+        graphiti_client: GraphitiClient,
+        neo4j_client: Neo4jClient,
+    ) -> None:
+        """BLOCKS/dependency relationship should be stored in graph."""
+        await graphiti_client.add_episode(
+            content="The project launch is blocked by the security audit. We cannot proceed until the audit is complete.",
+            source="conversation",
+            trace_id="golden-3-rel-238",
+        )
+
+        await asyncio.sleep(3)
+
+        # Check for edge with blocking information in Graphiti's edge format
+        result = await neo4j_client.execute_query(
+            """
+            MATCH (e:Edge)
+            WHERE toLower(e.fact) CONTAINS 'block'
+              AND (toLower(e.fact) CONTAINS 'launch' OR toLower(e.fact) CONTAINS 'audit')
+            RETURN e.fact as fact, e.name as name
+            LIMIT 5
+            """,
+            {},
+        )
+
+        # Alternatively check for Task nodes with BLOCKS relationship
+        if len(result) == 0:
+            result = await neo4j_client.execute_query(
+                """
+                MATCH (blocker)-[r:BLOCKS]->(blocked)
+                WHERE (toLower(blocker.action) CONTAINS 'audit' OR toLower(blocker.name) CONTAINS 'audit')
+                RETURN blocker.action as blocker, blocked.action as blocked, r.reason as reason
+                LIMIT 5
+                """,
+                {},
+            )
+
+        # If no explicit BLOCKS relationship, check for dependency facts
+        if len(result) == 0:
+            result = await neo4j_client.execute_query(
+                """
+                MATCH (t)-[r]->(dep)
+                WHERE type(r) IN ['BLOCKS', 'DEPENDS_ON', 'RELATED_TO']
+                  AND (toLower(t.name) CONTAINS 'audit' OR toLower(dep.name) CONTAINS 'launch')
+                RETURN type(r) as rel_type, t.name as task1, dep.name as task2
+                LIMIT 5
+                """,
+                {},
+            )
+
+        assert len(result) >= 1, (
+            "BLOCKS/dependency relationship must be stored in graph. "
+            "Expected relationship between 'security audit' and 'project launch'."
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_blocked_tasks(
+        self,
+        graphiti_client: GraphitiClient,
+    ) -> None:
+        """User should be able to query blocked tasks via search."""
+        # Create blocking scenario
+        await graphiti_client.add_episode(
+            content="The marketing campaign is waiting for the design assets from the creative team. This dependency is critical.",
+            source="conversation",
+            trace_id="golden-3-query-238",
+        )
+
+        await asyncio.sleep(3)
+
+        # Query for blocked/waiting tasks
+        results = await graphiti_client.search("what is blocking marketing campaign", limit=5)
+
+        assert isinstance(results, list), "Search must return a list"
+        # Should find facts about the blocking dependency
+        assert len(results) >= 1, (
+            f"Blocked task query must return results. "
+            f"Query about marketing campaign dependencies returned {len(results)} results."
+        )
+
+    @pytest.mark.asyncio
+    async def test_multiple_blocking_relationships(
+        self,
+        graphiti_client: GraphitiClient,
+    ) -> None:
+        """Multiple blocking relationships should be trackable."""
+        # Create multiple dependencies
+        await graphiti_client.add_episode(
+            content=(
+                "The website relaunch depends on three things: "
+                "1) Server migration must complete first, "
+                "2) Content review needs to be finished, and "
+                "3) Legal approval is required. "
+                "All of these are blocking the launch."
+            ),
+            source="conversation",
+            trace_id="golden-3-multi-238",
+        )
+
+        await asyncio.sleep(3)
+
+        # Should be able to find multiple dependencies
+        results = await graphiti_client.search("website relaunch dependencies", limit=10)
+
+        assert isinstance(results, list), "Search must return a list"
+        assert len(results) >= 1, (
+            f"Multiple dependencies must be searchable. "
+            f"Query about website relaunch dependencies returned {len(results)} results."
+        )
 
 
 @pytest.mark.e2e
