@@ -585,3 +585,253 @@ class TestResponseParsing:
         assert events[0].title == "(no title)"
         assert events[0].location is None
         assert len(events[0].attendees) == 0
+
+
+# ===========================================================================
+# OAuth Refresh Tests
+# ===========================================================================
+
+
+class TestOAuthRefresh:
+    """Test OAuth token refresh handling."""
+
+    @pytest.mark.asyncio
+    async def test_401_triggers_refresh(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that 401 error triggers token refresh and retries."""
+        from googleapiclient.errors import HttpError
+
+        # First call raises 401, second succeeds
+        mock_response = MagicMock()
+        mock_response.status = 401
+        mock_response.reason = "Unauthorized"
+
+        call_count = [0]
+
+        def side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise HttpError(mock_response, b"Token expired")
+            return {"messages": []}
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = side_effect
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        # Should succeed after refresh
+        result = await bridge.search_emails("test")
+
+        assert result == []
+        # Verify refresh was called
+        assert mock_credentials.return_value.refresh.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_refresh_retries_operation(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that failed operation is retried after token refresh."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 401
+        mock_response.reason = "Unauthorized"
+
+        # Succeed on second try
+        first_call = True
+
+        def list_side_effect():
+            nonlocal first_call
+            if first_call:
+                first_call = False
+                raise HttpError(mock_response, b"Token expired")
+            return {"messages": [{"id": "msg1"}]}
+
+        def get_side_effect(userId, id, format):
+            return MagicMock(
+                execute=MagicMock(
+                    return_value={
+                        "id": id,
+                        "threadId": "thread1",
+                        "snippet": "test",
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "Test"},
+                                {"name": "From", "value": "test@test.com"},
+                                {"name": "Date", "value": "Mon, 01 Jan 2024 00:00:00 +0000"},
+                            ]
+                        },
+                    }
+                )
+            )
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = list_side_effect
+        mock_gmail_service.users.return_value.messages.return_value.get.side_effect = (
+            get_side_effect
+        )
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        emails = await bridge.search_emails("test")
+
+        assert len(emails) == 1
+        assert emails[0].id == "msg1"
+
+    @pytest.mark.asyncio
+    async def test_invalid_grant_raises_error(self, mock_env, mock_build, mock_gmail_service):
+        """Test that invalid_grant error raises ExternalServiceError."""
+        import google.auth.exceptions
+
+        with patch("klabautermann.mcp.google_workspace.Credentials") as mock_creds_class:
+            mock_creds = MagicMock()
+            mock_creds.token = "mock_token"
+
+            def raise_invalid_grant(_):
+                raise google.auth.exceptions.RefreshError("invalid_grant: Token has been revoked")
+
+            mock_creds.refresh.side_effect = raise_invalid_grant
+            mock_creds_class.return_value = mock_creds
+
+            bridge = GoogleWorkspaceBridge()
+
+            with pytest.raises(ExternalServiceError, match="Failed to refresh credentials"):
+                await bridge.start()
+
+    @pytest.mark.asyncio
+    async def test_non_401_error_not_retried(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that non-401 errors are not retried."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 500
+        mock_response.reason = "Internal Server Error"
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = HttpError(
+            mock_response, b"Server error"
+        )
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        with pytest.raises(ExternalServiceError, match="Search failed"):
+            await bridge.search_emails("test")
+
+
+# ===========================================================================
+# Rate Limiting Tests
+# ===========================================================================
+
+
+class TestRateLimiting:
+    """Test API rate limiting functionality."""
+
+    @pytest.mark.asyncio
+    async def test_rate_limiter_initialization(self, mock_env, mock_credentials, mock_build):
+        """Test that rate limiters are initialized with correct config."""
+        bridge = GoogleWorkspaceBridge(
+            gmail_requests_per_minute=30,
+            calendar_requests_per_minute=20,
+            max_concurrent_requests=5,
+        )
+
+        assert bridge._gmail_limiter.config.max_requests == 30
+        assert bridge._calendar_limiter.config.max_requests == 20
+
+    @pytest.mark.asyncio
+    async def test_rate_limiting_disabled(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that rate limiting can be disabled."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": []
+        }
+
+        bridge = GoogleWorkspaceBridge(rate_limiting_enabled=False)
+        await bridge.start()
+
+        # Should work without rate limiting
+        for _ in range(100):
+            await bridge.search_emails("test")
+
+        # Gmail limiter should show full remaining (disabled)
+        assert bridge._gmail_limiter.config.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_separate_gmail_calendar_limits(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service, mock_calendar_service
+    ):
+        """Test that Gmail and Calendar have separate rate limits."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": []
+        }
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": []
+        }
+
+        bridge = GoogleWorkspaceBridge(
+            gmail_requests_per_minute=5,
+            calendar_requests_per_minute=5,
+            rate_limiting_enabled=True,
+        )
+        await bridge.start()
+
+        # Make some Gmail calls
+        for _ in range(3):
+            await bridge.search_emails("test")
+
+        # Gmail should have 2 remaining, Calendar should have 5
+        gmail_remaining = bridge._gmail_limiter.get_remaining("gmail")
+        calendar_remaining = bridge._calendar_limiter.get_remaining("calendar")
+
+        assert gmail_remaining == 2
+        assert calendar_remaining == 5
+
+    @pytest.mark.asyncio
+    async def test_429_response_backoff(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that 429 responses trigger backoff and retry."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 429
+        mock_response.reason = "Too Many Requests"
+        mock_response.get.return_value = "1"  # Retry-After: 1 second
+
+        call_count = [0]
+
+        def side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise HttpError(mock_response, b"Rate limit exceeded")
+            return {"messages": []}
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = side_effect
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        # Should succeed after retry
+        result = await bridge.search_emails("test")
+
+        assert result == []
+        assert call_count[0] == 2  # Initial + retry
+
+    @pytest.mark.asyncio
+    async def test_semaphore_limits_concurrency(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that semaphore limits concurrent API calls."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute = (
+            MagicMock(side_effect=lambda: {"messages": []})
+        )
+
+        bridge = GoogleWorkspaceBridge(max_concurrent_requests=2, rate_limiting_enabled=False)
+        await bridge.start()
+
+        # Bridge was started, semaphore should be created
+        assert bridge._semaphore._value == 2
