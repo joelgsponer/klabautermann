@@ -280,6 +280,6 @@ async def shutdown_scheduler(scheduler: AsyncIOScheduler) -> None:
 __all__ = [
     "create_scheduler",
     "register_scheduled_jobs",
-    "start_scheduler",
     "shutdown_scheduler",
+    "start_scheduler",
 ]

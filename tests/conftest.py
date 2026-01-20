@@ -11,7 +11,7 @@ import asyncio
 import os
 import socket
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
@@ -19,6 +19,7 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
 
+    from klabautermann.core.models import MessageNode
     from klabautermann.memory.graphiti_client import GraphitiClient
     from klabautermann.memory.neo4j_client import Neo4jClient
     from klabautermann.memory.thread_manager import ThreadManager
@@ -330,8 +331,8 @@ def thread_factory() -> Any:
     ) -> ThreadNode:
         """Create a ThreadNode with test defaults."""
         now = time.time()
-        thread_uuid = uuid or f"test-thread-{uuid_lib.uuid4()}"
-        ext_id = external_id or f"test-ext-{uuid_lib.uuid4()}"
+        thread_uuid = uuid or f"test-thread-{uuid.uuid4()}"
+        ext_id = external_id or f"test-ext-{uuid.uuid4()}"
 
         if isinstance(channel_type, str):
             channel_type = ChannelType(channel_type)
@@ -372,7 +373,7 @@ def message_factory() -> Any:
         metadata: dict | None = None,
     ) -> MessageNode:
         """Create a MessageNode with test defaults."""
-        msg_uuid = uuid or f"test-msg-{uuid_lib.uuid4()}"
+        msg_uuid = uuid or f"test-msg-{uuid.uuid4()}"
         return MessageNode(
             uuid=msg_uuid,
             role=role,
@@ -396,7 +397,6 @@ def conversation_factory(message_factory: Any) -> Any:
             ("user", "How are you?"),
         ])
     """
-    from klabautermann.core.models import MessageNode
 
     def _create_conversation(
         exchanges: list[tuple[str, str]],
@@ -522,7 +522,7 @@ def cli_driver_factory(
     ) -> MagicMock:
         """Create a mocked CLI driver for testing."""
         driver = MagicMock()
-        driver.session_id = session_id or f"test-session-{uuid_lib.uuid4()}"
+        driver.session_id = session_id or f"test-session-{uuid.uuid4()}"
         driver.orchestrator = orchestrator or mock_orchestrator
         driver.renderer = mock_cli_renderer
         driver.channel_type = "cli"
@@ -635,7 +635,7 @@ def agent_message_factory() -> Any:
     ) -> AgentMessage:
         """Create an AgentMessage for testing."""
         return AgentMessage(
-            trace_id=trace_id or f"test-trace-{uuid_lib.uuid4()}",
+            trace_id=trace_id or f"test-trace-{uuid.uuid4()}",
             source_agent=source_agent,
             target_agent=target_agent,
             intent=intent,
@@ -661,11 +661,12 @@ def capture_channel_output() -> Any:
     @contextmanager
     def _capture():
         class Captured:
-            output: list[str] = []
+            output: ClassVar[list[str]] = []
 
             def add(self, text: str) -> None:
                 self.output.append(text)
 
+        Captured.output = []  # Reset for each capture context
         captured = Captured()
         yield captured
 

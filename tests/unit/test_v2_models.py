@@ -798,7 +798,12 @@ class TestEdgeCases:
 
     def test_all_channel_types(self):
         """Test that all valid channel types work."""
-        for channel in [ChannelType.CLI, ChannelType.TELEGRAM, ChannelType.DISCORD, ChannelType.TEST]:
+        for channel in [
+            ChannelType.CLI,
+            ChannelType.TELEGRAM,
+            ChannelType.DISCORD,
+            ChannelType.TEST,
+        ]:
             ctx = EnrichedContext(
                 thread_uuid="test",
                 channel_type=channel,
@@ -876,9 +881,7 @@ class TestJSONRoundtrip:
                     topics=["topic1"],
                 )
             ],
-            pending_tasks=[
-                TaskNode(action="Task 1", status=TaskStatus.TODO)
-            ],
+            pending_tasks=[TaskNode(action="Task 1", status=TaskStatus.TODO)],
             recent_entities=[
                 EntityReference(
                     uuid="e1",

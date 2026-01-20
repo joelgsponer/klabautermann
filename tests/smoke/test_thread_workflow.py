@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -309,8 +309,8 @@ class TestOrchestratorThreadIntegration:
         )
 
         # Should have at least user message (assistant may depend on workflow path)
-        roles = [r["role"] for r in result]
-        contents = [r["content"] for r in result]
+        [r["role"] for r in result]
+        [r["content"] for r in result]
 
         # V1 workflow stores messages, V2 may not depending on path taken
         # At minimum, the thread should exist

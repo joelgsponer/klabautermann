@@ -40,7 +40,7 @@ class TestEmailComposer:
 
     def test_compose_email_formal_tone(self):
         """Test formal tone in composition."""
-        subject, body = EmailComposer.compose_email(
+        _subject, body = EmailComposer.compose_email(
             intent="regarding the budget",
             recipient_name="John Smith",
             tone="formal",
@@ -51,7 +51,7 @@ class TestEmailComposer:
 
     def test_compose_email_brief_tone(self):
         """Test brief tone (no greeting)."""
-        subject, body = EmailComposer.compose_email(
+        _subject, body = EmailComposer.compose_email(
             intent="quick question",
             recipient_name="Alice Johnson",
             tone="brief",
@@ -63,7 +63,7 @@ class TestEmailComposer:
 
     def test_compose_email_with_context(self):
         """Test composition with additional context."""
-        subject, body = EmailComposer.compose_email(
+        _subject, body = EmailComposer.compose_email(
             intent="discuss the project",
             recipient_name="Bob Williams",
             context="Q1 timeline",
@@ -144,7 +144,7 @@ class TestEmailComposer:
             snippet="Here are my thoughts",
         )
 
-        subject, body = EmailComposer.format_reply(
+        subject, _body = EmailComposer.format_reply(
             original_email=original,
             reply_intent="Thanks for the update",
             quote_original=False,
@@ -166,7 +166,7 @@ class TestEmailComposer:
             body="What's the timeline for the project?",
         )
 
-        subject, body = EmailComposer.format_reply(
+        _subject, body = EmailComposer.format_reply(
             original_email=original,
             reply_intent="By end of Q1",
             quote_original=True,

@@ -87,7 +87,9 @@ class TestAppStartup:
 
             # Verify ThreadManager is wired to Orchestrator
             orchestrator = app.agents["orchestrator"]
-            assert orchestrator.thread_manager is not None, "ThreadManager not wired to Orchestrator"
+            assert (
+                orchestrator.thread_manager is not None
+            ), "ThreadManager not wired to Orchestrator"
             assert app.thread_manager is not None, "ThreadManager not created"
 
             # Verify ThreadManager is wired to Archivist

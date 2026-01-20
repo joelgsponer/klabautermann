@@ -520,11 +520,11 @@ __all__ = [
     "DuplicateCandidate",
     "MergePreview",
     "MergeResult",
+    # Merge Operations
+    "auto_merge_duplicates",
     # Detection
     "find_duplicate_organizations",
     "find_duplicate_persons",
-    # Merge Operations
-    "auto_merge_duplicates",
     "merge_entities",
     "merge_persons",
     "preview_merge",

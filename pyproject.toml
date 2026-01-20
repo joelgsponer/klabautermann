@@ -39,6 +39,8 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     # Scheduling
     "apscheduler>=3.10",
+    # File watching for config hot-reload
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]

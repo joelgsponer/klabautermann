@@ -256,7 +256,7 @@ async def test_link_note_to_thread_not_found(mock_neo4j_client: Neo4jClient):
     # Mock empty result (nodes not found)
     mock_neo4j_client.execute_write.return_value = []
 
-    with pytest.raises(RuntimeError, match="Note .* or Thread .* not found"):
+    with pytest.raises(RuntimeError, match=r"Note .* or Thread .* not found"):
         await link_note_to_thread(mock_neo4j_client, note_uuid, thread_uuid)
 
 

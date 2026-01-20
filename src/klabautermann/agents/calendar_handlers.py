@@ -321,7 +321,7 @@ class CalendarFormatter:
 
         total_hours = sum((e.end - e.start).total_seconds() / 3600 for e in events)
 
-        return f"You have {len(events)} event(s) scheduled, " f"totaling {total_hours:.1f} hours."
+        return f"You have {len(events)} event(s) scheduled, totaling {total_hours:.1f} hours."
 
     @classmethod
     def _format_duration(cls, duration: timedelta) -> str:

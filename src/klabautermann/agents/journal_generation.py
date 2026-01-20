@@ -277,7 +277,7 @@ Be honest, insightful, and capture Klabautermann's voice."""
 # ===========================================================================
 
 __all__ = [
-    "generate_journal",
-    "format_analytics_for_prompt",
     "SCRIBE_SYSTEM_PROMPT",
+    "format_analytics_for_prompt",
+    "generate_journal",
 ]
