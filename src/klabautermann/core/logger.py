@@ -4,16 +4,25 @@ Nautical logging system for Klabautermann.
 Provides themed log levels and structured logging for tracing agent operations.
 All log levels are mapped to nautical terminology to maintain the ship spirit personality.
 
+Features:
+- Nautical-themed log levels ([WHISPER], [CHART], [BEACON], [SWELL], [STORM], [SHIPWRECK])
+- JSON structured logging for file output
+- Log rotation with configurable size/count limits
+- Gzip compression for old logs
+
 Reference: specs/quality/LOGGING.md
 """
 
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import os
+import shutil
 import sys
 from datetime import UTC, datetime
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -158,6 +167,138 @@ class JSONFormatter(logging.Formatter):
 
 
 # ===========================================================================
+# Log Rotation Configuration
+# ===========================================================================
+
+
+class LogRotationConfig:
+    """Configuration for log rotation behavior."""
+
+    # Maximum size of a single log file (default: 10MB)
+    max_bytes: int = 10 * 1024 * 1024
+
+    # Number of backup files to keep (default: 5)
+    backup_count: int = 5
+
+    # Whether to compress old logs with gzip
+    compress: bool = True
+
+    @classmethod
+    def from_env(cls) -> LogRotationConfig:
+        """Load configuration from environment variables."""
+        config = cls()
+
+        if max_bytes_str := os.getenv("LOG_MAX_BYTES"):
+            config.max_bytes = int(max_bytes_str)
+
+        if backup_count_str := os.getenv("LOG_BACKUP_COUNT"):
+            config.backup_count = int(backup_count_str)
+
+        if compress_str := os.getenv("LOG_COMPRESS"):
+            config.compress = compress_str.lower() in ("true", "1", "yes")
+
+        return config
+
+
+class CompressingRotatingFileHandler(RotatingFileHandler):
+    """
+    RotatingFileHandler that compresses old log files with gzip.
+
+    When a log file is rotated, the old file is compressed to save disk space.
+    This reduces storage requirements by ~80-90% for typical log files.
+
+    Configuration via environment variables:
+    - LOG_MAX_BYTES: Maximum size before rotation (default: 10MB)
+    - LOG_BACKUP_COUNT: Number of backup files to keep (default: 5)
+    - LOG_COMPRESS: Whether to compress old logs (default: true)
+    """
+
+    def __init__(
+        self,
+        filename: str | Path,
+        max_bytes: int = 10 * 1024 * 1024,
+        backup_count: int = 5,
+        compress: bool = True,
+        encoding: str | None = "utf-8",
+    ) -> None:
+        """
+        Initialize the compressing rotating file handler.
+
+        Args:
+            filename: Path to the log file.
+            max_bytes: Maximum size of log file before rotation (default 10MB).
+            backup_count: Number of backup files to keep (default 5).
+            compress: Whether to gzip rotated files (default True).
+            encoding: File encoding (default utf-8).
+        """
+        self.compress = compress
+        super().__init__(
+            filename=str(filename),
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding=encoding,
+        )
+
+    def doRollover(self) -> None:
+        """
+        Perform log rotation with optional compression.
+
+        Overrides RotatingFileHandler.doRollover() to add gzip compression
+        for the rotated file.
+        """
+        # Close the current stream
+        if self.stream:
+            self.stream.close()
+            self.stream = None  # type: ignore[assignment]
+
+        # Build the rollover file names
+        if self.backupCount > 0:
+            # Shift existing files
+            for i in range(self.backupCount - 1, 0, -1):
+                sfn = Path(self._get_backup_name(i))
+                dfn = Path(self._get_backup_name(i + 1))
+
+                if sfn.exists():
+                    if dfn.exists():
+                        dfn.unlink()
+                    sfn.rename(dfn)
+
+            # Rotate current file to .1
+            dfn = Path(self._get_backup_name(1))
+            if dfn.exists():
+                dfn.unlink()
+
+            # Compress current file to .1.gz (or just rename to .1)
+            if self.compress:
+                self._compress_file(self.baseFilename, str(dfn))
+            else:
+                Path(self.baseFilename).rename(dfn)
+
+        # Reopen the main log file
+        if not self.delay:
+            self.stream = self._open()
+
+    def _get_backup_name(self, index: int) -> str:
+        """Get backup file name for given index."""
+        if self.compress:
+            return f"{self.baseFilename}.{index}.gz"
+        return f"{self.baseFilename}.{index}"
+
+    def _compress_file(self, src: str, dst: str) -> None:
+        """Compress source file to destination with gzip."""
+        src_path = Path(src)
+        dst_path = Path(dst)
+        try:
+            with src_path.open("rb") as f_in, gzip.open(dst_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            src_path.unlink()
+        except OSError:
+            # If compression fails, just rename the file
+            if src_path.exists():
+                src_path.rename(Path(dst.replace(".gz", "")))
+
+
+# ===========================================================================
 # Logger Setup
 # ===========================================================================
 
@@ -209,11 +350,20 @@ def setup_logger(
     log.addHandler(console_handler)
     _console_handler = console_handler  # Store for suppression control
 
-    # File handler (always JSON for structured analysis)
+    # File handler with rotation (always JSON for structured analysis)
     if log_file or os.getenv("LOG_TO_FILE", "").lower() in ("true", "1", "yes"):
         file_path = log_file or Path("logs/ship_ledger.jsonl")
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(file_path)
+
+        # Load rotation config from environment
+        rotation_config = LogRotationConfig.from_env()
+
+        file_handler = CompressingRotatingFileHandler(
+            filename=file_path,
+            max_bytes=rotation_config.max_bytes,
+            backup_count=rotation_config.backup_count,
+            compress=rotation_config.compress,
+        )
         file_handler.setFormatter(JSONFormatter())
         log.addHandler(file_handler)
 
@@ -294,8 +444,10 @@ def log_with_context(
 
 __all__ = [
     "SUCCESS",
+    "CompressingRotatingFileHandler",
     "JSONFormatter",
     "KlabautermannLogger",
+    "LogRotationConfig",
     "NauticalFormatter",
     "get_logger",
     "log_with_context",
