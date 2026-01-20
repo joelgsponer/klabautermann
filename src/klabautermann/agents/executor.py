@@ -61,6 +61,10 @@ ERROR HANDLING:
 3. If MCP fails: Report the specific error, don't retry automatically
 """
 
+    # Default email configuration values
+    DEFAULT_EMAIL_MAX_RESULTS = 20
+    DEFAULT_EMAIL_MAX_DISPLAY = 10
+
     def __init__(
         self,
         name: str = "executor",
@@ -83,8 +87,19 @@ ERROR HANDLING:
                 self.model = model_config.get("primary", "claude-3-5-sonnet-20241022")
             else:
                 self.model = model_config or "claude-3-5-sonnet-20241022"
+
+            # Load email configuration
+            email_config = self.config.get("email", {})
+            self.email_max_results = email_config.get(
+                "max_results", self.DEFAULT_EMAIL_MAX_RESULTS
+            )
+            self.email_max_display = email_config.get(
+                "max_display", self.DEFAULT_EMAIL_MAX_DISPLAY
+            )
         else:
             self.model = "claude-3-5-sonnet-20241022"
+            self.email_max_results = self.DEFAULT_EMAIL_MAX_RESULTS
+            self.email_max_display = self.DEFAULT_EMAIL_MAX_DISPLAY
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -392,13 +407,17 @@ ERROR HANDLING:
             # Execute search using the built query
             emails = await self.google.search_emails(
                 query=gmail_query,
-                max_results=10,
+                max_results=self.email_max_results,
                 context=invocation_ctx,
             )
 
             # Format results using EmailFormatter with full body content
             formatted = EmailFormatter.format_email_list(
-                emails, max_display=5, include_body=True, body_max_length=500
+                emails,
+                max_display=self.email_max_display,
+                include_body=True,
+                body_max_length=500,
+                total_available=self.email_max_results,  # Hint for "may have more"
             )
 
             logger.info(
