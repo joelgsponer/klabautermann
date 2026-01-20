@@ -76,6 +76,7 @@ class CLIDriver(BaseChannel):
         self._running = False
         # Check for NO_SPINNER env var to disable animated spinner
         import os
+
         no_spinner = os.getenv("KLABAUTERMANN_NO_SPINNER", "").lower() in ("1", "true", "yes")
         self.renderer = CLIRenderer(no_spinner=no_spinner)
         self._prompt_session: PromptSession[str] | None = None
@@ -160,6 +161,9 @@ class CLIDriver(BaseChannel):
                             suppress_console_logging()
                             self.renderer.render_info("Logs disabled")
                         continue
+
+                    # Echo user input with distinct styling
+                    self.renderer.render_user_input(user_input)
 
                     # Process the message with spinner
                     response = await self.receive_message(

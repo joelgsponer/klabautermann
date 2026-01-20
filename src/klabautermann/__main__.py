@@ -28,7 +28,7 @@ from klabautermann.channels.cli_driver import CLIDriver
 from klabautermann.config.manager import ConfigManager
 from klabautermann.config.quartermaster import Quartermaster
 from klabautermann.core.exceptions import GraphConnectionError, StartupError
-from klabautermann.core.logger import logger
+from klabautermann.core.logger import logger, set_cli_log_level
 from klabautermann.memory.graphiti_client import GraphitiClient
 from klabautermann.memory.neo4j_client import Neo4jClient
 
@@ -336,6 +336,9 @@ async def main() -> int:
     """
     # Parse arguments
     args = parse_args()
+
+    # Set CLI-appropriate log level (WARNING by default to reduce noise)
+    set_cli_log_level()
 
     # Note: session_id support will be implemented in Sprint 3 with thread persistence
     if args.session:
