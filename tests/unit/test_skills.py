@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from klabautermann.skills.discovery import SkillDiscovery
 from klabautermann.skills.loader import SkillLoader
 from klabautermann.skills.models import (
     KlabautermannSkillConfig,
@@ -394,3 +396,177 @@ class TestSkillAwarePlanner:
         assert "send-email" in context
         assert "research" in context
         assert "execute" in context
+
+
+class TestSkillDiscovery:
+    """Tests for AI-first skill discovery."""
+
+    @pytest.fixture
+    def discovery_with_skills(self, tmp_path: Path) -> SkillDiscovery:
+        """Create discovery with test skills loaded."""
+        # Create test skills
+        for skill_data in [
+            ("schedule-meeting", "Schedule calendar meetings and events"),
+            ("search-contacts", "Find contacts and people in the knowledge graph"),
+            ("create-note", "Create and save notes to the knowledge graph"),
+            ("add-task", "Create tasks and todo items"),
+        ]:
+            skill_dir = tmp_path / skill_data[0]
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                dedent(f"""
+                ---
+                name: {skill_data[0]}
+                description: {skill_data[1]}
+                ---
+
+                # {skill_data[0]}
+
+                Skill content.
+            """).strip()
+            )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        return SkillDiscovery(loader=loader)
+
+    def test_build_skills_context(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Build context string for LLM."""
+        context = discovery_with_skills._build_skills_context()
+
+        assert "schedule-meeting" in context
+        assert "search-contacts" in context
+        assert "create-note" in context
+        assert "add-task" in context
+
+    def test_build_skills_context_empty(self, tmp_path: Path) -> None:
+        """Handle no skills available."""
+        loader = SkillLoader(
+            project_skills_dir=tmp_path / "empty", personal_skills_dir=tmp_path / "none"
+        )
+        discovery = SkillDiscovery(loader=loader)
+        context = discovery._build_skills_context()
+
+        assert context == "No skills available."
+
+    def test_parse_discovery_response_json(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Parse clean JSON response."""
+        result = discovery_with_skills._parse_discovery_response(
+            '{"skill": "schedule-meeting", "confidence": 0.9, "reasoning": "test"}'
+        )
+
+        assert result is not None
+        assert result["skill"] == "schedule-meeting"
+        assert result["confidence"] == 0.9
+
+    def test_parse_discovery_response_code_block(
+        self, discovery_with_skills: SkillDiscovery
+    ) -> None:
+        """Parse JSON in markdown code block."""
+        result = discovery_with_skills._parse_discovery_response(
+            dedent("""
+            Here's the match:
+            ```json
+            {"skill": "search-contacts", "confidence": 0.85, "reasoning": "user wants contact info"}
+            ```
+        """)
+        )
+
+        assert result is not None
+        assert result["skill"] == "search-contacts"
+
+    def test_parse_discovery_response_invalid(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Handle invalid response."""
+        result = discovery_with_skills._parse_discovery_response("I don't understand")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_discover_skill_success(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Discover skill with LLM (mocked)."""
+        # Mock the Anthropic client
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                text='{"skill": "search-contacts", "confidence": 0.9, "reasoning": "user wants contact"}'
+            )
+        ]
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
+            skill = await discovery_with_skills.discover_skill("Who is John?", "test-trace-123")
+
+        assert skill is not None
+        assert skill.name == "search-contacts"
+
+    @pytest.mark.asyncio
+    async def test_discover_skill_no_match(self, discovery_with_skills: SkillDiscovery) -> None:
+        """No skill matches user input."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                text='{"skill": "none", "confidence": 0.95, "reasoning": "no matching skill"}'
+            )
+        ]
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
+            skill = await discovery_with_skills.discover_skill(
+                "What's the weather?", "test-trace-123"
+            )
+
+        assert skill is None
+
+    @pytest.mark.asyncio
+    async def test_discover_skill_low_confidence(
+        self, discovery_with_skills: SkillDiscovery
+    ) -> None:
+        """Reject low confidence matches."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                text='{"skill": "search-contacts", "confidence": 0.3, "reasoning": "uncertain"}'
+            )
+        ]
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
+            skill = await discovery_with_skills.discover_skill(
+                "Do something", "test-trace-123", min_confidence=0.5
+            )
+
+        assert skill is None
+
+    @pytest.mark.asyncio
+    async def test_discover_skill_llm_error(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Handle LLM call failure gracefully."""
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.side_effect = Exception("API error")
+            skill = await discovery_with_skills.discover_skill("Find John", "test-trace-123")
+
+        assert skill is None
+
+    @pytest.mark.asyncio
+    async def test_discover_skill_nonexistent_skill(
+        self, discovery_with_skills: SkillDiscovery
+    ) -> None:
+        """Handle LLM returning non-existent skill name."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(text='{"skill": "nonexistent-skill", "confidence": 0.9, "reasoning": "oops"}')
+        ]
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
+            skill = await discovery_with_skills.discover_skill("Find something", "test-trace-123")
+
+        assert skill is None
