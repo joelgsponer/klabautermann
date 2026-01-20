@@ -1,0 +1,138 @@
+# Klabautermann Development Docker Compose Configuration
+#
+# Optimized for local development with:
+# - Source code mounting (hot reload)
+# - Debug ports exposed
+# - Verbose logging
+# - Lower resource limits for dev machines
+# - Faster health check intervals
+#
+# Usage:
+#   docker-compose -f docker-compose.dev.yml up -d
+#   docker-compose -f docker-compose.dev.yml logs -f
+#   docker-compose -f docker-compose.dev.yml exec klabautermann-app bash
+#
+# Debug with debugpy:
+#   1. Set DEBUGPY_ENABLE=true in .env
+#   2. Connect VS Code to localhost:5678
+
+services:
+  # ===========================================================================
+  # Neo4j Graph Database (Development)
+  # ===========================================================================
+  neo4j:
+    image: neo4j:5.26-community
+    container_name: klabautermann-neo4j-dev
+    restart: unless-stopped
+    ports:
+      - "7474:7474"  # Browser UI
+      - "7687:7687"  # Bolt protocol
+    environment:
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-devpassword}
+      # Lower memory settings for development
+      - NEO4J_server_memory_pagecache_size=256M
+      - NEO4J_server_memory_heap_initial__size=256M
+      - NEO4J_server_memory_heap_max__size=512M
+      # Enable APOC plugin
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+    volumes:
+      - neo4j_data_dev:/data
+      - neo4j_logs_dev:/logs
+      - neo4j_plugins_dev:/plugins
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 5s   # Faster for development
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+    networks:
+      - klabautermann-net-dev
+
+  # ===========================================================================
+  # Klabautermann Application (Development)
+  # ===========================================================================
+  klabautermann-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: klabautermann-app-dev
+    restart: unless-stopped
+    stdin_open: true   # Keep stdin open for CLI interaction
+    tty: true          # Allocate pseudo-TTY
+    env_file:
+      - .env
+    environment:
+      - NEO4J_URI=bolt://neo4j:7687
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+      # Enable debug mode
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+      # Debugpy settings (set DEBUGPY_ENABLE=true to activate)
+      - DEBUGPY_ENABLE=${DEBUGPY_ENABLE:-false}
+      - DEBUGPY_PORT=5678
+      - DEBUGPY_WAIT_FOR_CLIENT=${DEBUGPY_WAIT_FOR_CLIENT:-false}
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    volumes:
+      # Mount source code for hot reload (read-write for development)
+      - ./src:/app/src
+      - ./scripts:/app/scripts
+      - ./config:/app/config
+      - ./tests:/app/tests
+      - ./main.py:/app/main.py
+      # Persist data and logs locally
+      - ./data:/app/data
+      - ./logs:/app/logs
+      # Mount requirements for easy updates
+      - ./requirements.txt:/app/requirements.txt:ro
+      - ./requirements-dev.txt:/app/requirements-dev.txt:ro
+    ports:
+      - "5678:5678"  # debugpy
+      - "8000:8000"  # potential API/debug server
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    networks:
+      - klabautermann-net-dev
+
+# ===========================================================================
+# Networks
+# ===========================================================================
+networks:
+  klabautermann-net-dev:
+    name: klabautermann-network-dev
+    driver: bridge
+
+# ===========================================================================
+# Volumes
+# ===========================================================================
+volumes:
+  neo4j_data_dev:
+    name: klabautermann-neo4j-data-dev
+  neo4j_logs_dev:
+    name: klabautermann-neo4j-logs-dev
+  neo4j_plugins_dev:
+    name: klabautermann-neo4j-plugins-dev

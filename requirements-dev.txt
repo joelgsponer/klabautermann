@@ -20,3 +20,6 @@ types-pyyaml>=6.0  # Type stubs for PyYAML (used by mypy)
 
 # === Git Hooks ===
 pre-commit>=3.0
+
+# === Debugging ===
+debugpy>=1.8  # Remote debugging support
