@@ -75,6 +75,25 @@ class CreateEventResult(BaseModel):
     error: str | None = None
 
 
+class EmailOperationResult(BaseModel):
+    """Result of email management operations (delete, archive, label)."""
+
+    success: bool
+    message_id: str | None = None
+    operation: str = ""  # "trash", "delete", "archive", "label", "unlabel"
+    error: str | None = None
+
+
+class GmailLabel(BaseModel):
+    """Gmail label information."""
+
+    id: str
+    name: str
+    type: str = "user"  # "system" or "user"
+    message_count: int | None = None
+    unread_count: int | None = None
+
+
 # ===========================================================================
 # Google Workspace Bridge
 # ===========================================================================
@@ -326,6 +345,312 @@ class GoogleWorkspaceBridge:
         """Get emails from the last N hours."""
         query = f"newer_than:{hours}h"
         return await self.search_emails(query, max_results=50)
+
+    # ===========================================================================
+    # Email Management Operations
+    # ===========================================================================
+
+    async def trash_email(
+        self,
+        message_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailOperationResult:
+        """
+        Move an email to trash.
+
+        Args:
+            message_id: Gmail message ID to trash
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or failure
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_trash() -> str:
+            try:
+                self._gmail_service.users().messages().trash(
+                    userId="me", id=message_id
+                ).execute()
+                return message_id
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Trash failed: {e}") from e
+
+        try:
+            result_id = await loop.run_in_executor(None, do_trash)
+            logger.info(
+                f"[BEACON] Email trashed: {result_id[:8]}...",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=True, message_id=result_id, operation="trash"
+            )
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email trash failed: {e}",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=False, message_id=message_id, operation="trash", error=str(e)
+            )
+
+    async def delete_email(
+        self,
+        message_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailOperationResult:
+        """
+        Permanently delete an email (use with caution).
+
+        Args:
+            message_id: Gmail message ID to delete permanently
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or failure
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_delete() -> str:
+            try:
+                self._gmail_service.users().messages().delete(
+                    userId="me", id=message_id
+                ).execute()
+                return message_id
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Delete failed: {e}") from e
+
+        try:
+            result_id = await loop.run_in_executor(None, do_delete)
+            logger.info(
+                f"[BEACON] Email permanently deleted: {result_id[:8]}...",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=True, message_id=result_id, operation="delete"
+            )
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email delete failed: {e}",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=False, message_id=message_id, operation="delete", error=str(e)
+            )
+
+    async def archive_email(
+        self,
+        message_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailOperationResult:
+        """
+        Archive an email (remove from inbox but keep in All Mail).
+
+        Args:
+            message_id: Gmail message ID to archive
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or failure
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_archive() -> str:
+            try:
+                # Archive = remove INBOX label
+                self._gmail_service.users().messages().modify(
+                    userId="me",
+                    id=message_id,
+                    body={"removeLabelIds": ["INBOX"]},
+                ).execute()
+                return message_id
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Archive failed: {e}") from e
+
+        try:
+            result_id = await loop.run_in_executor(None, do_archive)
+            logger.info(
+                f"[BEACON] Email archived: {result_id[:8]}...",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=True, message_id=result_id, operation="archive"
+            )
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email archive failed: {e}",
+                extra={"message_id": message_id},
+            )
+            return EmailOperationResult(
+                success=False, message_id=message_id, operation="archive", error=str(e)
+            )
+
+    async def add_label(
+        self,
+        message_id: str,
+        label_ids: list[str],
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailOperationResult:
+        """
+        Add labels to an email.
+
+        Args:
+            message_id: Gmail message ID
+            label_ids: List of label IDs to add
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or failure
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_add_label() -> str:
+            try:
+                self._gmail_service.users().messages().modify(
+                    userId="me",
+                    id=message_id,
+                    body={"addLabelIds": label_ids},
+                ).execute()
+                return message_id
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Add label failed: {e}") from e
+
+        try:
+            result_id = await loop.run_in_executor(None, do_add_label)
+            logger.info(
+                f"[BEACON] Labels added to email: {result_id[:8]}...",
+                extra={"message_id": message_id, "labels": label_ids},
+            )
+            return EmailOperationResult(
+                success=True, message_id=result_id, operation="label"
+            )
+        except Exception as e:
+            logger.error(
+                f"[STORM] Add label failed: {e}",
+                extra={"message_id": message_id, "labels": label_ids},
+            )
+            return EmailOperationResult(
+                success=False, message_id=message_id, operation="label", error=str(e)
+            )
+
+    async def remove_label(
+        self,
+        message_id: str,
+        label_ids: list[str],
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailOperationResult:
+        """
+        Remove labels from an email.
+
+        Args:
+            message_id: Gmail message ID
+            label_ids: List of label IDs to remove
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or failure
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_remove_label() -> str:
+            try:
+                self._gmail_service.users().messages().modify(
+                    userId="me",
+                    id=message_id,
+                    body={"removeLabelIds": label_ids},
+                ).execute()
+                return message_id
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"Remove label failed: {e}") from e
+
+        try:
+            result_id = await loop.run_in_executor(None, do_remove_label)
+            logger.info(
+                f"[BEACON] Labels removed from email: {result_id[:8]}...",
+                extra={"message_id": message_id, "labels": label_ids},
+            )
+            return EmailOperationResult(
+                success=True, message_id=result_id, operation="unlabel"
+            )
+        except Exception as e:
+            logger.error(
+                f"[STORM] Remove label failed: {e}",
+                extra={"message_id": message_id, "labels": label_ids},
+            )
+            return EmailOperationResult(
+                success=False, message_id=message_id, operation="unlabel", error=str(e)
+            )
+
+    async def list_labels(
+        self,
+        context: Any = None,  # noqa: ARG002
+    ) -> list[GmailLabel]:
+        """
+        List all Gmail labels (system and user-created).
+
+        Args:
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            List of Gmail labels with their IDs and names
+        """
+        await self.start()
+        loop = asyncio.get_event_loop()
+
+        def do_list_labels() -> list[dict[str, Any]]:
+            try:
+                results = self._gmail_service.users().labels().list(userId="me").execute()
+                return results.get("labels", [])
+            except HttpError as e:
+                raise ExternalServiceError("gmail", f"List labels failed: {e}") from e
+
+        try:
+            raw_labels = await loop.run_in_executor(None, do_list_labels)
+            labels = []
+            for label in raw_labels:
+                labels.append(
+                    GmailLabel(
+                        id=label.get("id", ""),
+                        name=label.get("name", ""),
+                        type=label.get("type", "user").lower(),
+                        message_count=label.get("messagesTotal"),
+                        unread_count=label.get("messagesUnread"),
+                    )
+                )
+            logger.info(
+                f"[BEACON] Listed {len(labels)} Gmail labels",
+            )
+            return labels
+        except Exception as e:
+            logger.error(f"[STORM] List labels failed: {e}")
+            raise
+
+    async def get_label_by_name(
+        self,
+        name: str,
+        context: Any = None,
+    ) -> GmailLabel | None:
+        """
+        Find a label by its name (case-insensitive).
+
+        Args:
+            name: Label name to search for
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            GmailLabel if found, None otherwise
+        """
+        labels = await self.list_labels(context)
+        name_lower = name.lower()
+        for label in labels:
+            if label.name.lower() == name_lower:
+                return label
+        return None
 
     # ===========================================================================
     # Calendar Operations

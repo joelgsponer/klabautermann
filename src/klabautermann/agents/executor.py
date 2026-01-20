@@ -194,6 +194,35 @@ ERROR HANDLING:
                 draft_only=context.get("draft_only", True),
             )
 
+        elif action_type == "email_delete":
+            return ActionRequest(
+                type=ActionType.EMAIL_DELETE,
+                target=context.get("message_id"),
+            )
+
+        elif action_type == "email_archive":
+            return ActionRequest(
+                type=ActionType.EMAIL_ARCHIVE,
+                target=context.get("message_id"),
+            )
+
+        elif action_type == "email_label":
+            return ActionRequest(
+                type=ActionType.EMAIL_LABEL,
+                target=context.get("message_id"),
+                query=context.get("label_name"),  # Reuse query for label name
+            )
+
+        elif action_type == "email_unlabel":
+            return ActionRequest(
+                type=ActionType.EMAIL_UNLABEL,
+                target=context.get("message_id"),
+                query=context.get("label_name"),
+            )
+
+        elif action_type == "label_list":
+            return ActionRequest(type=ActionType.LABEL_LIST)
+
         elif action_type == "calendar_list":
             return ActionRequest(type=ActionType.CALENDAR_LIST)
 
@@ -279,6 +308,21 @@ ERROR HANDLING:
 
             elif request.type == ActionType.EMAIL_SEARCH:
                 return await self._handle_gmail_search(request, trace_id, ctx)
+
+            elif request.type == ActionType.EMAIL_DELETE:
+                return await self._handle_email_delete(request, trace_id, ctx)
+
+            elif request.type == ActionType.EMAIL_ARCHIVE:
+                return await self._handle_email_archive(request, trace_id, ctx)
+
+            elif request.type == ActionType.EMAIL_LABEL:
+                return await self._handle_email_label(request, trace_id, ctx)
+
+            elif request.type == ActionType.EMAIL_UNLABEL:
+                return await self._handle_email_unlabel(request, trace_id, ctx)
+
+            elif request.type == ActionType.LABEL_LIST:
+                return await self._handle_label_list(trace_id, ctx)
 
             elif request.type == ActionType.CALENDAR_CREATE:
                 return await self._handle_calendar_create(request, context, trace_id, ctx)
@@ -687,6 +731,336 @@ ERROR HANDLING:
                 success=False,
                 message=f"Failed to list events: {e!s}",
             )
+
+    # ===========================================================================
+    # Email Management Handlers
+    # ===========================================================================
+
+    async def _handle_email_delete(
+        self,
+        request: ActionRequest,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle email deletion (moves to trash by default).
+
+        Args:
+            request: Delete request with message_id in target
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with deletion status
+        """
+        if not request.target:
+            return ActionResult(
+                success=False,
+                message="I need the email ID to delete. Which email would you like me to delete?",
+            )
+
+        try:
+            result = await self.google.trash_email(
+                message_id=request.target,
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Email deleted (trashed): {request.target[:8]}...",
+                    extra={"trace_id": trace_id},
+                )
+                return ActionResult(
+                    success=True,
+                    message="Email moved to trash.",
+                    details={"message_id": request.target},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to delete email: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email delete failed: {e}",
+                extra={"trace_id": trace_id, "message_id": request.target},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to delete email: {e!s}",
+            )
+
+    async def _handle_email_archive(
+        self,
+        request: ActionRequest,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle email archiving (removes from inbox but keeps in All Mail).
+
+        Args:
+            request: Archive request with message_id in target
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with archive status
+        """
+        if not request.target:
+            return ActionResult(
+                success=False,
+                message="I need the email ID to archive. Which email would you like me to archive?",
+            )
+
+        try:
+            result = await self.google.archive_email(
+                message_id=request.target,
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Email archived: {request.target[:8]}...",
+                    extra={"trace_id": trace_id},
+                )
+                return ActionResult(
+                    success=True,
+                    message="Email archived (removed from inbox).",
+                    details={"message_id": request.target},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to archive email: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email archive failed: {e}",
+                extra={"trace_id": trace_id, "message_id": request.target},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to archive email: {e!s}",
+            )
+
+    async def _handle_email_label(
+        self,
+        request: ActionRequest,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle adding a label to an email.
+
+        Args:
+            request: Label request with message_id in target and label_name in query
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with label operation status
+        """
+        if not request.target:
+            return ActionResult(
+                success=False,
+                message="I need the email ID to label. Which email would you like me to label?",
+            )
+
+        if not request.query:
+            return ActionResult(
+                success=False,
+                message="What label would you like to apply?",
+            )
+
+        try:
+            # Find label by name
+            label = await self.google.get_label_by_name(
+                request.query, context=invocation_ctx
+            )
+
+            if not label:
+                return ActionResult(
+                    success=False,
+                    message=f"Label '{request.query}' not found. Use 'list labels' to see available labels.",
+                )
+
+            result = await self.google.add_label(
+                message_id=request.target,
+                label_ids=[label.id],
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Label '{request.query}' added to email",
+                    extra={"trace_id": trace_id, "label": request.query},
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"Label '{request.query}' applied to email.",
+                    details={"message_id": request.target, "label": request.query},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to apply label: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email label failed: {e}",
+                extra={"trace_id": trace_id, "message_id": request.target},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to apply label: {e!s}",
+            )
+
+    async def _handle_email_unlabel(
+        self,
+        request: ActionRequest,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle removing a label from an email.
+
+        Args:
+            request: Unlabel request with message_id in target and label_name in query
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with unlabel operation status
+        """
+        if not request.target:
+            return ActionResult(
+                success=False,
+                message="I need the email ID to remove the label from.",
+            )
+
+        if not request.query:
+            return ActionResult(
+                success=False,
+                message="Which label would you like to remove?",
+            )
+
+        try:
+            # Find label by name
+            label = await self.google.get_label_by_name(
+                request.query, context=invocation_ctx
+            )
+
+            if not label:
+                return ActionResult(
+                    success=False,
+                    message=f"Label '{request.query}' not found.",
+                )
+
+            result = await self.google.remove_label(
+                message_id=request.target,
+                label_ids=[label.id],
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Label '{request.query}' removed from email",
+                    extra={"trace_id": trace_id, "label": request.query},
+                )
+                return ActionResult(
+                    success=True,
+                    message=f"Label '{request.query}' removed from email.",
+                    details={"message_id": request.target, "label": request.query},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to remove label: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email unlabel failed: {e}",
+                extra={"trace_id": trace_id, "message_id": request.target},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to remove label: {e!s}",
+            )
+
+    async def _handle_label_list(
+        self,
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle listing all Gmail labels.
+
+        Args:
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with formatted label list
+        """
+        try:
+            labels = await self.google.list_labels(context=invocation_ctx)
+
+            if not labels:
+                return ActionResult(
+                    success=True,
+                    message="No labels found.",
+                )
+
+            # Separate system and user labels
+            system_labels = [lbl for lbl in labels if lbl.type == "system"]
+            user_labels = [lbl for lbl in labels if lbl.type == "user"]
+
+            lines = ["**Your Gmail Labels:**\n"]
+
+            if user_labels:
+                lines.append("*Custom Labels:*")
+                for label in sorted(user_labels, key=lambda x: x.name):
+                    lines.append(f"  - {label.name}")
+
+            if system_labels:
+                lines.append("\n*System Labels:*")
+                for label in sorted(system_labels, key=lambda x: x.name):
+                    lines.append(f"  - {label.name}")
+
+            logger.info(
+                f"[BEACON] Listed {len(labels)} Gmail labels",
+                extra={"trace_id": trace_id},
+            )
+
+            return ActionResult(
+                success=True,
+                message="\n".join(lines),
+                details={"count": len(labels)},
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] List labels failed: {e}",
+                extra={"trace_id": trace_id},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to list labels: {e!s}",
+            )
+
+    # ===========================================================================
+    # Calendar Helpers
+    # ===========================================================================
 
     def _extract_event_title(self, action_text: str) -> str:
         """
