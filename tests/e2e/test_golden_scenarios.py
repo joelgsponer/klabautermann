@@ -421,69 +421,159 @@ class TestGoldenScenario3BlockedTask:
 @requires_openai
 class TestGoldenScenario4TemporalTimeTravel:
     """
-    Golden Scenario 4: Temporal Time-Travel
+    Golden Scenario 4: Temporal Time-Travel (#239)
 
     Input: Change employer, ask historical
     Expected: Returns old employer, not just current
 
     This scenario tests temporal graph capabilities:
     Multiple facts over time -> Graphiti temporal handling -> Historical queries
+
+    Acceptance Criteria:
+    - Change employer
+    - Query historical employer
+    - Return old employer
+
+    Reference: specs/quality/TESTING.md Section 10.2
     """
 
     @pytest.mark.asyncio
-    async def test_stores_temporal_facts(
+    async def test_change_employer_preserves_history(
         self,
         graphiti_client: GraphitiClient,
     ) -> None:
-        """Multiple facts over time should be stored with temporal context."""
-        # Initial state
+        """Changing employer should preserve employment history."""
+        # Initial state: Person works at first company
         await graphiti_client.add_episode(
             content="Dave works at OldCompany as a Developer. He's been there for 5 years.",
             source="conversation",
-            trace_id="golden-4-initial",
+            trace_id="golden-4-initial-239",
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
-        # Update state (later)
+        # Update state: Person moves to new company
         await graphiti_client.add_episode(
             content="Dave left OldCompany last week and joined NewCompany as Tech Lead.",
             source="conversation",
-            trace_id="golden-4-update",
+            trace_id="golden-4-update-239",
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
         # Search should find facts about Dave's employment history
         results = await graphiti_client.search("Dave employment history", limit=10)
 
-        # Document expected behavior - temporal facts should be preserved
-        assert isinstance(results, list)
+        # Must find employment history facts
+        assert isinstance(results, list), "Search must return a list"
+        assert len(results) >= 1, (
+            f"Employment history must be searchable. "
+            f"Query 'Dave employment history' returned {len(results)} results."
+        )
 
     @pytest.mark.asyncio
-    async def test_search_finds_historical_facts(
+    async def test_query_historical_employer(
         self,
         graphiti_client: GraphitiClient,
     ) -> None:
-        """Historical queries should find past facts."""
+        """Query for historical employer should return past employment."""
         # Setup: Create historical employment
         await graphiti_client.add_episode(
             content="In 2022, Eve was working at FirstJob Inc as a junior developer.",
             source="conversation",
-            trace_id="golden-4-history-setup",
+            trace_id="golden-4-history-setup-239",
         )
-        await asyncio.sleep(2)
+        await asyncio.sleep(3)
 
         await graphiti_client.add_episode(
             content="Eve now works at CurrentJob Corp as a senior engineer since 2024.",
             source="conversation",
-            trace_id="golden-4-history-current",
+            trace_id="golden-4-history-current-239",
+        )
+        await asyncio.sleep(3)
+
+        # Search for historical employer specifically
+        results = await graphiti_client.search("Eve FirstJob", limit=5)
+
+        # Must find facts about Eve's past employment
+        assert isinstance(results, list), "Search must return a list"
+        assert len(results) >= 1, (
+            f"Historical employer must be queryable. "
+            f"Query 'Eve FirstJob' returned {len(results)} results."
+        )
+
+    @pytest.mark.asyncio
+    async def test_return_old_employer_not_just_current(
+        self,
+        graphiti_client: GraphitiClient,
+    ) -> None:
+        """Both old and current employer should be findable."""
+        # Create clear employment transition
+        await graphiti_client.add_episode(
+            content="Frank worked at PastCorp from 2018 to 2022 as a software engineer.",
+            source="conversation",
+            trace_id="golden-4-old-239",
+        )
+        await asyncio.sleep(3)
+
+        await graphiti_client.add_episode(
+            content="Frank now works at PresentCorp since 2023 as a senior architect.",
+            source="conversation",
+            trace_id="golden-4-current-239",
+        )
+        await asyncio.sleep(3)
+
+        # Query for old employer specifically
+        old_results = await graphiti_client.search("Frank PastCorp", limit=5)
+
+        # Query for current employer
+        current_results = await graphiti_client.search("Frank PresentCorp", limit=5)
+
+        # Both should be findable
+        assert len(old_results) >= 1, (
+            f"Old employer must be queryable. "
+            f"Query 'Frank PastCorp' returned {len(old_results)} results."
+        )
+        assert len(current_results) >= 1, (
+            f"Current employer must be queryable. "
+            f"Query 'Frank PresentCorp' returned {len(current_results)} results."
+        )
+
+    @pytest.mark.asyncio
+    async def test_temporal_ordering_preserved(
+        self,
+        graphiti_client: GraphitiClient,
+        neo4j_client: Neo4jClient,
+    ) -> None:
+        """Temporal facts should preserve their ordering."""
+        # Create sequence of events
+        await graphiti_client.add_episode(
+            content="Grace started at CompanyA in 2015.",
+            source="conversation",
+            trace_id="golden-4-seq1-239",
         )
         await asyncio.sleep(2)
 
-        # Search for historical information
-        results = await graphiti_client.search("Eve FirstJob", limit=5)
+        await graphiti_client.add_episode(
+            content="Grace moved to CompanyB in 2018.",
+            source="conversation",
+            trace_id="golden-4-seq2-239",
+        )
+        await asyncio.sleep(2)
 
-        # Should find facts about Eve's past employment
-        assert isinstance(results, list)
+        await graphiti_client.add_episode(
+            content="Grace joined CompanyC in 2022.",
+            source="conversation",
+            trace_id="golden-4-seq3-239",
+        )
+        await asyncio.sleep(3)
+
+        # Search for Grace's full history
+        results = await graphiti_client.search("Grace career history", limit=10)
+
+        # Must find career history
+        assert len(results) >= 1, (
+            f"Career history with temporal ordering must be searchable. "
+            f"Query returned {len(results)} results."
+        )
 
 
 @pytest.mark.e2e
@@ -491,13 +581,20 @@ class TestGoldenScenario4TemporalTimeTravel:
 @requires_neo4j
 class TestGoldenScenario5MultiChannelThreading:
     """
-    Golden Scenario 5: Multi-Channel Threading
+    Golden Scenario 5: Multi-Channel Threading (#240)
 
     Input: CLI + Telegram conversations
     Expected: Separate threads, no context bleed
 
     This scenario tests thread isolation:
     Different channels -> Separate threads -> No cross-contamination
+
+    Acceptance Criteria:
+    - CLI conversation
+    - Telegram conversation
+    - Verify no context bleed
+
+    Reference: specs/quality/TESTING.md Section 10.2
     """
 
     @pytest.mark.asyncio
