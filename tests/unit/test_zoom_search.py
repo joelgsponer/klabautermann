@@ -11,11 +11,15 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from klabautermann.memory.zoom_search import (
+    AIZoomLevelSelector,
     MacroSearchResult,
     MesoSearchResult,
     MicroSearchResult,
+    ZoomClassification,
+    ZoomLevel,
     ZoomLevelSelector,
     ZoomSearchResponse,
+    ai_zoom_search,
     auto_zoom_search,
     get_entity_timeline,
     get_project_context,
@@ -510,3 +514,306 @@ class TestAutoZoomSearch:
         response = await auto_zoom_search(mock_neo4j, "Find people")
 
         assert response.result_count == 2
+
+
+# =============================================================================
+# Test AI Zoom Level Selector (#190)
+# =============================================================================
+
+
+class TestZoomLevel:
+    """Tests for ZoomLevel enum."""
+
+    def test_values(self) -> None:
+        """Test ZoomLevel enum values."""
+        assert ZoomLevel.MACRO.value == "macro"
+        assert ZoomLevel.MESO.value == "meso"
+        assert ZoomLevel.MICRO.value == "micro"
+
+
+class TestZoomClassification:
+    """Tests for ZoomClassification dataclass."""
+
+    def test_creation(self) -> None:
+        """Test creating ZoomClassification."""
+        classification = ZoomClassification(
+            level=ZoomLevel.MACRO,
+            confidence=0.95,
+            reasoning="Query asks for a high-level overview",
+        )
+        assert classification.level == ZoomLevel.MACRO
+        assert classification.confidence == 0.95
+        assert "overview" in classification.reasoning
+
+
+class TestAIZoomLevelSelector:
+    """Tests for AIZoomLevelSelector class (#190)."""
+
+    @pytest.mark.asyncio
+    async def test_fallback_without_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test fallback to keyword selector when API key missing."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("Give me an overview")
+
+        # Should fall back to keyword-based classification
+        assert classification.confidence == 0.5  # Fallback confidence
+        assert classification.reasoning == "Fallback to keyword-based classification"
+
+    @pytest.mark.asyncio
+    async def test_classify_macro_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test AI classification of macro-level query."""
+        # Mock the anthropic client
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "macro",
+                    "confidence": 0.9,
+                    "reasoning": "Query asks for high-level themes",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("What are the main themes in my life?")
+
+        assert classification.level == ZoomLevel.MACRO
+        assert classification.confidence == 0.9
+
+    @pytest.mark.asyncio
+    async def test_classify_meso_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test AI classification of meso-level query."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "meso",
+                    "confidence": 0.85,
+                    "reasoning": "Query asks about project status",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("What's the status of my budget project?")
+
+        assert classification.level == ZoomLevel.MESO
+        assert classification.confidence == 0.85
+
+    @pytest.mark.asyncio
+    async def test_classify_micro_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test AI classification of micro-level query."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "micro",
+                    "confidence": 0.95,
+                    "reasoning": "Query asks for specific contact info",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("What is John's email address?")
+
+        assert classification.level == ZoomLevel.MICRO
+        assert classification.confidence == 0.95
+
+    @pytest.mark.asyncio
+    async def test_fallback_on_no_tool_use_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test fallback when LLM doesn't return tool_use block."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="Unable to classify")]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("Some query")
+
+        # Should fall back to keyword-based
+        assert classification.confidence == 0.5
+
+    @pytest.mark.asyncio
+    async def test_fallback_on_api_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test fallback when API call fails."""
+        import anthropic
+
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = anthropic.APIError(
+            message="API Error", request=MagicMock(), body=None
+        )
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        selector = AIZoomLevelSelector()
+        classification = await selector.classify_query("Some query")
+
+        # Should fall back gracefully
+        assert classification.confidence == 0.5
+        assert classification.reasoning == "Fallback to keyword-based classification"
+
+
+class TestAIZoomSearch:
+    """Tests for ai_zoom_search function (#190)."""
+
+    @pytest.mark.asyncio
+    async def test_uses_ai_classification(
+        self, mock_neo4j: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test AI zoom search uses AI classification."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "macro",
+                    "confidence": 0.9,
+                    "reasoning": "High-level overview query",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        mock_neo4j.execute_query.return_value = []
+
+        response = await ai_zoom_search(mock_neo4j, "What are the themes?")
+
+        assert response.zoom_level == "macro"
+
+    @pytest.mark.asyncio
+    async def test_returns_meso_results(
+        self, mock_neo4j: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test AI zoom search returns meso results when classified."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "meso",
+                    "confidence": 0.88,
+                    "reasoning": "Project-level query",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "note-001",
+                "item_type": "Note",
+                "title": "Budget Notes",
+                "summary": "Q1 budget discussion",
+                "created_at": None,
+                "score": 1.0,
+                "related_projects": [],
+                "mentioned_persons": [],
+                "aligned_goals": [],
+            }
+        ]
+
+        response = await ai_zoom_search(mock_neo4j, "What did we discuss about the budget?")
+
+        assert response.zoom_level == "meso"
+        assert response.result_count == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_micro_results(
+        self, mock_neo4j: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test AI zoom search returns micro results when classified."""
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(
+                type="tool_use",
+                input={
+                    "level": "micro",
+                    "confidence": 0.95,
+                    "reasoning": "Specific entity query",
+                },
+            )
+        ]
+
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_response
+
+        def mock_anthropic(*args: object, **kwargs: object) -> MagicMock:
+            return mock_client
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        monkeypatch.setattr("anthropic.Anthropic", mock_anthropic)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "entity_uuid": "person-001",
+                "entity_type": "Person",
+                "entity_properties": {"name": "John", "email": "john@test.com"},
+                "score": 1.0,
+                "relationships": [],
+            }
+        ]
+
+        response = await ai_zoom_search(mock_neo4j, "What is John's email?")
+
+        assert response.zoom_level == "micro"
+        assert response.result_count == 1
