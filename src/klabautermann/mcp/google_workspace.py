@@ -104,6 +104,19 @@ class GmailLabel(BaseModel):
     unread_count: int | None = None
 
 
+class EmailSearchResult(BaseModel):
+    """Email search results with pagination metadata."""
+
+    emails: list[EmailMessage]
+    next_page_token: str | None = None
+    result_size_estimate: int | None = None
+
+    @property
+    def has_more(self) -> bool:
+        """Whether more results are available."""
+        return self.next_page_token is not None
+
+
 # ===========================================================================
 # Google Workspace Bridge
 # ===========================================================================
@@ -435,6 +448,126 @@ class GoogleWorkspaceBridge:
             raise ExternalServiceError("gmail", f"Search failed: {e}") from e
         except Exception as e:
             logger.error(f"[STORM] Gmail search failed: {e}", extra={"query": query})
+            raise
+
+    async def search_emails_paginated(
+        self,
+        query: str,
+        max_results: int = 100,
+        page_token: str | None = None,
+        context: Any = None,  # noqa: ARG002  # Kept for interface compatibility
+    ) -> EmailSearchResult:
+        """
+        Search Gmail messages with pagination support.
+
+        Supports retrieving large result sets efficiently by returning
+        a page token for subsequent requests. Each page requires N+1 API calls
+        where N is the number of messages (1 list + N individual fetches).
+
+        Args:
+            query: Gmail search query (e.g., "from:sarah@acme.com" or "is:unread")
+            max_results: Maximum messages per page (1-500, default: 100)
+            page_token: Token from previous response to continue pagination
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            EmailSearchResult with emails, next_page_token, and result_size_estimate
+
+        Raises:
+            ExternalServiceError: If search fails
+
+        Example:
+            result = await bridge.search_emails_paginated("is:unread")
+            for email in result.emails:
+                process_email(email)
+
+            if result.has_more:
+                next_result = await bridge.search_emails_paginated(
+                    "is:unread",
+                    page_token=result.next_page_token
+                )
+        """
+        await self.start()
+
+        # Enforce Gmail API limits (max 500 per page)
+        max_results = min(max_results, 500)
+
+        def do_search() -> tuple[list[dict[str, Any]], str | None, int | None]:
+            # Build list request with optional page token
+            list_request = (
+                self._gmail_service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=query,
+                    maxResults=max_results,
+                )
+            )
+            if page_token:
+                list_request = (
+                    self._gmail_service.users()
+                    .messages()
+                    .list(
+                        userId="me",
+                        q=query,
+                        maxResults=max_results,
+                        pageToken=page_token,
+                    )
+                )
+
+            results = list_request.execute()
+
+            messages = results.get("messages", [])
+            next_token = results.get("nextPageToken")
+            size_estimate = results.get("resultSizeEstimate")
+
+            if not messages:
+                return [], next_token, size_estimate
+
+            # Fetch full message details
+            full_messages = []
+            for msg in messages:
+                full = (
+                    self._gmail_service.users()
+                    .messages()
+                    .get(userId="me", id=msg["id"], format="full")
+                    .execute()
+                )
+                full_messages.append(full)
+
+            return full_messages, next_token, size_estimate
+
+        try:
+            raw_messages, next_token, size_estimate = await self._rate_limited_call(
+                "gmail", do_search
+            )
+            emails = self._parse_gmail_messages(raw_messages)
+
+            logger.info(
+                f"[CHART] Email search returned {len(emails)} results",
+                extra={
+                    "query": query,
+                    "has_more": next_token is not None,
+                    "estimate": size_estimate,
+                },
+            )
+
+            return EmailSearchResult(
+                emails=emails,
+                next_page_token=next_token,
+                result_size_estimate=size_estimate,
+            )
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Gmail paginated search failed: {e}",
+                extra={"query": query, "page_token": page_token},
+            )
+            raise ExternalServiceError("gmail", f"Paginated search failed: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"[STORM] Gmail paginated search failed: {e}",
+                extra={"query": query, "page_token": page_token},
+            )
             raise
 
     async def send_email(

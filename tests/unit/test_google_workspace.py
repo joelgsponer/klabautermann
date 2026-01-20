@@ -298,6 +298,130 @@ class TestEmailOperations:
 
 
 # ===========================================================================
+# Email Pagination Tests
+# ===========================================================================
+
+
+class TestEmailPagination:
+    """Test Gmail email pagination (#216)."""
+
+    @pytest.mark.asyncio
+    async def test_search_emails_paginated_returns_result(self, bridge, mock_gmail_service):
+        """Test paginated search returns EmailSearchResult."""
+        from klabautermann.mcp.google_workspace import EmailSearchResult
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}],
+            "nextPageToken": "token123",
+            "resultSizeEstimate": 100,
+        }
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Test email snippet",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+            },
+        }
+
+        result = await bridge.search_emails_paginated("test")
+
+        assert isinstance(result, EmailSearchResult)
+        assert len(result.emails) == 1
+        assert result.emails[0].subject == "Test Subject"
+        assert result.next_page_token == "token123"
+        assert result.result_size_estimate == 100
+        assert result.has_more is True
+
+    @pytest.mark.asyncio
+    async def test_search_emails_with_page_token(self, bridge, mock_gmail_service):
+        """Test search with page token for continuation."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg2"}],
+        }
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg2",
+            "threadId": "thread2",
+            "snippet": "Page 2 email",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Page 2"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+            },
+        }
+
+        result = await bridge.search_emails_paginated("test", page_token="token123")
+
+        # Verify pageToken was passed
+        call_args = mock_gmail_service.users.return_value.messages.return_value.list.call_args
+        assert call_args[1].get("pageToken") == "token123"
+        assert len(result.emails) == 1
+        assert result.emails[0].subject == "Page 2"
+
+    @pytest.mark.asyncio
+    async def test_pagination_last_page_no_token(self, bridge, mock_gmail_service):
+        """Test that pagination stops when nextPageToken is absent."""
+        from klabautermann.mcp.google_workspace import EmailSearchResult
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}],
+            # NO nextPageToken field = last page
+        }
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Last page",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Final Email"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+            },
+        }
+
+        result = await bridge.search_emails_paginated("test")
+
+        assert isinstance(result, EmailSearchResult)
+        assert result.next_page_token is None
+        assert result.has_more is False
+        assert len(result.emails) == 1
+
+    @pytest.mark.asyncio
+    async def test_pagination_empty_results(self, bridge, mock_gmail_service):
+        """Test pagination with no matching messages."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [],
+            # Empty result set
+        }
+
+        result = await bridge.search_emails_paginated("from:nonexistent@example.com")
+
+        assert len(result.emails) == 0
+        assert result.next_page_token is None
+        assert result.has_more is False
+
+    @pytest.mark.asyncio
+    async def test_pagination_max_results_enforced(self, bridge, mock_gmail_service):
+        """Test that max_results is enforced (max 500)."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [],
+        }
+
+        await bridge.search_emails_paginated("test", max_results=1000)
+
+        # Verify maxResults was capped at 500
+        call_args = mock_gmail_service.users.return_value.messages.return_value.list.call_args
+        assert call_args[1].get("maxResults") == 500
+
+
+# ===========================================================================
 # Calendar Tests
 # ===========================================================================
 
