@@ -1,5 +1,171 @@
 # Contributing to Klabautermann
 
+Thank you for your interest in contributing to Klabautermann!
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.11+
+- Docker & Docker Compose
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
+- Git
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/joelgsponer/klabautermann.git
+cd klabautermann
+
+# Create virtual environment
+make venv
+source .venv/bin/activate
+
+# Install development dependencies
+make dev
+
+# Copy environment template
+cp .env.example .env
+# Edit .env with your API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY)
+
+# Start Neo4j
+make docker-up
+
+# Initialize database schema
+make init-db
+
+# Verify setup
+make check
+```
+
+### Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `make run` | Start the CLI |
+| `make test` | Run all tests |
+| `make test-fast` | Run tests in parallel |
+| `make lint` | Run linter (ruff) |
+| `make type-check` | Run type checker (mypy) |
+| `make format` | Format code |
+| `make check` | Run all quality checks |
+
+---
+
+## Code Style
+
+### Ruff Configuration
+
+We use [Ruff](https://github.com/astral-sh/ruff) for linting and formatting:
+
+```bash
+# Check for issues
+make lint
+
+# Auto-format code
+make format
+```
+
+Key style rules:
+- Line length: 100 characters
+- Import ordering: isort-compatible (first-party: `klabautermann`)
+- Python target: 3.11+
+
+### Type Hints
+
+All functions should have type hints:
+
+```python
+# Good
+async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
+    ...
+
+# Bad
+async def process_message(self, msg):
+    ...
+```
+
+### Naming Conventions
+
+- **Classes**: `PascalCase` (e.g., `ThreadManager`)
+- **Functions/Methods**: `snake_case` (e.g., `get_context_window`)
+- **Constants**: `UPPER_SNAKE_CASE` (e.g., `DEFAULT_TIMEOUT`)
+- **Private**: Prefix with `_` (e.g., `_internal_method`)
+
+---
+
+## Pull Request Process
+
+### 1. Create a Branch
+
+```bash
+# Feature
+git checkout -b feat/description
+
+# Bug fix
+git checkout -b fix/description
+
+# Documentation
+git checkout -b docs/description
+
+# Tests
+git checkout -b test/description
+```
+
+### 2. Make Changes
+
+- Follow existing code patterns
+- Write tests for new functionality
+- Update documentation if needed
+- Run `make check` before committing
+
+### 3. Commit Format
+
+We use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types**: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `ci`
+
+**Examples**:
+```
+feat(researcher): Add temporal search support
+
+- Add _execute_temporal_search method
+- Add TimeRange parsing from queries
+- Add tests for temporal queries
+```
+
+```
+fix(cli): Handle ANSI escape codes in non-color terminals
+```
+
+### 4. Push and Create PR
+
+```bash
+git push -u origin your-branch
+
+# Create PR via GitHub CLI
+gh pr create --base dev --title "feat: Description" --body "..."
+```
+
+### 5. PR Requirements
+
+- [ ] All tests pass (`make test`)
+- [ ] Linting passes (`make lint`)
+- [ ] Type checking passes (`make type-check`)
+- [ ] Documentation updated if needed
+- [ ] Conventional commit format
+
+---
+
 ## Task Workflow
 
 ### 1. Select a Task
