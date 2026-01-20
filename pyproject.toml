@@ -50,6 +50,7 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.9",
     "pre-commit>=3.0",
+    "pip-audit>=2.0",  # Security vulnerability scanning
 ]
 
 [project.scripts]
