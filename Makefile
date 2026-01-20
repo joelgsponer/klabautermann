@@ -2,7 +2,7 @@
 # ======================
 # Common development commands
 
-.PHONY: help venv install dev run test lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
+.PHONY: help venv install dev run api tui tui-build test lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
 
 # Default target
 help:
@@ -16,6 +16,9 @@ help:
 	@echo ""
 	@echo "Run:"
 	@echo "  make run          Start the CLI"
+	@echo "  make api          Start the API server (ws://localhost:8765)"
+	@echo "  make tui          Build and run the Rust TUI"
+	@echo "  make tui-build    Build the Rust TUI only"
 	@echo ""
 	@echo "Quality:"
 	@echo "  make test         Run all tests"
@@ -57,6 +60,15 @@ dev:
 
 run:
 	uv run python main.py
+
+api:
+	uv run python scripts/start_api.py
+
+tui-build:
+	cd tui-rs && cargo build --release
+
+tui: tui-build
+	./tui-rs/target/release/klabautermann-tui
 
 # === Quality ===
 

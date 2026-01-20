@@ -1,0 +1,4866 @@
+{
+  "issues": [
+    {
+      "id": "AGT-P-001",
+      "title": "[AGT-P-001] Remove keyword-based intent classification - use pure LLM",
+      "body": "## Summary\n\nThe Orchestrator currently uses keyword lists (search_keywords, action_keywords) in config for intent classification. This must be replaced with pure LLM tool_use classification.\n\n## Spec Reference\n\n`specs/MAINAGENT.md Section 2.1`\n\n## Acceptance Criteria\n\n- [ ] Remove intent_classification.search_keywords from config\n- [ ] Remove intent_classification.action_keywords from config\n- [ ] Implement Claude tool_use based classification\n- [ ] Intent detection uses semantic understanding\n- [ ] Tests verify LLM-based classification\n\n## AI-First Requirement\n\n**This feature MUST use pure LLM intelligence.**\n- No keyword matching\n- No regex patterns\n- Use Claude tool_use or semantic understanding\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/refactor",
+        "priority/P0-critical",
+        "complexity/L",
+        "ai-first"
+      ],
+      "category": "AGT-P",
+      "priority": "P0",
+      "complexity": "L",
+      "ai_first": true,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-002",
+      "title": "[AGT-P-002] Implement true multi-model orchestration",
+      "body": "## Summary\n\nOrchestrator should dynamically select models based on task complexity. Currently uses single Sonnet model for everything.\n\n## Spec Reference\n\n`specs/MAINAGENT.md Section 5.1`\n\n## Acceptance Criteria\n\n- [ ] Implement model selection logic\n- [ ] Use Haiku for simple tasks (search, classification)\n- [ ] Use Sonnet for complex reasoning\n- [ ] Add model usage metrics\n- [ ] Config allows model overrides per agent\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-003",
+      "title": "[AGT-P-003] Add proactive morning briefing generation",
+      "body": "## Summary\n\nOrchestrator should generate proactive morning briefings summarizing schedule, tasks, and alerts.\n\n## Spec Reference\n\n`specs/PRD.md Section 7.3`\n\n## Acceptance Criteria\n\n- [ ] Implement morning briefing generation\n- [ ] Include today's calendar events\n- [ ] Include high-priority tasks\n- [ ] Include any overnight alerts\n- [ ] Trigger at configurable time (default 7:00)\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-004",
+      "title": "[AGT-P-004] Implement Storm Mode detection and response",
+      "body": "## Summary\n\nWhen high task density is detected, switch to terse, action-focused responses.\n\n## Spec Reference\n\n`specs/PRD.md Section 8.4`\n\n## Acceptance Criteria\n\n- [ ] Detect high task density (>5 urgent tasks)\n- [ ] Switch response style to terse mode\n- [ ] Reduce tidbit probability to 0\n- [ ] Add storm_mode flag to context\n- [ ] Revert to normal mode when density drops\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-005",
+      "title": "[AGT-P-005] Add conversation memory compression",
+      "body": "## Summary\n\nImplement memory compression for long conversations to stay within context limits.\n\n## Spec Reference\n\n`specs/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Detect when context window approaches limit\n- [ ] Compress older messages into summary\n- [ ] Preserve key facts and entities\n- [ ] Maintain conversation coherence\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-006",
+      "title": "[AGT-P-006] Implement task deduplication across channels",
+      "body": "## Summary\n\nDetect and deduplicate tasks mentioned across different channels.\n\n## Spec Reference\n\n`specs/CHANNELS.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Track tasks by content hash\n- [ ] Detect similar tasks across threads\n- [ ] Merge duplicate tasks\n- [ ] Preserve original channel references\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-007",
+      "title": "[AGT-P-007] Add user preference learning",
+      "body": "## Summary\n\nLearn user preferences from interactions and apply them to responses.\n\n## Spec Reference\n\n`specs/ONTOLOGY.md Section 1.2 (Preference)`\n\n## Acceptance Criteria\n\n- [ ] Track user preference signals\n- [ ] Store preferences in Preference nodes\n- [ ] Apply preferences to response generation\n- [ ] Support preference override commands\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/L"
+      ],
+      "category": "AGT-P",
+      "priority": "P3",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-008",
+      "title": "[AGT-P-008] Implement response streaming",
+      "body": "## Summary\n\nStream responses to channels instead of waiting for complete generation.\n\n## Spec Reference\n\n`specs/CHANNELS.md`\n\n## Acceptance Criteria\n\n- [ ] Implement streaming in Orchestrator\n- [ ] Update CLI driver for streaming\n- [ ] Update API server for WebSocket streaming\n- [ ] Handle streaming errors gracefully\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-009",
+      "title": "[AGT-P-009] Add LLM-based entity pre-extraction",
+      "body": "## Summary\n\nIngestor should use Haiku for pre-extraction before Graphiti, validating entities against ontology.\n\n## Spec Reference\n\n`specs/AGENTS.md Section 2.1`\n\n## Acceptance Criteria\n\n- [ ] Implement Haiku-based extraction\n- [ ] Extract entities before Graphiti call\n- [ ] Validate against ontology schema\n- [ ] Pass validated entities to Graphiti\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-010",
+      "title": "[AGT-P-010] Implement custom ontology validation",
+      "body": "## Summary\n\nValidate extracted entities against the Klabautermann ontology before ingestion.\n\n## Spec Reference\n\n`specs/ONTOLOGY.md Section 7`\n\n## Acceptance Criteria\n\n- [ ] Load ontology schema from spec\n- [ ] Validate entity types\n- [ ] Validate relationship types\n- [ ] Validate property constraints\n- [ ] Log validation failures\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-011",
+      "title": "[AGT-P-011] Add confidence scoring to extracted entities",
+      "body": "## Summary\n\nAssign confidence scores to extracted entities for quality filtering.\n\n## Spec Reference\n\n`specs/AGENTS.md`\n\n## Acceptance Criteria\n\n- [ ] Calculate confidence score per entity\n- [ ] Store confidence on relationship properties\n- [ ] Filter low-confidence extractions\n- [ ] Flag uncertain entities for user validation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-012",
+      "title": "[AGT-P-012] Support batch episode ingestion",
+      "body": "## Summary\n\nEnable ingestion of multiple episodes in a single batch call.\n\n## Spec Reference\n\n`specs/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Implement batch_add_episodes method\n- [ ] Process episodes in parallel where possible\n- [ ] Maintain transaction consistency\n- [ ] Return batch results summary\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/S"
+      ],
+      "category": "AGT-P",
+      "priority": "P3",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-013",
+      "title": "[AGT-P-013] Add structural traversal queries (REPORTS_TO chains)",
+      "body": "## Summary\n\nImplement Cypher queries for structural graph traversal like reporting chains.\n\n## Spec Reference\n\n`specs/RESEARCHER.md Section 2.4`\n\n## Acceptance Criteria\n\n- [ ] Implement REPORTS_TO chain traversal\n- [ ] Support configurable depth limits\n- [ ] Return structured hierarchy results\n- [ ] Add tests for traversal queries\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-014",
+      "title": "[AGT-P-014] Implement time-filtered temporal queries",
+      "body": "## Summary\n\nSupport temporal queries like 'Who did X work for last year?'\n\n## Spec Reference\n\n`specs/RESEARCHER.md Section 2.5`\n\n## Acceptance Criteria\n\n- [ ] Parse temporal expressions from queries\n- [ ] Filter relationships by created_at/expired_at\n- [ ] Support relative time expressions\n- [ ] Return historical data correctly\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-015",
+      "title": "[AGT-P-015] Add Island search (Knowledge Island exploration)",
+      "body": "## Summary\n\nEnable searching within specific Knowledge Islands (communities).\n\n## Spec Reference\n\n`specs/RESEARCHER.md Section 2.6`\n\n## Acceptance Criteria\n\n- [ ] Implement island-scoped search\n- [ ] Support island name in search params\n- [ ] Combine with vector search\n- [ ] Return island context in results\n\n## Dependencies\n\n- Blocked by #AGT-S-033\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-016",
+      "title": "[AGT-P-016] Implement zoom level mechanics for retrieval",
+      "body": "## Summary\n\nSupport macro/meso/micro zoom levels for multi-level retrieval.\n\n## Spec Reference\n\n`specs/AGENTS_EXTENDED.md Section 4.4`\n\n## Acceptance Criteria\n\n- [ ] Implement macro level (Community search)\n- [ ] Implement meso level (Project/Note search)\n- [ ] Implement micro level (Entity search)\n- [ ] Auto-detect appropriate zoom level\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-017",
+      "title": "[AGT-P-017] Add semantic ranking improvements",
+      "body": "## Summary\n\nImprove semantic ranking of search results using reranking.\n\n## Spec Reference\n\n`specs/RESEARCHER.md`\n\n## Acceptance Criteria\n\n- [ ] Implement result reranking\n- [ ] Use cross-encoder for fine-grained ranking\n- [ ] Weight graph relationships in ranking\n- [ ] Add diversity to top results\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/enhancement",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-018",
+      "title": "[AGT-P-018] LLM query intent understanding (no pattern matching)",
+      "body": "## Summary\n\nQuery intent detection must use pure LLM understanding, not keyword patterns.\n\n## Spec Reference\n\n`specs/AGENTS_EXTENDED.md Section 4.4`\n\n## Acceptance Criteria\n\n- [ ] Remove keyword-based zoom detection\n- [ ] Use LLM to understand query intent\n- [ ] Determine search scope semantically\n- [ ] Tests verify no pattern matching\n\n## AI-First Requirement\n\n**This feature MUST use pure LLM intelligence.**\n- No keyword matching\n- No regex patterns\n- Use Claude tool_use or semantic understanding\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/refactor",
+        "priority/P0-critical",
+        "complexity/M",
+        "ai-first"
+      ],
+      "category": "AGT-P",
+      "priority": "P0",
+      "complexity": "M",
+      "ai_first": true,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-019",
+      "title": "[AGT-P-019] Add cross-thread context retrieval",
+      "body": "## Summary\n\nEnable retrieval of context from related threads.\n\n## Spec Reference\n\n`specs/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Detect related threads by entity overlap\n- [ ] Retrieve relevant context from other threads\n- [ ] Maintain thread isolation for direct context\n- [ ] Add cross-thread links to results\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/L"
+      ],
+      "category": "AGT-P",
+      "priority": "P3",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-020",
+      "title": "[AGT-P-020] Implement email reply-to-thread functionality",
+      "body": "## Summary\n\nEnable replying to email threads instead of only creating new emails.\n\n## Spec Reference\n\n`specs/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Implement reply_to_email method\n- [ ] Maintain thread references (In-Reply-To)\n- [ ] Support quoted replies\n- [ ] Tests verify threading works\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-021",
+      "title": "[AGT-P-021] Add calendar event update and delete",
+      "body": "## Summary\n\nSupport updating and deleting calendar events.\n\n## Spec Reference\n\n`specs/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Implement update_event method\n- [ ] Implement delete_event method\n- [ ] Support partial updates\n- [ ] Handle conflict on update\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-022",
+      "title": "[AGT-P-022] Implement recurring events support",
+      "body": "## Summary\n\nSupport creation and management of recurring calendar events.\n\n## Spec Reference\n\n`specs/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Parse recurrence patterns from natural language\n- [ ] Create recurring events via API\n- [ ] Support daily, weekly, monthly patterns\n- [ ] Handle recurrence exceptions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-023",
+      "title": "[AGT-P-023] Add attendee management for calendar events",
+      "body": "## Summary\n\nSupport adding, removing, and managing event attendees.\n\n## Spec Reference\n\n`specs/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Implement add_attendees method\n- [ ] Implement remove_attendees method\n- [ ] Send invitations via Calendar API\n- [ ] Track attendee responses\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-024",
+      "title": "[AGT-P-024] Wire deduplication module to Archivist",
+      "body": "## Summary\n\nThe deduplication module exists but is not integrated into the Archivist workflow.\n\n## Spec Reference\n\n`specs/AGENTS.md Section 3.4`\n\n## Acceptance Criteria\n\n- [ ] Import deduplication module in Archivist\n- [ ] Call dedup during archival\n- [ ] Flag potential duplicates\n- [ ] Suggest merges to user\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "AGT-P",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-P-025",
+      "title": "[AGT-P-025] Add dynamic personality voice to Scribe",
+      "body": "## Summary\n\nScribe currently uses a template for journal entries. Should generate dynamic personality.\n\n## Spec Reference\n\n`specs/AGENTS.md Section 3.5`\n\n## Acceptance Criteria\n\n- [ ] Use LLM for journal voice generation\n- [ ] Apply Klabautermann personality\n- [ ] Vary tone based on day's events\n- [ ] Include appropriate nautical metaphors\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/enhancement",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "AGT-P",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-001",
+      "title": "[AGT-S-001] Create BardOfTheBilge agent skeleton",
+      "body": "## Summary\n\nCreate the basic agent class and register with system.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Create agents/bard.py\n- [ ] Extend BaseAgent\n- [ ] Register in main.py\n- [ ] Add config/agents/bard.yaml\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-002",
+      "title": "[AGT-S-002] Implement LoreEpisode node model",
+      "body": "## Summary\n\nDefine the LoreEpisode Pydantic model and Neo4j schema.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add LoreEpisode to core/models.py\n- [ ] Add LORE_EPISODE to NodeLabel enum\n- [ ] Create constraint and index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-003",
+      "title": "[AGT-S-003] Implement TOLD_TO relationship",
+      "body": "## Summary\n\nLink LoreEpisodes to the Captain (Person).\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add TOLD_TO to RelationType enum\n- [ ] Create relationship in Bard queries\n- [ ] Test relationship creation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-004",
+      "title": "[AGT-S-004] Implement EXPANDS_UPON relationship",
+      "body": "## Summary\n\nChain saga chapters together.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add EXPANDS_UPON to RelationType\n- [ ] Link consecutive chapters\n- [ ] Query saga chains\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-005",
+      "title": "[AGT-S-005] Create SagaManager class",
+      "body": "## Summary\n\nManage saga lifecycle (start, continue, complete, archive).\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Implement get_active_sagas\n- [ ] Implement continue_saga\n- [ ] Implement start_new_saga\n- [ ] Implement archive_saga\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-006",
+      "title": "[AGT-S-006] Add CANONICAL_SAGAS seed data",
+      "body": "## Summary\n\nInclude the canonical story database from spec.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add great-maelstrom saga\n- [ ] Add kraken-scroll saga\n- [ ] Add sirens-inbox saga\n- [ ] Add 2+ more sagas\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-007",
+      "title": "[AGT-S-007] Add STANDALONE_TIDBITS collection",
+      "body": "## Summary\n\nInclude standalone tidbits for random selection.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add 12+ standalone tidbits\n- [ ] Match spec examples\n- [ ] Ensure nautical voice\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-008",
+      "title": "[AGT-S-008] Implement tidbit selection logic",
+      "body": "## Summary\n\nSelect between saga continuation, new saga, or standalone.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] 30% chance continue saga\n- [ ] 20% chance start saga\n- [ ] 50% standalone tidbit\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-009",
+      "title": "[AGT-S-009] Integrate Bard with Orchestrator",
+      "body": "## Summary\n\nCall Bard.salt_response from Orchestrator.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Add salt_response call in response flow\n- [ ] Pass storm_mode flag\n- [ ] Respect tidbit_probability config\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-010",
+      "title": "[AGT-S-010] Add cross-channel saga persistence",
+      "body": "## Summary\n\nStories follow Captain across CLI/Telegram.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Query by captain_uuid not thread_id\n- [ ] Track channel in LoreEpisode\n- [ ] Test cross-channel continuity\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-011",
+      "title": "[AGT-S-011] Implement saga timeout handling",
+      "body": "## Summary\n\nAuto-complete sagas after 30 days.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Detect timed-out sagas\n- [ ] Generate conclusion chapter\n- [ ] Archive completed sagas\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-012",
+      "title": "[AGT-S-012] Add Bard unit tests",
+      "body": "## Summary\n\nTest saga management and tidbit selection.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 1`\n\n## Acceptance Criteria\n\n- [ ] Test saga creation\n- [ ] Test saga continuation\n- [ ] Test cross-channel persistence\n- [ ] Test selection logic\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-013",
+      "title": "[AGT-S-013] Create Purser agent skeleton",
+      "body": "## Summary\n\nCreate the Purser class for state synchronization.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Create agents/purser.py\n- [ ] Extend BaseAgent\n- [ ] Register in main.py\n- [ ] Add config/agents/purser.yaml\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-014",
+      "title": "[AGT-S-014] Implement Gmail delta-sync",
+      "body": "## Summary\n\nSync new emails since last sync timestamp.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Track last_sync timestamp\n- [ ] Fetch emails after last_sync\n- [ ] Update sync timestamp on completion\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-015",
+      "title": "[AGT-S-015] Implement Calendar delta-sync",
+      "body": "## Summary\n\nSync calendar events since last sync.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Track calendar last_sync\n- [ ] Fetch events in range\n- [ ] Detect updated/deleted events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-016",
+      "title": "[AGT-S-016] Create TheSieve email filter class",
+      "body": "## Summary\n\nFilter emails for noise and injection attacks.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Implement noise pattern detection\n- [ ] Implement injection pattern detection\n- [ ] Return EmailManifest with is_manifest_worthy\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-017",
+      "title": "[AGT-S-017] Implement VIP whitelist",
+      "body": "## Summary\n\nAllow certain senders to bypass TheSieve.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Load VIP list from config\n- [ ] Check sender against whitelist\n- [ ] Skip filtering for VIPs\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-018",
+      "title": "[AGT-S-018] Add external_id duplicate tracking",
+      "body": "## Summary\n\nPrevent re-ingesting already synced items.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Store external_id in Resource nodes\n- [ ] Check before ingestion\n- [ ] Handle updates vs creates\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-019",
+      "title": "[AGT-S-019] Implement scheduled sync job",
+      "body": "## Summary\n\nRun sync every 15 minutes via scheduler.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Register Purser with scheduler\n- [ ] Add sync_interval config\n- [ ] Handle sync failures gracefully\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-020",
+      "title": "[AGT-S-020] Add expired event detection",
+      "body": "## Summary\n\nMark deleted external events as expired.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Detect events deleted externally\n- [ ] Set expired_at on Event nodes\n- [ ] Log expired events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-021",
+      "title": "[AGT-S-021] Implement sync health monitoring",
+      "body": "## Summary\n\nTrack sync success/failure metrics.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Count successful syncs\n- [ ] Count failed syncs\n- [ ] Expose metrics endpoint\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-022",
+      "title": "[AGT-S-022] Add Purser unit tests",
+      "body": "## Summary\n\nTest sync and filtering logic.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Test delta-sync\n- [ ] Test TheSieve filtering\n- [ ] Test duplicate detection\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-023",
+      "title": "[AGT-S-023] Create OfficerOfTheWatch agent skeleton",
+      "body": "## Summary\n\nCreate the proactive alert agent.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Create agents/officer.py\n- [ ] Extend BaseAgent\n- [ ] Register in main.py\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-024",
+      "title": "[AGT-S-024] Implement deadline warning alerts",
+      "body": "## Summary\n\nAlert when tasks are due within 24 hours.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Query tasks with approaching due_date\n- [ ] Generate WARNING alerts\n- [ ] Respect quiet mode\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-025",
+      "title": "[AGT-S-025] Implement meeting reminder alerts",
+      "body": "## Summary\n\nAlert 15 minutes before meetings.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Query upcoming events\n- [ ] Generate INFO alerts\n- [ ] Include event details\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-026",
+      "title": "[AGT-S-026] Implement schedule conflict detection",
+      "body": "## Summary\n\nDetect overlapping calendar events.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Query for time overlaps\n- [ ] Generate WARNING alerts\n- [ ] Suggest resolution\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-027",
+      "title": "[AGT-S-027] Implement overdue task alerts",
+      "body": "## Summary\n\nAlert when tasks are past due.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Query overdue tasks\n- [ ] Generate ERROR alerts\n- [ ] Prioritize by task priority\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-028",
+      "title": "[AGT-S-028] Add morning briefing generation",
+      "body": "## Summary\n\nGenerate daily morning summary.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Aggregate today's schedule\n- [ ] Include urgent tasks\n- [ ] Apply personality voice\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-029",
+      "title": "[AGT-S-029] Implement Deep Work / Quiet Watch mode",
+      "body": "## Summary\n\nSuppress non-critical alerts during focus time.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Detect focus calendar blocks\n- [ ] Set quiet_mode flag\n- [ ] Only allow CRITICAL alerts through\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-030",
+      "title": "[AGT-S-030] Add alert debouncing",
+      "body": "## Summary\n\nDon't re-send same alert within time window.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Track sent alerts\n- [ ] Check last_sent timestamp\n- [ ] Configurable debounce window\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-031",
+      "title": "[AGT-S-031] Integrate with Channel Manager",
+      "body": "## Summary\n\nSend alerts to all active channels.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Get active channels from manager\n- [ ] Format alerts per channel\n- [ ] Handle send failures\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-032",
+      "title": "[AGT-S-032] Add Officer unit tests",
+      "body": "## Summary\n\nTest alert generation and filtering.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Test deadline alerts\n- [ ] Test quiet mode\n- [ ] Test debouncing\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-033",
+      "title": "[AGT-S-033] Create Cartographer agent skeleton",
+      "body": "## Summary\n\nCreate community detection agent.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Create agents/cartographer.py\n- [ ] Extend BaseAgent\n- [ ] Register in main.py\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-034",
+      "title": "[AGT-S-034] Implement graph projection for GDS",
+      "body": "## Summary\n\nCreate in-memory graph for algorithms.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Call gds.graph.project\n- [ ] Include relevant node types\n- [ ] Include relevant relationship types\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-035",
+      "title": "[AGT-S-035] Implement Louvain community detection",
+      "body": "## Summary\n\nRun Louvain algorithm on projected graph.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Call gds.louvain.stream\n- [ ] Collect community memberships\n- [ ] Filter by minimum size\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-036",
+      "title": "[AGT-S-036] Create Community node model",
+      "body": "## Summary\n\nDefine Community/KnowledgeIsland node.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Add Community to models.py\n- [ ] Add to NodeLabel enum\n- [ ] Create constraint and index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-037",
+      "title": "[AGT-S-037] Implement PART_OF_ISLAND relationship",
+      "body": "## Summary\n\nLink nodes to their communities.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Add PART_OF_ISLAND to RelationType\n- [ ] Store membership weight\n- [ ] Store detected_at timestamp\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-038",
+      "title": "[AGT-S-038] Add theme classification",
+      "body": "## Summary\n\nClassify communities by theme (work, family, etc.).\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Analyze member node types\n- [ ] Assign theme label\n- [ ] Support multiple themes\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-039",
+      "title": "[AGT-S-039] Implement community summary generation",
+      "body": "## Summary\n\nGenerate AI summaries for islands.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Gather community members\n- [ ] Generate summary with LLM\n- [ ] Store in Community.summary\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-040",
+      "title": "[AGT-S-040] Add scheduled community detection",
+      "body": "## Summary\n\nRun weekly via scheduler.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Register with scheduler\n- [ ] Run Sunday midnight\n- [ ] Handle algorithm failures\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-041",
+      "title": "[AGT-S-041] Implement island search support",
+      "body": "## Summary\n\nEnable Researcher to search within islands.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Add island_uuid parameter to search\n- [ ] Filter results by community\n- [ ] Return island context\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-042",
+      "title": "[AGT-S-042] Add Cartographer unit tests",
+      "body": "## Summary\n\nTest community detection.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Test graph projection\n- [ ] Test community creation\n- [ ] Test summary generation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-043",
+      "title": "[AGT-S-043] Create HullCleaner agent skeleton",
+      "body": "## Summary\n\nCreate graph maintenance agent.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Create agents/hull_cleaner.py\n- [ ] Extend BaseAgent\n- [ ] Register in main.py\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-044",
+      "title": "[AGT-S-044] Implement weak relationship detection",
+      "body": "## Summary\n\nFind relationships with low weight and old age.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Query relationships with weight < 0.2\n- [ ] Filter by age > 90 days\n- [ ] Return pruning candidates\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-045",
+      "title": "[AGT-S-045] Implement relationship pruning",
+      "body": "## Summary\n\nDelete weak relationships.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Support dry-run mode\n- [ ] Log all deletions\n- [ ] Create audit entries\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-046",
+      "title": "[AGT-S-046] Implement orphan message detection",
+      "body": "## Summary\n\nFind messages not in any thread.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Query unlinked Message nodes\n- [ ] Return orphan list\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-047",
+      "title": "[AGT-S-047] Implement orphan removal",
+      "body": "## Summary\n\nDelete orphan nodes.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Support dry-run mode\n- [ ] Log deletions\n- [ ] Create audit entries\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-048",
+      "title": "[AGT-S-048] Implement duplicate entity detection",
+      "body": "## Summary\n\nFind potential duplicate Person/Org nodes.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Use Levenshtein similarity\n- [ ] Threshold > 0.85 similarity\n- [ ] Return duplicate pairs\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-049",
+      "title": "[AGT-S-049] Implement entity merge",
+      "body": "## Summary\n\nMerge duplicate entities using APOC.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Use apoc.refactor.mergeNodes\n- [ ] Preserve all relationships\n- [ ] Log merge operations\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-050",
+      "title": "[AGT-S-050] Implement transitive redundancy detection",
+      "body": "## Summary\n\nFind redundant transitive paths.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Detect A->B->C with direct A->C\n- [ ] Evaluate for pruning\n- [ ] Consider relationship weights\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-051",
+      "title": "[AGT-S-051] Add pruning audit log",
+      "body": "## Summary\n\nPersist audit trail of all pruning.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Create AuditEntry model\n- [ ] Store in AuditLog nodes\n- [ ] Support audit queries\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-052",
+      "title": "[AGT-S-052] Add HullCleaner unit tests",
+      "body": "## Summary\n\nTest pruning logic.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 5`\n\n## Acceptance Criteria\n\n- [ ] Test weak rel detection\n- [ ] Test duplicate detection\n- [ ] Test merge operations\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-053",
+      "title": "[AGT-S-053] Implement A/B testing for prompts",
+      "body": "## Summary\n\nSupport prompt variants with selection logic.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Add prompt_variants to AgentConfig\n- [ ] Implement variant selection\n- [ ] Track variant usage\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-054",
+      "title": "[AGT-S-054] Add model switching capability",
+      "body": "## Summary\n\nAllow runtime model changes.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Support model override per request\n- [ ] Validate model availability\n- [ ] Track model usage\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-055",
+      "title": "[AGT-S-055] Implement prompt performance tracking",
+      "body": "## Summary\n\nTrack metrics per prompt variant.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Measure response quality\n- [ ] Track latency per variant\n- [ ] Store metrics in graph\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-056",
+      "title": "[AGT-S-056] Add config validation webhook",
+      "body": "## Summary\n\nNotify on config changes.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Call observers on change\n- [ ] Validate new config\n- [ ] Rollback on validation failure\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-057",
+      "title": "[AGT-S-057] Implement feature flags",
+      "body": "## Summary\n\nSupport feature flag configuration.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Add feature_flags to config\n- [ ] Check flags at runtime\n- [ ] Support gradual rollout\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-058",
+      "title": "[AGT-S-058] Add experiment reporting",
+      "body": "## Summary\n\nGenerate A/B test reports.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Aggregate variant metrics\n- [ ] Calculate statistical significance\n- [ ] Export reports\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-059",
+      "title": "[AGT-S-059] Implement config rollback",
+      "body": "## Summary\n\nRevert to previous config version.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Track config versions\n- [ ] Implement rollback command\n- [ ] Validate before apply\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "AGT-S-060",
+      "title": "[AGT-S-060] Add Quartermaster tests",
+      "body": "## Summary\n\nTest config management.\n\n## Spec Reference\n\n`specs/architecture/AGENTS_EXTENDED.md Section 6`\n\n## Acceptance Criteria\n\n- [ ] Test hot reload\n- [ ] Test variant selection\n- [ ] Test validation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/agents",
+        "area/infra",
+        "type/feature",
+        "priority/P3-low",
+        "complexity/M"
+      ],
+      "category": "AGT-S",
+      "priority": "P3",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-001",
+      "title": "[LORE-001] Add LoreEpisode node type to ontology",
+      "body": "## Summary\n\nAdd the LoreEpisode node definition.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 2.1`\n\n## Acceptance Criteria\n\n- [ ] Add LoreEpisode to NodeLabel enum\n- [ ] Add LoreEpisodeNode Pydantic model\n- [ ] Create uuid constraint\n- [ ] Create saga_id index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-002",
+      "title": "[LORE-002] Implement TOLD_TO relationship",
+      "body": "## Summary\n\nLink stories to the Captain.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 2.2`\n\n## Acceptance Criteria\n\n- [ ] Add TOLD_TO to RelationType\n- [ ] Create relationship in Bard\n- [ ] Query stories by Captain\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-003",
+      "title": "[LORE-003] Implement EXPANDS_UPON relationship",
+      "body": "## Summary\n\nChain saga chapters.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 2.2`\n\n## Acceptance Criteria\n\n- [ ] Add EXPANDS_UPON to RelationType\n- [ ] Link consecutive chapters\n- [ ] Support saga chain queries\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-004",
+      "title": "[LORE-004] Implement SAGA_STARTED_BY relationship",
+      "body": "## Summary\n\nTrack saga initiators.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 2.2`\n\n## Acceptance Criteria\n\n- [ ] Add SAGA_STARTED_BY to RelationType\n- [ ] Link first chapter to Captain\n- [ ] Query saga origins\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-005",
+      "title": "[LORE-005] Create SagaManager class",
+      "body": "## Summary\n\nManage saga lifecycle.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.3`\n\n## Acceptance Criteria\n\n- [ ] get_active_sagas method\n- [ ] continue_saga method\n- [ ] start_new_saga method\n- [ ] archive_saga method\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-006",
+      "title": "[LORE-006] Add The Great Maelstrom saga",
+      "body": "## Summary\n\nInclude canonical saga from spec.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add all 5 chapters\n- [ ] Match spec content exactly\n- [ ] Set theme: origin\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-007",
+      "title": "[LORE-007] Add The Kraken of Infinite Scroll saga",
+      "body": "## Summary\n\nInclude canonical saga.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add all 5 chapters\n- [ ] Match spec content\n- [ ] Set theme: battle\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-008",
+      "title": "[LORE-008] Add The Sirens of the Inbox saga",
+      "body": "## Summary\n\nInclude canonical saga.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add all 5 chapters\n- [ ] Set theme: warning\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-009",
+      "title": "[LORE-009] Add The Ghost Ship saga",
+      "body": "## Summary\n\nInclude canonical saga.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add all 5 chapters\n- [ ] Set theme: melancholy\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-010",
+      "title": "[LORE-010] Add The Lighthouse of Passwords saga",
+      "body": "## Summary\n\nInclude canonical saga.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add all 5 chapters\n- [ ] Set theme: humor\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-011",
+      "title": "[LORE-011] Add standalone tidbits collection",
+      "body": "## Summary\n\nInclude standalone tidbits.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.1`\n\n## Acceptance Criteria\n\n- [ ] Add 12+ tidbits from spec\n- [ ] Ensure nautical voice\n- [ ] No pirate cliches\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-012",
+      "title": "[LORE-012] Implement tidbit selection algorithm",
+      "body": "## Summary\n\nSelect tidbits based on probability.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 4.2`\n\n## Acceptance Criteria\n\n- [ ] 30% continue saga\n- [ ] 20% start saga\n- [ ] 50% standalone\n- [ ] Respect storm mode\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-013",
+      "title": "[LORE-013] Integrate salt_response with Orchestrator",
+      "body": "## Summary\n\nCall Bard from response flow.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 5.1`\n\n## Acceptance Criteria\n\n- [ ] Add salt_response call\n- [ ] Pass storm_mode\n- [ ] Pass captain_uuid\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-014",
+      "title": "[LORE-014] Add saga progress to daily reflection",
+      "body": "## Summary\n\nInclude lore in Scribe output.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Query today's lore episodes\n- [ ] Format saga progress\n- [ ] Include in journal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-015",
+      "title": "[LORE-015] Implement Captain-context storage",
+      "body": "## Summary\n\nStories follow Captain, not thread.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Query by captain_uuid\n- [ ] Not by thread_uuid\n- [ ] Cross-channel persistence\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-016",
+      "title": "[LORE-016] Add get recent lore query",
+      "body": "## Summary\n\nRetrieve recent story episodes.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Cypher query for recent lore\n- [ ] Limit to N episodes\n- [ ] Order by told_at DESC\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-017",
+      "title": "[LORE-017] Add get saga chain query",
+      "body": "## Summary\n\nRetrieve all chapters of a saga.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 6.2`\n\n## Acceptance Criteria\n\n- [ ] Cypher query for saga chain\n- [ ] Order by chapter ASC\n- [ ] Include all metadata\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-018",
+      "title": "[LORE-018] Add cross-channel story query",
+      "body": "## Summary\n\nShow story travel across channels.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 6.3`\n\n## Acceptance Criteria\n\n- [ ] Query saga with channel info\n- [ ] Show channel per chapter\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-019",
+      "title": "[LORE-019] Add saga statistics query",
+      "body": "## Summary\n\nCount sagas and chapters.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 6.4`\n\n## Acceptance Criteria\n\n- [ ] Count total sagas\n- [ ] Count total chapters\n- [ ] Group by Captain\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-020",
+      "title": "[LORE-020] Create bard.yaml config file",
+      "body": "## Summary\n\nAdd Bard configuration.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 7.1`\n\n## Acceptance Criteria\n\n- [ ] Set model to haiku\n- [ ] Set tidbit_probability\n- [ ] Set saga_rules\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-021",
+      "title": "[LORE-021] Add personality.lore config",
+      "body": "## Summary\n\nConfigure lore in personality.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 7.2`\n\n## Acceptance Criteria\n\n- [ ] enabled flag\n- [ ] tidbit_frequency\n- [ ] display_format\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-022",
+      "title": "[LORE-022] Implement max chapters per saga",
+      "body": "## Summary\n\nEnforce 5 chapter limit.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.2`\n\n## Acceptance Criteria\n\n- [ ] Check chapter count\n- [ ] Raise SagaCompleteError\n- [ ] Auto-archive at max\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-023",
+      "title": "[LORE-023] Implement max active sagas",
+      "body": "## Summary\n\nEnforce 3 active saga limit.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.2`\n\n## Acceptance Criteria\n\n- [ ] Check active count\n- [ ] Archive oldest if over\n- [ ] Log archival\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-024",
+      "title": "[LORE-024] Implement saga timeout",
+      "body": "## Summary\n\nAuto-complete after 30 days.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.2`\n\n## Acceptance Criteria\n\n- [ ] Check last_told timestamp\n- [ ] Generate conclusion\n- [ ] Archive timed-out sagas\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-025",
+      "title": "[LORE-025] Implement min time between chapters",
+      "body": "## Summary\n\nEnforce 1 hour minimum.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.2`\n\n## Acceptance Criteria\n\n- [ ] Check last chapter time\n- [ ] Skip if too recent\n- [ ] Log skip reason\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-026",
+      "title": "[LORE-026] Add test_saga_continuation",
+      "body": "## Summary\n\nUnit test for saga continuation.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 8.1`\n\n## Acceptance Criteria\n\n- [ ] Start saga\n- [ ] Continue chapter\n- [ ] Verify chain\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-027",
+      "title": "[LORE-027] Add test_cross_channel_persistence",
+      "body": "## Summary\n\nTest stories across channels.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 8.1`\n\n## Acceptance Criteria\n\n- [ ] Tell on CLI\n- [ ] Continue on Telegram\n- [ ] Verify same saga\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-028",
+      "title": "[LORE-028] Add E2E cross-conversation saga test",
+      "body": "## Summary\n\nGolden scenario for lore.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 8.2`\n\n## Acceptance Criteria\n\n- [ ] CLI: start saga\n- [ ] Telegram: continue\n- [ ] CLI: retrieve and continue\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-029",
+      "title": "[LORE-029] Add saga summary generation",
+      "body": "## Summary\n\nGenerate summary when archiving.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.3`\n\n## Acceptance Criteria\n\n- [ ] Gather all chapters\n- [ ] Generate summary with LLM\n- [ ] Store in Note node\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "LORE-030",
+      "title": "[LORE-030] Add SUMMARIZES relationship for lore",
+      "body": "## Summary\n\nLink Note to archived episodes.\n\n## Spec Reference\n\n`specs/architecture/LORE_SYSTEM.md Section 3.3`\n\n## Acceptance Criteria\n\n- [ ] Create Note on archive\n- [ ] Link to all episodes\n- [ ] Mark episodes archived\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/lore",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "LORE",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-001",
+      "title": "[CHAN-001] Implement /status command in CLI",
+      "body": "## Summary\n\nAdd /status command to show system status.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 2.2`\n\n## Acceptance Criteria\n\n- [ ] Show session ID\n- [ ] Show active thread count\n- [ ] Show agent status\n- [ ] Show connection status\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/XS"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "XS",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-002",
+      "title": "[CHAN-002] Fix /clear to reset session context",
+      "body": "## Summary\n\nCurrently /clear only clears screen. Should also reset orchestrator context.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 2.2`\n\n## Acceptance Criteria\n\n- [ ] Clear screen\n- [ ] Create new session ID\n- [ ] Reset thread context\n- [ ] Notify user of reset\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/bug",
+        "priority/P2-medium",
+        "complexity/XS"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "XS",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-003",
+      "title": "[CHAN-003] Create TelegramDriver class skeleton",
+      "body": "## Summary\n\nBase implementation extending BaseChannel.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Create telegram_driver.py\n- [ ] Extend BaseChannel\n- [ ] Implement abstract methods\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-004",
+      "title": "[CHAN-004] Add Telegram bot token configuration",
+      "body": "## Summary\n\nSupport token from env and config.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Load TELEGRAM_BOT_TOKEN\n- [ ] Validate token on start\n- [ ] Log connection status\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-005",
+      "title": "[CHAN-005] Implement /start command",
+      "body": "## Summary\n\nWelcome message for Telegram.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Register CommandHandler\n- [ ] Send welcome message\n- [ ] Include help instructions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-006",
+      "title": "[CHAN-006] Implement /help command",
+      "body": "## Summary\n\nHelp message for Telegram.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Register CommandHandler\n- [ ] List available commands\n- [ ] Explain capabilities\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-007",
+      "title": "[CHAN-007] Implement /status command",
+      "body": "## Summary\n\nSystem status for Telegram.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Show chat ID\n- [ ] Show user ID\n- [ ] Show connection status\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-008",
+      "title": "[CHAN-008] Implement text message handling",
+      "body": "## Summary\n\nProcess incoming text messages.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Register MessageHandler\n- [ ] Convert to StandardizedMessage\n- [ ] Route to Orchestrator\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-009",
+      "title": "[CHAN-009] Implement voice message handling",
+      "body": "## Summary\n\nProcess voice messages.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Detect voice messages\n- [ ] Download voice file\n- [ ] Send to transcription\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-010",
+      "title": "[CHAN-010] Integrate Whisper transcription",
+      "body": "## Summary\n\nTranscribe voice to text.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Call OpenAI Whisper API\n- [ ] Handle transcription errors\n- [ ] Update message content\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-011",
+      "title": "[CHAN-011] Implement user whitelist",
+      "body": "## Summary\n\nRestrict bot to allowed users.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Load allowed_user_ids\n- [ ] Check on message receive\n- [ ] Reject unauthorized users\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-012",
+      "title": "[CHAN-012] Add typing indicators",
+      "body": "## Summary\n\nShow typing during processing.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Send typing action\n- [ ] Maintain during LLM call\n- [ ] Clear on response\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-013",
+      "title": "[CHAN-013] Implement Markdown formatting",
+      "body": "## Summary\n\nFormat responses for Telegram.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Use parse_mode='Markdown'\n- [ ] Escape special characters\n- [ ] Handle formatting errors\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-014",
+      "title": "[CHAN-014] Implement thread isolation",
+      "body": "## Summary\n\nSeparate threads per chat.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Map chat_id to thread_uuid\n- [ ] Maintain context separation\n- [ ] Test isolation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-015",
+      "title": "[CHAN-015] Create config/channels/telegram.yaml",
+      "body": "## Summary\n\nTelegram configuration file.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] bot_token reference\n- [ ] allowed_user_ids list\n- [ ] enable_voice flag\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-016",
+      "title": "[CHAN-016] Add Telegram integration tests",
+      "body": "## Summary\n\nTest Telegram message flow.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Mock Telegram API\n- [ ] Test message handling\n- [ ] Test voice handling\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-017",
+      "title": "[CHAN-017] Add Telegram E2E test scenario",
+      "body": "## Summary\n\nEnd-to-end Telegram test.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 3`\n\n## Acceptance Criteria\n\n- [ ] Start bot\n- [ ] Send message\n- [ ] Verify response\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-018",
+      "title": "[CHAN-018] Create DiscordDriver class skeleton",
+      "body": "## Summary\n\nBase Discord bot implementation.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Create discord_driver.py\n- [ ] Use discord.py\n- [ ] Extend BaseChannel\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-019",
+      "title": "[CHAN-019] Implement guild management",
+      "body": "## Summary\n\nSupport guild configuration.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Load guild_id from config\n- [ ] Validate guild access\n- [ ] Handle permissions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-020",
+      "title": "[CHAN-020] Implement slash commands",
+      "body": "## Summary\n\nDiscord slash command handlers.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Register /help command\n- [ ] /status command\n- [ ] Sync commands on start\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-021",
+      "title": "[CHAN-021] Implement rich embeds",
+      "body": "## Summary\n\nFormat responses as Discord embeds.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Create embed builder\n- [ ] Include branding colors\n- [ ] Support markdown in embeds\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-022",
+      "title": "[CHAN-022] Implement role-based auth",
+      "body": "## Summary\n\nRestrict by Discord roles.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 6.1`\n\n## Acceptance Criteria\n\n- [ ] Load allowed_roles\n- [ ] Check user roles\n- [ ] Reject unauthorized\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/L"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-023",
+      "title": "[CHAN-023] Create ChannelManager class",
+      "body": "## Summary\n\nOrchestrate multiple channels.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Create channels/manager.py\n- [ ] Track active channels\n- [ ] Support start_all/stop_all\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-024",
+      "title": "[CHAN-024] Implement multi-channel startup",
+      "body": "## Summary\n\nStart enabled channels concurrently.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Check enable_* flags\n- [ ] Create channel instances\n- [ ] Start with asyncio.gather\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-025",
+      "title": "[CHAN-025] Implement health monitoring",
+      "body": "## Summary\n\nTrack channel health status.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Periodic health checks\n- [ ] Track last_message times\n- [ ] Detect disconnections\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-026",
+      "title": "[CHAN-026] Implement graceful shutdown",
+      "body": "## Summary\n\nClean shutdown of all channels.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Stop in reverse order\n- [ ] Wait for pending messages\n- [ ] Log shutdown status\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-027",
+      "title": "[CHAN-027] Add channel status endpoint",
+      "body": "## Summary\n\nAPI endpoint for channel status.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] /channels/status endpoint\n- [ ] Return channel health\n- [ ] Include message counts\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-028",
+      "title": "[CHAN-028] Implement channel restart",
+      "body": "## Summary\n\nRestart failed channels.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Detect channel failure\n- [ ] Attempt restart\n- [ ] Notify on failure\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-029",
+      "title": "[CHAN-029] Add rate limiting per channel",
+      "body": "## Summary\n\nPrevent abuse.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Track messages per user\n- [ ] Enforce rate limits\n- [ ] Configurable per channel\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-030",
+      "title": "[CHAN-030] Implement cross-channel messaging",
+      "body": "## Summary\n\nSend alerts to all channels.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Broadcast method\n- [ ] Format per channel\n- [ ] Track delivery\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-031",
+      "title": "[CHAN-031] Add ChannelManager unit tests",
+      "body": "## Summary\n\nTest channel orchestration.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 5.2`\n\n## Acceptance Criteria\n\n- [ ] Test startup\n- [ ] Test shutdown\n- [ ] Test health monitoring\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-032",
+      "title": "[CHAN-032] Implement input sanitization for all channels",
+      "body": "## Summary\n\nSanitize input to prevent injection and limit length.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 8.3`\n\n## Acceptance Criteria\n\n- [ ] Remove injection attempts\n- [ ] Limit message length\n- [ ] Log sanitization events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-033",
+      "title": "[CHAN-033] Add channel metrics collection",
+      "body": "## Summary\n\nCollect metrics for channel usage.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md`\n\n## Acceptance Criteria\n\n- [ ] Message counts\n- [ ] Response latencies\n- [ ] Error rates\n- [ ] Export to Prometheus\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-034",
+      "title": "[CHAN-034] Implement message queue for channel resilience",
+      "body": "## Summary\n\nQueue messages when Orchestrator is busy.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md`\n\n## Acceptance Criteria\n\n- [ ] Implement message queue\n- [ ] Process in order\n- [ ] Handle queue overflow\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "CHAN-035",
+      "title": "[CHAN-035] Add channel integration test suite",
+      "body": "## Summary\n\nComprehensive integration tests for channels.\n\n## Spec Reference\n\n`specs/architecture/CHANNELS.md Section 7`\n\n## Acceptance Criteria\n\n- [ ] CLI integration tests\n- [ ] Thread isolation test\n- [ ] Multi-channel test\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/channels",
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "CHAN",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-001",
+      "title": "[ONT-001] Add Hobby node type",
+      "body": "## Summary\n\nLeisure activities and interests.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Create Pydantic model\n- [ ] Add constraint/index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-002",
+      "title": "[ONT-002] Add HealthMetric node type",
+      "body": "## Summary\n\nHealth tracking data points.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Support type/value/unit\n- [ ] Add recorded_at index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-003",
+      "title": "[ONT-003] Add Pet node type",
+      "body": "## Summary\n\nAnimal companions.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include species/breed\n- [ ] Add adoption_date\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-004",
+      "title": "[ONT-004] Add Milestone node type",
+      "body": "## Summary\n\nPersonal achievements.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include significance\n- [ ] Add achieved_at index\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-005",
+      "title": "[ONT-005] Add Routine node type",
+      "body": "## Summary\n\nRecurring activities.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include frequency\n- [ ] Track is_active\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-006",
+      "title": "[ONT-006] Add Preference node type",
+      "body": "## Summary\n\nLikes and dislikes.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include sentiment\n- [ ] Support strength scoring\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-007",
+      "title": "[ONT-007] Add Community node type",
+      "body": "## Summary\n\nKnowledge Islands.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include theme/summary\n- [ ] Track node_count\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-008",
+      "title": "[ONT-008] Add LoreEpisode node type",
+      "body": "## Summary\n\nStory chapters.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 1.2`\n\n## Acceptance Criteria\n\n- [ ] Add to NodeLabel enum\n- [ ] Include saga_id/chapter\n- [ ] Track told_at\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-009",
+      "title": "[ONT-009] Add FAMILY_OF relationship",
+      "body": "## Summary\n\nGeneric family relationship.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include role property\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-010",
+      "title": "[ONT-010] Add SPOUSE_OF relationship",
+      "body": "## Summary\n\nMarriage/partnership.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include married_at\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-011",
+      "title": "[ONT-011] Add PARENT_OF relationship",
+      "body": "## Summary\n\nParent-child link.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Directional\n- [ ] Support adoption\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-012",
+      "title": "[ONT-012] Add CHILD_OF relationship",
+      "body": "## Summary\n\nChild-parent link.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Inverse of PARENT_OF\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-013",
+      "title": "[ONT-013] Add SIBLING_OF relationship",
+      "body": "## Summary\n\nSibling link.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Bidirectional semantics\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-014",
+      "title": "[ONT-014] Add FRIEND_OF relationship",
+      "body": "## Summary\n\nFriendship.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include since/strength\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-015",
+      "title": "[ONT-015] Add PRACTICES relationship",
+      "body": "## Summary\n\nPerson practices Hobby.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include skill_level\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-016",
+      "title": "[ONT-016] Add OWNS relationship",
+      "body": "## Summary\n\nPerson owns Pet.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include since\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-017",
+      "title": "[ONT-017] Add RECORDED relationship",
+      "body": "## Summary\n\nPerson recorded HealthMetric.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Link to Day node\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-018",
+      "title": "[ONT-018] Add ACHIEVES relationship",
+      "body": "## Summary\n\nPerson achieved Milestone.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Link to achieved_at\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-019",
+      "title": "[ONT-019] Add FOLLOWS_ROUTINE relationship",
+      "body": "## Summary\n\nPerson follows Routine.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include streak count\n- [ ] Support temporal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-020",
+      "title": "[ONT-020] Add PREFERS relationship",
+      "body": "## Summary\n\nPerson has Preference.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Simple link\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-021",
+      "title": "[ONT-021] Add PART_OF_ISLAND relationship",
+      "body": "## Summary\n\nNode belongs to Community.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Include weight\n- [ ] Track detected_at\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-022",
+      "title": "[ONT-022] Add EXPANDS_UPON relationship",
+      "body": "## Summary\n\nLore chapter chain.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Link episodes\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-023",
+      "title": "[ONT-023] Add TOLD_TO relationship",
+      "body": "## Summary\n\nLore told to Person.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] Captain-context\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-024",
+      "title": "[ONT-024] Add SAGA_STARTED_BY relationship",
+      "body": "## Summary\n\nSaga initiated by Captain.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 2`\n\n## Acceptance Criteria\n\n- [ ] Add to RelationType\n- [ ] First chapter only\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "ONT",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "ONT-025",
+      "title": "[ONT-025] Add database setup migration for personal life entities",
+      "body": "## Summary\n\nCreate constraints, indexes, and vector indexes for new entity types.\n\n## Spec Reference\n\n`specs/architecture/ONTOLOGY.md Section 4`\n\n## Acceptance Criteria\n\n- [ ] Create uniqueness constraints\n- [ ] Create property existence constraints\n- [ ] Create full-text indexes\n- [ ] Create temporal indexes\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/ontology",
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "ONT",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-001",
+      "title": "[MEM-001] Implement macro zoom level search",
+      "body": "## Summary\n\nSearch at Community/Island level.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Query Community nodes\n- [ ] Return summaries\n- [ ] Aggregate results\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-002",
+      "title": "[MEM-002] Implement meso zoom level search",
+      "body": "## Summary\n\nSearch at Project/Note level.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Query Project and Note nodes\n- [ ] Balance detail/overview\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-003",
+      "title": "[MEM-003] Implement micro zoom level search",
+      "body": "## Summary\n\nSearch at Entity level.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Default search behavior\n- [ ] Return individual entities\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-004",
+      "title": "[MEM-004] Implement auto zoom detection (AI-first)",
+      "body": "## Summary\n\nDetect zoom from query semantically.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] No keyword matching\n- [ ] Use LLM understanding\n- [ ] Return zoom level\n\n## AI-First Requirement\n\n**This feature MUST use pure LLM intelligence.**\n- No keyword matching\n- No regex patterns\n- Use Claude tool_use or semantic understanding\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M",
+        "ai-first"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": true,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-005",
+      "title": "[MEM-005] Wire deduplication module",
+      "body": "## Summary\n\nIntegrate dedup into active workflow.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Import in Archivist\n- [ ] Call during archival\n- [ ] Log duplicates found\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-006",
+      "title": "[MEM-006] Implement orphan message cleanup",
+      "body": "## Summary\n\nFind and remove orphan messages.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Query unlinked Messages\n- [ ] Remove in scheduled job\n- [ ] Log removals\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-007",
+      "title": "[MEM-007] Implement entity merge utility",
+      "body": "## Summary\n\nMerge duplicate entities.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Take source and target UUIDs\n- [ ] Transfer relationships\n- [ ] Delete source\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-008",
+      "title": "[MEM-008] Add temporal spine queries",
+      "body": "## Summary\n\nQuery events by Day.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Find entities by date\n- [ ] Support date ranges\n- [ ] Link through OCCURRED_ON\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-009",
+      "title": "[MEM-009] Implement relationship weight decay",
+      "body": "## Summary\n\nDecay unused relationship weights.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Track last_accessed\n- [ ] Decay over time\n- [ ] Prune when too low\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-010",
+      "title": "[MEM-010] Add context window statistics",
+      "body": "## Summary\n\nTrack context usage.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Count tokens per context\n- [ ] Track compression ratio\n- [ ] Log overflow events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-011",
+      "title": "[MEM-011] Implement semantic caching",
+      "body": "## Summary\n\nCache similar queries.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Hash query embeddings\n- [ ] Store results\n- [ ] TTL expiration\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-012",
+      "title": "[MEM-012] Add graph statistics endpoint",
+      "body": "## Summary\n\nAPI for graph metrics.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Node counts by type\n- [ ] Relationship counts\n- [ ] Total graph size\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-013",
+      "title": "[MEM-013] Implement context relevance scoring",
+      "body": "## Summary\n\nScore context items by relevance.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Compute relevance scores\n- [ ] Sort by relevance\n- [ ] Truncate lowest\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-014",
+      "title": "[MEM-014] Add thread summary caching",
+      "body": "## Summary\n\nCache thread summaries.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Store summary on creation\n- [ ] Invalidate on new message\n- [ ] Return cached summary\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-015",
+      "title": "[MEM-015] Implement relationship traversal optimization",
+      "body": "## Summary\n\nOptimize common traversals.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Add traversal hints\n- [ ] Use relationship indexes\n- [ ] Benchmark improvements\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-016",
+      "title": "[MEM-016] Add memory health monitoring",
+      "body": "## Summary\n\nTrack memory system health.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Connection status\n- [ ] Query latencies\n- [ ] Error rates\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-017",
+      "title": "[MEM-017] Implement backup snapshot",
+      "body": "## Summary\n\nCreate graph backup.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Export to JSON\n- [ ] Include all nodes/rels\n- [ ] Store with timestamp\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-018",
+      "title": "[MEM-018] Add restore from backup",
+      "body": "## Summary\n\nRestore graph from backup.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Import from JSON\n- [ ] Clear existing data option\n- [ ] Validate consistency\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-019",
+      "title": "[MEM-019] Implement query timeout handling",
+      "body": "## Summary\n\nHandle long-running queries.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Set query timeout\n- [ ] Return partial results\n- [ ] Log timeout events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MEM-020",
+      "title": "[MEM-020] Add memory unit tests",
+      "body": "## Summary\n\nTest memory operations.\n\n## Spec Reference\n\n`specs/architecture/MEMORY.md`\n\n## Acceptance Criteria\n\n- [ ] Test search\n- [ ] Test ingestion\n- [ ] Test deduplication\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/memory",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MEM",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-001",
+      "title": "[MCP-001] Implement email reply-to-thread",
+      "body": "## Summary\n\nReply to existing email threads.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Get thread ID from email\n- [ ] Set In-Reply-To header\n- [ ] Maintain thread context\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-002",
+      "title": "[MCP-002] Implement email attachment handling",
+      "body": "## Summary\n\nSupport email attachments.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Read attachments from email\n- [ ] Save to local storage\n- [ ] Include in ingestion\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-003",
+      "title": "[MCP-003] Implement calendar event update",
+      "body": "## Summary\n\nUpdate existing events.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Get event by ID\n- [ ] Update properties\n- [ ] Handle conflicts\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-004",
+      "title": "[MCP-004] Implement calendar event delete",
+      "body": "## Summary\n\nDelete calendar events.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Get event by ID\n- [ ] Confirm deletion\n- [ ] Handle recurring\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-005",
+      "title": "[MCP-005] Implement recurring events support",
+      "body": "## Summary\n\nCreate and manage recurring events.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Parse recurrence rules\n- [ ] Create RRULE\n- [ ] Handle exceptions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-006",
+      "title": "[MCP-006] Implement attendee management",
+      "body": "## Summary\n\nAdd/remove event attendees.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Add attendees method\n- [ ] Remove attendees method\n- [ ] Send invitations\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-007",
+      "title": "[MCP-007] Wire filesystem MCP server",
+      "body": "## Summary\n\nEnable filesystem operations.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Start filesystem server\n- [ ] Configure allowed paths\n- [ ] Test file operations\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-008",
+      "title": "[MCP-008] Implement OAuth refresh handling",
+      "body": "## Summary\n\nAuto-refresh expired tokens.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Detect expired token\n- [ ] Refresh automatically\n- [ ] Retry failed request\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-009",
+      "title": "[MCP-009] Implement MCP rate limiting",
+      "body": "## Summary\n\nPrevent API abuse.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Track API calls\n- [ ] Enforce rate limits\n- [ ] Queue excess requests\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-010",
+      "title": "[MCP-010] Add email search with pagination",
+      "body": "## Summary\n\nSupport large result sets.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Implement pagination\n- [ ] Return page tokens\n- [ ] Handle large mailboxes\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-011",
+      "title": "[MCP-011] Implement email label management",
+      "body": "## Summary\n\nAdd/remove Gmail labels.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Add label method\n- [ ] Remove label method\n- [ ] Create custom labels\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-012",
+      "title": "[MCP-012] Add calendar free slot finder",
+      "body": "## Summary\n\nFind available meeting times.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Query busy times\n- [ ] Calculate free slots\n- [ ] Return suggestions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-013",
+      "title": "[MCP-013] Implement email draft management",
+      "body": "## Summary\n\nSave and edit drafts.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Create draft\n- [ ] Update draft\n- [ ] Send draft\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-014",
+      "title": "[MCP-014] Add calendar event search",
+      "body": "## Summary\n\nSearch events by query.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Search by title\n- [ ] Search by date range\n- [ ] Return matching events\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-015",
+      "title": "[MCP-015] Implement email thread summarization",
+      "body": "## Summary\n\nSummarize email threads.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Fetch thread messages\n- [ ] Generate summary\n- [ ] Return key points\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-016",
+      "title": "[MCP-016] Add shared calendar support",
+      "body": "## Summary\n\nSupport shared calendars.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] List shared calendars\n- [ ] Create events on shared\n- [ ] Respect permissions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-017",
+      "title": "[MCP-017] Implement contact integration",
+      "body": "## Summary\n\nSync with Google Contacts.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Fetch contacts\n- [ ] Create Person nodes\n- [ ] Update on sync\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-018",
+      "title": "[MCP-018] Add MCP connection pooling",
+      "body": "## Summary\n\nReuse MCP connections.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Pool connections\n- [ ] Handle reconnection\n- [ ] Track pool health\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-019",
+      "title": "[MCP-019] Implement MCP error recovery",
+      "body": "## Summary\n\nHandle MCP failures gracefully.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Detect failures\n- [ ] Retry with backoff\n- [ ] Notify on persistent failure\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "MCP-020",
+      "title": "[MCP-020] Add MCP integration tests",
+      "body": "## Summary\n\nTest MCP operations.\n\n## Spec Reference\n\n`specs/architecture/MCP.md`\n\n## Acceptance Criteria\n\n- [ ] Mock MCP servers\n- [ ] Test Gmail operations\n- [ ] Test Calendar operations\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/mcp",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "MCP",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-001",
+      "title": "[TEST-001] Fix test suite import errors",
+      "body": "## Summary\n\nTests fail on import due to missing deps.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Fix pydantic import\n- [ ] Fix graphiti import\n- [ ] All tests collect successfully\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P0-critical",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P0",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-002",
+      "title": "[TEST-002] Configure pytest-asyncio properly",
+      "body": "## Summary\n\nAsync tests not running correctly.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Set asyncio_mode=auto\n- [ ] Fix event loop warnings\n- [ ] Async fixtures work\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-003",
+      "title": "[TEST-003] Create agent fixtures",
+      "body": "## Summary\n\nShared fixtures for agent tests.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Mock Orchestrator\n- [ ] Mock Ingestor\n- [ ] Mock Researcher\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-004",
+      "title": "[TEST-004] Create mock Graphiti client",
+      "body": "## Summary\n\nMock for testing ingestion.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Implement mock search\n- [ ] Implement mock add_episode\n- [ ] Return test data\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-005",
+      "title": "[TEST-005] Create mock MCP servers",
+      "body": "## Summary\n\nMock Gmail and Calendar.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Mock gmail_search\n- [ ] Mock calendar_create\n- [ ] Configurable responses\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-006",
+      "title": "[TEST-006] Create mock Neo4j client",
+      "body": "## Summary\n\nMock for testing graph ops.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Mock execute_query\n- [ ] Return test results\n- [ ] Track query calls\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-007",
+      "title": "[TEST-007] Add test coverage configuration",
+      "body": "## Summary\n\nEnable coverage reporting.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Configure pytest-cov\n- [ ] Set coverage thresholds\n- [ ] Exclude test files\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-008",
+      "title": "[TEST-008] Create thread manager fixtures",
+      "body": "## Summary\n\nTest fixtures for threads.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Create test threads\n- [ ] Add test messages\n- [ ] Cleanup after tests\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-009",
+      "title": "[TEST-009] Create channel test fixtures",
+      "body": "## Summary\n\nTest fixtures for channels.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Mock CLI input\n- [ ] Mock Telegram update\n- [ ] Standardize responses\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-010",
+      "title": "[TEST-010] Add CI test runner configuration",
+      "body": "## Summary\n\nConfigure tests for CI.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Parallel test execution\n- [ ] Test result artifacts\n- [ ] Failure notifications\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-011",
+      "title": "[TEST-011] E2E: New Contact golden scenario",
+      "body": "## Summary\n\nTest contact ingestion.\n\n## Spec Reference\n\n`specs/quality/TESTING.md Section 10.2`\n\n## Acceptance Criteria\n\n- [ ] Input contact info\n- [ ] Verify Person created\n- [ ] Verify Org created\n- [ ] Verify WORKS_AT\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-012",
+      "title": "[TEST-012] E2E: Contextual Retrieval golden scenario",
+      "body": "## Summary\n\nTest memory search.\n\n## Spec Reference\n\n`specs/quality/TESTING.md Section 10.2`\n\n## Acceptance Criteria\n\n- [ ] Ask about previous topic\n- [ ] Verify thread found\n- [ ] Verify summary generated\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-013",
+      "title": "[TEST-013] E2E: Blocked Task golden scenario",
+      "body": "## Summary\n\nTest task dependencies.\n\n## Spec Reference\n\n`specs/quality/TESTING.md Section 10.2`\n\n## Acceptance Criteria\n\n- [ ] Create blocked task\n- [ ] Verify BLOCKS relationship\n- [ ] Query blocked tasks\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-014",
+      "title": "[TEST-014] E2E: Temporal Time-Travel golden scenario",
+      "body": "## Summary\n\nTest historical queries.\n\n## Spec Reference\n\n`specs/quality/TESTING.md Section 10.2`\n\n## Acceptance Criteria\n\n- [ ] Change employer\n- [ ] Query historical employer\n- [ ] Return old employer\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-015",
+      "title": "[TEST-015] E2E: Multi-Channel Threading golden scenario",
+      "body": "## Summary\n\nTest channel isolation.\n\n## Spec Reference\n\n`specs/quality/TESTING.md Section 10.2`\n\n## Acceptance Criteria\n\n- [ ] CLI conversation\n- [ ] Telegram conversation\n- [ ] Verify no context bleed\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-016",
+      "title": "[TEST-016] Unit: Orchestrator intent classification",
+      "body": "## Summary\n\nTest intent detection.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test SEARCH intent\n- [ ] Test ACTION intent\n- [ ] Test INGESTION intent\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-017",
+      "title": "[TEST-017] Unit: Ingestor cleaning",
+      "body": "## Summary\n\nTest input cleaning.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test role prefix removal\n- [ ] Test roleplay marker removal\n- [ ] Test system mention removal\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-018",
+      "title": "[TEST-018] Unit: Researcher hybrid search",
+      "body": "## Summary\n\nTest search fusion.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test vector search\n- [ ] Test entity search\n- [ ] Test result fusion\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-019",
+      "title": "[TEST-019] Unit: Executor email handlers",
+      "body": "## Summary\n\nTest email operations.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test search builder\n- [ ] Test composer\n- [ ] Test formatter\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-020",
+      "title": "[TEST-020] Unit: Executor calendar handlers",
+      "body": "## Summary\n\nTest calendar operations.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test time parser\n- [ ] Test conflict checker\n- [ ] Test formatter\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-021",
+      "title": "[TEST-021] Unit: Archivist summarization",
+      "body": "## Summary\n\nTest thread summarization.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test summary generation\n- [ ] Test Note creation\n- [ ] Test pruning\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-022",
+      "title": "[TEST-022] Unit: Scribe journal generation",
+      "body": "## Summary\n\nTest journal creation.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test analytics gathering\n- [ ] Test journal creation\n- [ ] Test Day linking\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-023",
+      "title": "[TEST-023] Unit: Thread manager operations",
+      "body": "## Summary\n\nTest thread management.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test create thread\n- [ ] Test add message\n- [ ] Test get context\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-024",
+      "title": "[TEST-024] Unit: Deduplication detection",
+      "body": "## Summary\n\nTest duplicate finding.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test similarity calculation\n- [ ] Test duplicate detection\n- [ ] Test merge suggestions\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-025",
+      "title": "[TEST-025] Unit: Skills loader",
+      "body": "## Summary\n\nTest skill loading.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Test YAML parsing\n- [ ] Test skill discovery\n- [ ] Test validation\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-026",
+      "title": "[TEST-026] Integration: Orchestrator to Ingestor",
+      "body": "## Summary\n\nTest fire-and-forget.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Send ingestion request\n- [ ] Verify Graphiti called\n- [ ] Verify no blocking\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-027",
+      "title": "[TEST-027] Integration: Orchestrator to Researcher",
+      "body": "## Summary\n\nTest dispatch-and-wait.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Send search request\n- [ ] Verify results returned\n- [ ] Test timeout handling\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-028",
+      "title": "[TEST-028] Integration: Orchestrator to Executor",
+      "body": "## Summary\n\nTest action dispatch.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Send action request\n- [ ] Verify MCP called\n- [ ] Verify result synthesis\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-029",
+      "title": "[TEST-029] Integration: Archivist to Thread",
+      "body": "## Summary\n\nTest archival flow.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Mark thread archiving\n- [ ] Run archival\n- [ ] Verify summary created\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-030",
+      "title": "[TEST-030] Integration: Scribe to Day nodes",
+      "body": "## Summary\n\nTest journal linking.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Generate journal\n- [ ] Verify Day exists\n- [ ] Verify OCCURRED_ON\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-031",
+      "title": "[TEST-031] Integration: CLI to Orchestrator",
+      "body": "## Summary\n\nTest CLI message flow.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Send CLI message\n- [ ] Verify Orchestrator receives\n- [ ] Verify response returned\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-032",
+      "title": "[TEST-032] Integration: Memory to Graph",
+      "body": "## Summary\n\nTest Neo4j operations.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Write to graph\n- [ ] Read from graph\n- [ ] Verify consistency\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-033",
+      "title": "[TEST-033] Integration: Skills to Executor",
+      "body": "## Summary\n\nTest skill execution.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Parse skill payload\n- [ ] Route to Executor\n- [ ] Execute action\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-034",
+      "title": "[TEST-034] Integration: Context to Response",
+      "body": "## Summary\n\nTest context injection.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] Build enriched context\n- [ ] Generate response\n- [ ] Verify context used\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "TEST-035",
+      "title": "[TEST-035] Integration: Full v2 workflow",
+      "body": "## Summary\n\nTest Think-Dispatch-Synthesize.\n\n## Spec Reference\n\n`specs/quality/TESTING.md`\n\n## Acceptance Criteria\n\n- [ ] User input\n- [ ] Planning\n- [ ] Dispatch\n- [ ] Synthesis\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/testing",
+        "type/test",
+        "priority/P1-high",
+        "complexity/L"
+      ],
+      "category": "TEST",
+      "priority": "P1",
+      "complexity": "L",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-001",
+      "title": "[INFRA-001] Create .github/workflows directory",
+      "body": "## Summary\n\nInitialize GitHub Actions.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Create directory\n- [ ] Add .gitkeep if empty\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P0-critical",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P0",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-002",
+      "title": "[INFRA-002] Create ci.yml workflow",
+      "body": "## Summary\n\nMain CI pipeline.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Trigger on push/PR\n- [ ] Run lint, type-check, test\n- [ ] Report status\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P0-critical",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P0",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-003",
+      "title": "[INFRA-003] Create lint job",
+      "body": "## Summary\n\nRun ruff linting.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Install ruff\n- [ ] Run ruff check\n- [ ] Fail on errors\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-004",
+      "title": "[INFRA-004] Create type-check job",
+      "body": "## Summary\n\nRun mypy.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Install mypy\n- [ ] Run mypy check\n- [ ] Report type errors\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-005",
+      "title": "[INFRA-005] Create test job",
+      "body": "## Summary\n\nRun pytest.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Install test deps\n- [ ] Run pytest\n- [ ] Upload results\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-006",
+      "title": "[INFRA-006] Create coverage job",
+      "body": "## Summary\n\nTrack code coverage.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Run pytest-cov\n- [ ] Upload to codecov\n- [ ] Enforce minimum\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-007",
+      "title": "[INFRA-007] Create dependency check job",
+      "body": "## Summary\n\nAudit dependencies.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Run pip audit\n- [ ] Check for vulnerabilities\n- [ ] Report findings\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-008",
+      "title": "[INFRA-008] Add dependabot.yml",
+      "body": "## Summary\n\nAuto-update dependencies.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Configure for pip\n- [ ] Weekly schedule\n- [ ] Auto-merge patches\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-009",
+      "title": "[INFRA-009] Create release workflow",
+      "body": "## Summary\n\nAutomate releases.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Trigger on tag\n- [ ] Build package\n- [ ] Publish to PyPI\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-010",
+      "title": "[INFRA-010] Add branch protection rules",
+      "body": "## Summary\n\nProtect main branch.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Require PR reviews\n- [ ] Require CI pass\n- [ ] No force push\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-011",
+      "title": "[INFRA-011] Create Docker build workflow",
+      "body": "## Summary\n\nBuild and push images.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Build Docker image\n- [ ] Push to registry\n- [ ] Tag with version\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-012",
+      "title": "[INFRA-012] Add PR template",
+      "body": "## Summary\n\nStandard PR description.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Summary section\n- [ ] Testing checklist\n- [ ] Related issues\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "INFRA",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-013",
+      "title": "[INFRA-013] Optimize Dockerfile for production",
+      "body": "## Summary\n\nMulti-stage build.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Add builder stage\n- [ ] Minimize final image\n- [ ] Remove dev deps\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-014",
+      "title": "[INFRA-014] Add health check to container",
+      "body": "## Summary\n\nDocker health check.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Add HEALTHCHECK instruction\n- [ ] Check API endpoint\n- [ ] Set intervals\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-015",
+      "title": "[INFRA-015] Create backup script",
+      "body": "## Summary\n\nBackup Neo4j data.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Export graph data\n- [ ] Compress backup\n- [ ] Rotate old backups\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-016",
+      "title": "[INFRA-016] Create restore script",
+      "body": "## Summary\n\nRestore from backup.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Import graph data\n- [ ] Verify integrity\n- [ ] Handle conflicts\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-017",
+      "title": "[INFRA-017] Add docker-compose.prod.yml",
+      "body": "## Summary\n\nProduction compose file.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Remove dev volumes\n- [ ] Set production env\n- [ ] Configure resources\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-018",
+      "title": "[INFRA-018] Implement log rotation",
+      "body": "## Summary\n\nRotate application logs.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Configure logrotate\n- [ ] Set retention period\n- [ ] Compress old logs\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-019",
+      "title": "[INFRA-019] Add container resource limits",
+      "body": "## Summary\n\nSet memory/CPU limits.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Set memory limit\n- [ ] Set CPU limit\n- [ ] Handle OOM\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-020",
+      "title": "[INFRA-020] Create development docker-compose",
+      "body": "## Summary\n\nDev-friendly compose.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Mount source code\n- [ ] Hot reload\n- [ ] Debug ports\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-021",
+      "title": "[INFRA-021] Add Prometheus metrics export",
+      "body": "## Summary\n\nExport application metrics.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Add prometheus-client\n- [ ] Export agent metrics\n- [ ] Export API metrics\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-022",
+      "title": "[INFRA-022] Add structured logging",
+      "body": "## Summary\n\nJSON log format.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Configure JSON formatter\n- [ ] Include trace IDs\n- [ ] Include timestamps\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-023",
+      "title": "[INFRA-023] Implement distributed tracing",
+      "body": "## Summary\n\nTrace requests across agents.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Generate trace IDs\n- [ ] Propagate through calls\n- [ ] Export to collector\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-024",
+      "title": "[INFRA-024] Create Grafana dashboard",
+      "body": "## Summary\n\nVisualize metrics.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] Agent performance panel\n- [ ] API latency panel\n- [ ] Error rate panel\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "INFRA-025",
+      "title": "[INFRA-025] Add alerting rules",
+      "body": "## Summary\n\nAlert on issues.\n\n## Spec Reference\n\n`specs/infrastructure/DEPLOYMENT.md`\n\n## Acceptance Criteria\n\n- [ ] High error rate alert\n- [ ] High latency alert\n- [ ] Connection failure alert\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/infra",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "INFRA",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-001",
+      "title": "[DOC-001] Create QUICKSTART.md",
+      "body": "## Summary\n\nQuick setup guide.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Prerequisites\n- [ ] Installation steps\n- [ ] First run\n- [ ] Troubleshooting\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-002",
+      "title": "[DOC-002] Create Telegram setup guide",
+      "body": "## Summary\n\nTelegram bot setup.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Create bot via BotFather\n- [ ] Get token\n- [ ] Configure env\n- [ ] Test connection\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-003",
+      "title": "[DOC-003] Create API documentation",
+      "body": "## Summary\n\nDocument REST/WebSocket API.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Endpoint list\n- [ ] Request/response formats\n- [ ] Authentication\n- [ ] Examples\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-004",
+      "title": "[DOC-004] Create troubleshooting guide",
+      "body": "## Summary\n\nCommon issues and fixes.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Connection issues\n- [ ] Authentication errors\n- [ ] Performance issues\n- [ ] FAQ\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-005",
+      "title": "[DOC-005] Update architecture diagrams",
+      "body": "## Summary\n\nVisual documentation.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] System overview\n- [ ] Agent communication\n- [ ] Data flow\n- [ ] Deployment\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P1-high",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P1",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-006",
+      "title": "[DOC-006] Create contributor guide",
+      "body": "## Summary\n\nHow to contribute.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Development setup\n- [ ] Code style\n- [ ] PR process\n- [ ] Testing guidelines\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-007",
+      "title": "[DOC-007] Document skill creation",
+      "body": "## Summary\n\nHow to create new skills.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Skill structure\n- [ ] YAML format\n- [ ] Integration\n- [ ] Examples\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-008",
+      "title": "[DOC-008] Create Cypher query cookbook",
+      "body": "## Summary\n\nCommon queries.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Search queries\n- [ ] Traversal queries\n- [ ] Temporal queries\n- [ ] Analytics\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-009",
+      "title": "[DOC-009] Document configuration options",
+      "body": "## Summary\n\nAll config options.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Agent configs\n- [ ] Channel configs\n- [ ] MCP configs\n- [ ] Examples\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-010",
+      "title": "[DOC-010] Create deployment guide",
+      "body": "## Summary\n\nProduction deployment.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Docker deployment\n- [ ] Environment setup\n- [ ] Scaling\n- [ ] Monitoring\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-011",
+      "title": "[DOC-011] Document personality customization",
+      "body": "## Summary\n\nCustomize Klabautermann voice.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Personality config\n- [ ] Lexicon customization\n- [ ] Tidbit probability\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-012",
+      "title": "[DOC-012] Create security guide",
+      "body": "## Summary\n\nSecurity best practices.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Credential management\n- [ ] OAuth setup\n- [ ] Prompt injection prevention\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-013",
+      "title": "[DOC-013] Document testing approach",
+      "body": "## Summary\n\nHow to test.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Unit tests\n- [ ] Integration tests\n- [ ] E2E tests\n- [ ] Mocking\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-014",
+      "title": "[DOC-014] Create changelog",
+      "body": "## Summary\n\nTrack changes.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Initial version\n- [ ] Version format\n- [ ] Breaking changes\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "DOC-015",
+      "title": "[DOC-015] Update README with current status",
+      "body": "## Summary\n\nAccurate README.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Current features\n- [ ] Installation\n- [ ] Usage\n- [ ] Contributing\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/docs",
+        "type/chore",
+        "priority/P2-medium",
+        "complexity/S"
+      ],
+      "category": "DOC",
+      "priority": "P2",
+      "complexity": "S",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-001",
+      "title": "[SKILL-001] Create schedule-meeting skill",
+      "body": "## Summary\n\nSchedule calendar meetings.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] SKILL.md definition\n- [ ] Payload schema\n- [ ] Executor integration\n- [ ] Tests\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-002",
+      "title": "[SKILL-002] Create search-contacts skill",
+      "body": "## Summary\n\nSearch for people.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] SKILL.md definition\n- [ ] Researcher integration\n- [ ] Return formatted results\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-003",
+      "title": "[SKILL-003] Create create-note skill",
+      "body": "## Summary\n\nCreate knowledge notes.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] SKILL.md definition\n- [ ] Ingestor integration\n- [ ] Link to entities\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-004",
+      "title": "[SKILL-004] Create add-task skill",
+      "body": "## Summary\n\nAdd tasks to graph.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] SKILL.md definition\n- [ ] Task node creation\n- [ ] Support dependencies\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P1-high",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P1",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-005",
+      "title": "[SKILL-005] Create summarize-thread skill",
+      "body": "## Summary\n\nSummarize conversations.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] SKILL.md definition\n- [ ] Archivist integration\n- [ ] Return summary\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-006",
+      "title": "[SKILL-006] Implement natural language skill discovery",
+      "body": "## Summary\n\nFind skills from description.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] No pattern matching\n- [ ] LLM understanding\n- [ ] Return best match\n\n## AI-First Requirement\n\n**This feature MUST use pure LLM intelligence.**\n- No keyword matching\n- No regex patterns\n- Use Claude tool_use or semantic understanding\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M",
+        "ai-first"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": true,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-007",
+      "title": "[SKILL-007] Implement skill chaining",
+      "body": "## Summary\n\nExecute multiple skills.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Chain definition\n- [ ] Sequential execution\n- [ ] Pass context between\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-008",
+      "title": "[SKILL-008] Add skill validation",
+      "body": "## Summary\n\nValidate skill definitions.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Schema validation\n- [ ] Dependency checking\n- [ ] Error messages\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-009",
+      "title": "[SKILL-009] Create skill documentation generator",
+      "body": "## Summary\n\nAuto-generate skill docs.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Parse SKILL.md\n- [ ] Generate usage docs\n- [ ] Include examples\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    },
+    {
+      "id": "SKILL-010",
+      "title": "[SKILL-010] Add skill unit tests",
+      "body": "## Summary\n\nTest skill framework.\n\n## Spec Reference\n\n`specs/`\n\n## Acceptance Criteria\n\n- [ ] Test loading\n- [ ] Test execution\n- [ ] Test chaining\n\n---\n*Generated from gap analysis*",
+      "labels": [
+        "area/skills",
+        "type/feature",
+        "priority/P2-medium",
+        "complexity/M"
+      ],
+      "category": "SKILL",
+      "priority": "P2",
+      "complexity": "M",
+      "ai_first": false,
+      "dependencies": []
+    }
+  ]
+}

@@ -155,6 +155,47 @@ def register_scheduled_jobs(
         )
 
     # ========================================================================
+    # Syncer: Import emails and calendar events
+    # ========================================================================
+    syncer_config = config.get("syncer", {})
+    syncer_enabled = syncer_config.get("enabled", True)
+    syncer_interval = syncer_config.get("interval_minutes", 30)
+
+    if syncer_enabled and "syncer" in agents:
+        syncer = agents["syncer"]
+
+        # Wrap the job to pass trace_id
+        async def syncer_job() -> None:
+            job_trace_id = str(uuid.uuid4())
+            logger.info(
+                "[BEACON] Scheduled Syncer import triggered",
+                extra={"trace_id": job_trace_id, "agent_name": "syncer"},
+            )
+            await syncer.process_sync_queue(trace_id=job_trace_id)  # type: ignore[attr-defined]
+
+        scheduler.add_job(
+            syncer_job,
+            trigger=IntervalTrigger(minutes=syncer_interval),
+            id="syncer_import",
+            name="Email/Calendar Sync",
+            replace_existing=True,
+        )
+        logger.info(
+            f"[CHART] Registered Syncer import job (every {syncer_interval} min)",
+            extra={"trace_id": trace_id},
+        )
+    elif not syncer_enabled:
+        logger.info(
+            "[CHART] Syncer import job disabled by config",
+            extra={"trace_id": trace_id},
+        )
+    else:
+        logger.warning(
+            "[SWELL] Syncer agent not available, skipping scheduled job",
+            extra={"trace_id": trace_id},
+        )
+
+    # ========================================================================
     # Scribe: Generate daily reflection
     # ========================================================================
     scribe_config = config.get("scribe", {})

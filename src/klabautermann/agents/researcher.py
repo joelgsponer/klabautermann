@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.agents.researcher_models import (
     ConfidenceLevel,
+    EntityReference,
     EvidenceItem,
     GraphIntelligenceReport,
     RawSearchResult,
@@ -793,6 +794,76 @@ class Researcher(BaseAgent):
 
         return float(base_score * boost)
 
+    def _extract_entity_refs(
+        self,
+        results: list[RawSearchResult],
+        key_entities: list[str],
+    ) -> list[EntityReference]:
+        """
+        Extract EntityReference objects from search results.
+
+        Prioritizes results from ENTITY_FULLTEXT searches where source_id
+        is definitely an entity UUID. Falls back to STRUCTURAL results.
+
+        Args:
+            results: Aggregated search results.
+            key_entities: Entity names from synthesis (for matching).
+
+        Returns:
+            List of EntityReference objects with resolved UUIDs.
+        """
+        refs: list[EntityReference] = []
+        seen_uuids: set[str] = set()
+        key_entities_lower = {e.lower() for e in key_entities}
+
+        for result in results:
+            if not result.source_id or result.source_id in seen_uuids:
+                continue
+
+            # ENTITY_FULLTEXT results have entity UUIDs
+            if result.source_technique == SearchTechnique.ENTITY_FULLTEXT:
+                # Extract entity name from content (format: "Name: content")
+                entity_name = result.content.split(":")[0].strip() if ":" in result.content else ""
+
+                refs.append(
+                    EntityReference(
+                        uuid=result.source_id,
+                        name=entity_name or "Entity",
+                        entity_type="Entity",  # Could be enhanced with label detection
+                        confidence=result.vector_score or 0.5,
+                        source_technique=result.source_technique.value,
+                    )
+                )
+                seen_uuids.add(result.source_id)
+
+            # STRUCTURAL results may have entity UUIDs (Person, Organization nodes)
+            elif result.source_technique == SearchTechnique.STRUCTURAL:
+                # Extract name if it matches a key entity
+                content_lower = result.content.lower()
+                matched_name = None
+                for entity in key_entities_lower:
+                    if entity in content_lower:
+                        # Find original case name
+                        for orig in key_entities:
+                            if orig.lower() == entity:
+                                matched_name = orig
+                                break
+                        break
+
+                if matched_name:
+                    refs.append(
+                        EntityReference(
+                            uuid=result.source_id,
+                            name=matched_name,
+                            entity_type="Entity",
+                            confidence=0.7,  # Structural matches are typically reliable
+                            source_technique=result.source_technique.value,
+                        )
+                    )
+                    seen_uuids.add(result.source_id)
+
+        return refs
+
     # =========================================================================
     # Report Synthesis (Opus)
     # =========================================================================
@@ -853,6 +924,9 @@ class Researcher(BaseAgent):
             report.search_techniques_used = [SearchTechnique(t) for t in techniques_used]
             report.result_count = len(results)
 
+            # Extract entity references for message linking
+            report.key_entity_refs = self._extract_entity_refs(results, report.key_entities)
+
             return report
 
         except TimeoutError:
@@ -884,6 +958,9 @@ class Researcher(BaseAgent):
             f"- {r.content[:200]}" for r in results[:5]
         )
 
+        # Extract entity refs from ENTITY_FULLTEXT results (no key_entities to match)
+        entity_refs = self._extract_entity_refs(results, [])
+
         return GraphIntelligenceReport(
             query=query,
             direct_answer=direct_answer,
@@ -899,6 +976,7 @@ class Researcher(BaseAgent):
                 for r in results[:5]
             ],
             key_entities=[],
+            key_entity_refs=entity_refs,
             as_of_date=datetime.now(UTC).strftime("%Y-%m-%d"),
             search_techniques_used=[s.technique for s in plan.strategies],
             result_count=len(results),

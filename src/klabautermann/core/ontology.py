@@ -75,6 +75,16 @@ class TaskType(BaseModel):
     due_date: str | None = Field(description="When the task is due", default=None)
 
 
+class EmailType(BaseModel):
+    """An email message - correspondence from Gmail or other email sources."""
+
+    subject: str | None = Field(description="Email subject line", default=None)
+    thread_id: str | None = Field(
+        description="Email thread ID for grouping related messages", default=None
+    )
+    is_unread: bool = Field(description="Whether email is unread", default=False)
+
+
 # Entity types dict for Graphiti's add_episode()
 ENTITY_TYPES: dict[str, type[BaseModel]] = {
     "Person": PersonType,
@@ -83,6 +93,7 @@ ENTITY_TYPES: dict[str, type[BaseModel]] = {
     "Location": LocationType,
     "Event": EventType,
     "Task": TaskType,
+    "Email": EmailType,
 }
 
 
@@ -104,6 +115,8 @@ class NodeLabel(str, Enum):
     LOCATION = "Location"
     NOTE = "Note"
     RESOURCE = "Resource"
+    EMAIL = "Email"
+    CALENDAR_EVENT = "CalendarEvent"
 
     # Personal Life Entities
     HOBBY = "Hobby"
@@ -121,6 +134,7 @@ class NodeLabel(str, Enum):
     DAY = "Day"
     JOURNAL_ENTRY = "JournalEntry"
     TAG = "Tag"
+    SYNC_STATE = "SyncState"
 
 
 class RelationType(str, Enum):
@@ -154,6 +168,15 @@ class RelationType(str, Enum):
     # Event Context
     ATTENDED = "ATTENDED"
     ORGANIZED_BY = "ORGANIZED_BY"
+
+    # Email Context
+    SENT_BY = "SENT_BY"
+    SENT_TO = "SENT_TO"
+    PART_OF_EMAIL_THREAD = "PART_OF_EMAIL_THREAD"
+
+    # Calendar Context
+    ATTENDED_BY = "ATTENDED_BY"
+    HELD_AT_LOCATION = "HELD_AT_LOCATION"
 
     # Information Lineage
     VERSION_OF = "VERSION_OF"
@@ -269,6 +292,12 @@ CONSTRAINTS: list[str] = [
     "CREATE CONSTRAINT message_uuid IF NOT EXISTS FOR (m:Message) REQUIRE m.uuid IS UNIQUE",
     "CREATE CONSTRAINT day_date IF NOT EXISTS FOR (d:Day) REQUIRE d.date IS UNIQUE",
     "CREATE CONSTRAINT journal_uuid IF NOT EXISTS FOR (j:JournalEntry) REQUIRE j.uuid IS UNIQUE",
+    # Email/Calendar/Sync entity constraints
+    "CREATE CONSTRAINT email_uuid IF NOT EXISTS FOR (e:Email) REQUIRE e.uuid IS UNIQUE",
+    "CREATE CONSTRAINT email_external_id IF NOT EXISTS FOR (e:Email) REQUIRE e.external_id IS UNIQUE",
+    "CREATE CONSTRAINT calendarevent_uuid IF NOT EXISTS FOR (c:CalendarEvent) REQUIRE c.uuid IS UNIQUE",
+    "CREATE CONSTRAINT calendarevent_external_id IF NOT EXISTS FOR (c:CalendarEvent) REQUIRE c.external_id IS UNIQUE",
+    "CREATE CONSTRAINT syncstate_source IF NOT EXISTS FOR (s:SyncState) REQUIRE s.source IS UNIQUE",
     # Personal Life entity UUID constraints
     "CREATE CONSTRAINT hobby_uuid IF NOT EXISTS FOR (h:Hobby) REQUIRE h.uuid IS UNIQUE",
     "CREATE CONSTRAINT healthmetric_uuid IF NOT EXISTS FOR (h:HealthMetric) REQUIRE h.uuid IS UNIQUE",
@@ -312,6 +341,15 @@ INDEXES: list[str] = [
     "CREATE INDEX thread_status IF NOT EXISTS FOR (t:Thread) ON (t.status, t.last_message_at)",
     # Task status for task management
     "CREATE INDEX task_status IF NOT EXISTS FOR (t:Task) ON (t.status, t.due_date)",
+    # Email indexes for search and deduplication
+    "CREATE INDEX email_date IF NOT EXISTS FOR (e:Email) ON (e.date)",
+    "CREATE INDEX email_sender IF NOT EXISTS FOR (e:Email) ON (e.sender)",
+    "CREATE INDEX email_thread IF NOT EXISTS FOR (e:Email) ON (e.thread_id)",
+    "CREATE FULLTEXT INDEX email_search IF NOT EXISTS FOR (e:Email) ON EACH [e.subject, e.snippet]",
+    # CalendarEvent indexes
+    "CREATE INDEX calendarevent_start IF NOT EXISTS FOR (c:CalendarEvent) ON (c.start_time)",
+    "CREATE INDEX calendarevent_end IF NOT EXISTS FOR (c:CalendarEvent) ON (c.end_time)",
+    "CREATE FULLTEXT INDEX calendarevent_search IF NOT EXISTS FOR (c:CalendarEvent) ON EACH [c.title, c.description]",
     # Spatial index for location queries
     "CREATE POINT INDEX location_coords IF NOT EXISTS FOR (l:Location) ON (l.coordinate)",
     # Personal Life indexes
@@ -363,6 +401,7 @@ __all__ = [
     "LocationType",
     "EventType",
     "TaskType",
+    "EmailType",
     # Enums
     "NodeLabel",
     "RelationType",

@@ -1,0 +1,23 @@
+# Syncer Agent Configuration
+#
+# The Syncer imports emails and calendar events from Google Workspace
+# into the knowledge graph for persistent memory of communications.
+#
+# Reference: specs/architecture/AGENTS.md
+
+name: syncer
+model:
+  primary: claude-3-5-haiku-20241022  # For any LLM formatting needs
+
+# Calendar sync settings
+calendar:
+  enabled: true
+  lookback_days: 7        # How far back to sync on first run
+  lookahead_days: 14      # How far ahead to sync
+
+# Email sync settings
+email:
+  enabled: true
+  lookback_hours: 24      # How far back to sync emails
+  max_per_sync: 50        # Max emails per sync cycle
+  query: "is:inbox"       # Gmail query filter (can use "is:unread", etc.)

@@ -121,6 +121,24 @@ class RawSearchResult(BaseModel):
     temporal_context: TemporalContext | None = None
 
 
+class EntityReference(BaseModel):
+    """
+    Entity reference with resolved UUID for message linking.
+
+    Used to create MENTIONED_IN relationships between entities and messages.
+    """
+
+    uuid: str = Field(description="Entity UUID from knowledge graph")
+    name: str = Field(description="Entity name for display")
+    entity_type: str = Field(
+        default="Entity", description="Node label (Person, Organization, etc.)"
+    )
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Search confidence score")
+    source_technique: str = Field(
+        default="", description="Which search technique found this entity"
+    )
+
+
 # ===========================================================================
 # GRAPH INTELLIGENCE REPORT MODELS
 # ===========================================================================
@@ -170,6 +188,10 @@ class GraphIntelligenceReport(BaseModel):
     # Relationship context
     relationships: list[RelationshipDetail] = Field(default_factory=list)
     key_entities: list[str] = Field(default_factory=list)
+    key_entity_refs: list[EntityReference] = Field(
+        default_factory=list,
+        description="Entity references with UUIDs for message linking",
+    )
 
     # Temporal context
     as_of_date: str = Field(default="")
@@ -224,6 +246,7 @@ __all__ = [
     # Results
     "TemporalContext",
     "RawSearchResult",
+    "EntityReference",
     # Report
     "EvidenceItem",
     "RelationshipDetail",

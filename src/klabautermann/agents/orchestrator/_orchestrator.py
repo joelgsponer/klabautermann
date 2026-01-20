@@ -59,6 +59,7 @@ from klabautermann.memory.context_queries import (
     get_recent_summaries,
     get_relevant_islands,
 )
+from klabautermann.memory.message_linking import link_entities_to_message
 from klabautermann.skills.planner import SkillAwarePlanner
 
 
@@ -2296,7 +2297,15 @@ Analyze this message and return a JSON task plan.
 
             # 7. Apply personality and store
             response = await self._apply_personality(response, trace_id)
-            await self._store_response(thread_uuid, response, trace_id)
+            message_uuid = await self._store_response(thread_uuid, response, trace_id)
+
+            # 8. Fire-and-forget: Link entities from research to message
+            if message_uuid and results and self.neo4j_client:
+                self._track_background_task(
+                    self._link_message_entities(message_uuid, results, trace_id),
+                    trace_id=trace_id,
+                    task_name=f"entity-linking-{trace_id[:8]}",
+                )
 
             logger.info(
                 "[CHART] V2 workflow complete",
@@ -2725,27 +2734,111 @@ Analyze this message and return a JSON task plan.
                 merged[key] = value
         return merged
 
+    async def _link_message_entities(
+        self,
+        message_uuid: str,
+        results: dict[str, Any],
+        trace_id: str,
+    ) -> None:
+        """
+        Fire-and-forget: Link entities found by researcher to message.
+
+        Extracts key_entity_refs from research results and creates
+        MENTIONED_IN relationships in the knowledge graph.
+
+        Args:
+            message_uuid: UUID of the message to link entities to.
+            results: Results dict from parallel execution (contains researcher report).
+            trace_id: Request trace ID for logging.
+        """
+        if not self.neo4j_client:
+            logger.debug(
+                "[WHISPER] Neo4j client unavailable, skipping entity linking",
+                extra={"trace_id": trace_id},
+            )
+            return
+
+        # Extract entity refs from researcher results
+        entity_refs = []
+        for agent_name, result in results.items():
+            if agent_name == "researcher" and isinstance(result, dict):
+                report = result.get("report")
+                if report and hasattr(report, "key_entity_refs"):
+                    entity_refs = report.key_entity_refs
+                    break
+                # Also check if report is a dict
+                elif isinstance(report, dict):
+                    refs_data = report.get("key_entity_refs", [])
+                    # Convert dicts to EntityReference objects
+                    from klabautermann.agents.researcher_models import EntityReference
+
+                    for ref_dict in refs_data:
+                        if isinstance(ref_dict, dict) and "uuid" in ref_dict:
+                            entity_refs.append(
+                                EntityReference(
+                                    uuid=ref_dict["uuid"],
+                                    name=ref_dict.get("name", "Entity"),
+                                    entity_type=ref_dict.get("entity_type", "Entity"),
+                                    confidence=ref_dict.get("confidence", 0.5),
+                                    source_technique=ref_dict.get("source_technique", ""),
+                                )
+                            )
+                    break
+
+        if not entity_refs:
+            logger.debug(
+                "[WHISPER] No entity refs to link to message",
+                extra={"trace_id": trace_id, "message_uuid": message_uuid},
+            )
+            return
+
+        try:
+            link_count = await link_entities_to_message(
+                neo4j=self.neo4j_client,
+                message_uuid=message_uuid,
+                entity_refs=entity_refs,
+                trace_id=trace_id,
+            )
+            logger.info(
+                f"[BEACON] Linked {link_count} entities to message",
+                extra={
+                    "trace_id": trace_id,
+                    "message_uuid": message_uuid,
+                    "link_count": link_count,
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Entity linking failed: {e}",
+                extra={"trace_id": trace_id, "message_uuid": message_uuid},
+            )
+
     async def _store_response(
         self,
         thread_uuid: str,
         response: str,
         trace_id: str,
-    ) -> None:
+    ) -> str | None:
         """
         Store the response in the thread.
+
+        Returns:
+            Message UUID if stored successfully, None otherwise.
         """
         if self.thread_manager:
             try:
-                await self.thread_manager.add_message(
+                message = await self.thread_manager.add_message(
                     thread_uuid=thread_uuid,
                     role="assistant",
                     content=response,
                     trace_id=trace_id,
                 )
+                return message.uuid
             except Exception as e:
                 logger.warning(
                     f"[SWELL] Failed to store response: {e}", extra={"trace_id": trace_id}
                 )
+        return None
 
 
 # ===========================================================================

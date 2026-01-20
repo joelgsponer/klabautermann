@@ -188,6 +188,45 @@ class ResourceNode(BaseNode):
     vector_embedding: list[float] | None = None
 
 
+class EmailNode(BaseNode):
+    """Email message stored in the knowledge graph."""
+
+    subject: str
+    sender: str  # Email address (may include name like "John Doe <john@example.com>")
+    recipient: str | None = None
+    date: float  # Unix timestamp
+    snippet: str | None = None  # Preview text
+    body: str | None = None
+    thread_id: str | None = None  # Gmail thread ID for grouping
+    external_id: str  # Gmail message ID (for deduplication)
+    is_unread: bool = False
+    source: str = "gmail"  # Source system
+
+
+class CalendarEventNode(BaseNode):
+    """Calendar event stored in the knowledge graph."""
+
+    title: str
+    start_time: float  # Unix timestamp
+    end_time: float  # Unix timestamp
+    location: str | None = None
+    description: str | None = None
+    external_id: str  # Google Calendar event ID (for deduplication)
+    source: str = "google_calendar"  # Source system
+    is_all_day: bool = False
+
+
+class SyncStateNode(BaseModel):
+    """Tracks sync state for external data sources."""
+
+    model_config = ConfigDict(extra="allow")
+
+    source: str  # "gmail" or "google_calendar"
+    last_sync_at: float  # Unix timestamp of last successful sync
+    last_item_id: str | None = None  # ID of last synced item
+    items_synced: int = 0  # Count of items synced in last run
+
+
 # ===========================================================================
 # System Nodes
 # ===========================================================================
@@ -979,6 +1018,10 @@ __all__ = [
     "RelationshipExtraction",
     "ResourceNode",
     "SearchResult",
+    # Email/Calendar/Sync nodes
+    "EmailNode",
+    "CalendarEventNode",
+    "SyncStateNode",
     "TaskNode",
     "TaskPlan",
     "TaskStatus",

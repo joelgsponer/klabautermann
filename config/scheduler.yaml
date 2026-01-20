@@ -17,6 +17,12 @@ scribe:
   hour: 0     # Midnight UTC
   minute: 0
 
+# Syncer Configuration
+# Imports emails and calendar events from Google Workspace
+syncer:
+  enabled: true
+  interval_minutes: 15  # Sync every 15 minutes
+
 # Scheduler Settings
 timezone: UTC  # All jobs run in UTC
 job_store: memory  # Options: 'memory' or 'sqlite'

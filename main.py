@@ -38,6 +38,7 @@ from klabautermann.agents.ingestor import Ingestor  # noqa: E402
 from klabautermann.agents.orchestrator import Orchestrator  # noqa: E402
 from klabautermann.agents.researcher import Researcher  # noqa: E402
 from klabautermann.agents.scribe import Scribe  # noqa: E402
+from klabautermann.agents.syncer import Syncer  # noqa: E402
 from klabautermann.channels.cli_driver import CLIDriver  # noqa: E402
 from klabautermann.config.manager import ConfigManager  # noqa: E402
 from klabautermann.config.quartermaster import Quartermaster  # noqa: E402
@@ -249,6 +250,23 @@ class Klabautermann:
             config=get_config_dict("scribe"),
             neo4j_client=self.neo4j,
         )
+
+        # Create Syncer - imports emails and calendar events from Google Workspace
+        if self.graphiti and self.google_bridge:
+            self.agents["syncer"] = Syncer(
+                name="syncer",
+                config=get_config_dict("syncer"),
+                google_bridge=self.google_bridge,
+                graphiti=self.graphiti,
+                neo4j=self.neo4j,
+            )
+        else:
+            missing = []
+            if not self.graphiti:
+                missing.append("Graphiti")
+            if not self.google_bridge:
+                missing.append("GoogleWorkspaceBridge")
+            logger.warning(f"[SWELL] Syncer not created - requires {' + '.join(missing)}")
 
         logger.info(f"[CHART] Created {len(self.agents)} agents")
 

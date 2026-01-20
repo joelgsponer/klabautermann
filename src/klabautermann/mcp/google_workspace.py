@@ -364,12 +364,16 @@ class GoogleWorkspaceBridge:
 
         def do_list() -> list[dict[str, Any]]:
             try:
+                # Format as RFC3339 for Google Calendar API
+                # Strip timezone info and use Z suffix for UTC
+                time_min = start.replace(tzinfo=None).isoformat() + "Z"
+                time_max = end.replace(tzinfo=None).isoformat() + "Z"
                 results = (
                     self._calendar_service.events()
                     .list(
                         calendarId="primary",
-                        timeMin=start.isoformat() + "Z",
-                        timeMax=end.isoformat() + "Z",
+                        timeMin=time_min,
+                        timeMax=time_max,
                         maxResults=max_results,
                         singleEvents=True,
                         orderBy="startTime",
