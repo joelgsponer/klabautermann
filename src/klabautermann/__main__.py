@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import os
 import signal
 import sys
@@ -29,6 +30,7 @@ from klabautermann.config.manager import ConfigManager
 from klabautermann.config.quartermaster import Quartermaster
 from klabautermann.core.exceptions import GraphConnectionError, StartupError
 from klabautermann.core.logger import logger, set_cli_log_level
+from klabautermann.core.shutdown import ShutdownManager
 from klabautermann.memory.graphiti_client import GraphitiClient
 from klabautermann.memory.neo4j_client import Neo4jClient
 
@@ -62,9 +64,16 @@ class Klabautermann:
         self.agents: dict[str, BaseAgent] = {}
         self.agent_tasks: list[asyncio.Task[Any]] = []
 
-        # Shutdown coordination
+        # Shutdown manager for graceful shutdown
+        self._shutdown_manager = ShutdownManager(
+            timeout_seconds=30.0,
+            drain_timeout_seconds=10.0,
+        )
+
+        # Legacy shutdown event (for signal handlers)
         self._shutdown_event = asyncio.Event()
         self._cli_task: asyncio.Task[Any] | None = None
+        self._cli: CLIDriver | None = None
 
     @property
     def anthropic(self) -> Any:
@@ -104,6 +113,8 @@ class Klabautermann:
             password=os.getenv("NEO4J_PASSWORD", ""),
         )
         await self.neo4j.connect()
+        # Register for graceful shutdown
+        self._shutdown_manager.register_client("neo4j", self.neo4j.disconnect)
 
         # Initialize Graphiti (optional - may fail if OpenAI key not set)
         if os.getenv("OPENAI_API_KEY"):
@@ -116,6 +127,8 @@ class Klabautermann:
                     openai_api_key=os.getenv("OPENAI_API_KEY"),
                 )
                 await self.graphiti.connect()
+                # Register for graceful shutdown
+                self._shutdown_manager.register_client("graphiti", self.graphiti.disconnect)
             except Exception as e:
                 logger.warning(
                     f"[SWELL] Graphiti initialization failed (entity extraction disabled): {e}"
@@ -168,7 +181,6 @@ class Klabautermann:
                 name="ingestor",
                 config=get_config_dict("ingestor"),
                 graphiti_client=self.graphiti,
-                llm_client=self.anthropic,
             )
         else:
             logger.warning("[SWELL] Ingestor not created - Graphiti unavailable")
@@ -189,6 +201,10 @@ class Klabautermann:
         )
 
         logger.info(f"[CHART] Created {len(self.agents)} agents")
+
+        # Register agents for graceful shutdown (in creation order)
+        for name, agent in self.agents.items():
+            self._shutdown_manager.register_agent(name, agent)
 
     def _wire_agent_registry(self) -> None:
         """Wire up agent registry for message routing."""
@@ -229,54 +245,79 @@ class Klabautermann:
         orchestrator = self.agents["orchestrator"]
         if not isinstance(orchestrator, Orchestrator):
             raise StartupError("orchestrator agent must be an Orchestrator instance")
-        cli = CLIDriver(orchestrator)
+        self._cli = CLIDriver(orchestrator)
+
+        # Register CLI for graceful shutdown
+        self._shutdown_manager.register_channel("cli", self._cli)
 
         try:
             # Run CLI in the main task
-            await cli.start()
+            await self._cli.start()
         except asyncio.CancelledError:
             logger.info("[CHART] CLI cancelled")
 
     def _handle_shutdown(self) -> None:
-        """Handle shutdown signal."""
+        """Handle shutdown signal (SIGINT/SIGTERM)."""
         logger.info("[CHART] Shutdown signal received")
+
+        # Request graceful shutdown via manager
+        self._shutdown_manager.request_shutdown()
         self._shutdown_event.set()
+
+        # Stop CLI if running (allows graceful exit from REPL)
+        if self._cli:
+            # Create task to stop CLI asynchronously
+            self._cli_task = asyncio.create_task(self._cli.stop())
 
         # Cancel all agent tasks
         for task in self.agent_tasks:
             task.cancel()
 
     async def shutdown(self) -> None:
-        """Clean shutdown of all components."""
+        """
+        Clean shutdown of all components using ShutdownManager.
+
+        Shutdown order (reverse of startup):
+        1. Channels (stops accepting new requests)
+        2. Drain pending messages from agent queues
+        3. Agents (in reverse registration order)
+        4. Clients (Neo4j, Graphiti)
+        5. Support services (quartermaster)
+        """
         logger.info("[CHART] Shutting down Klabautermann...")
 
-        # Stop agents
-        for name, agent in self.agents.items():
-            await agent.stop()
-            logger.debug(f"[WHISPER] Stopped {name}")
+        # Use ShutdownManager for orderly shutdown
+        result = await self._shutdown_manager.shutdown()
 
-        # Wait for tasks to complete
+        # Wait for agent tasks to complete
         if self.agent_tasks:
-            await asyncio.gather(*self.agent_tasks, return_exceptions=True)
+            # Give tasks a chance to complete gracefully
+            done, pending = await asyncio.wait(
+                self.agent_tasks,
+                timeout=5.0,
+                return_when=asyncio.ALL_COMPLETED,
+            )
 
-        # Stop hot-reload
+            # Cancel any still-pending tasks
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+            logger.debug(
+                f"[WHISPER] Agent tasks completed: {len(done)} done, {len(pending)} cancelled"
+            )
+
+        # Stop hot-reload (not managed by shutdown manager)
         if self.quartermaster:
             self.quartermaster.stop()
+            logger.debug("[WHISPER] Quartermaster stopped")
 
-        # Close clients
-        if self.graphiti:
-            try:
-                await self.graphiti.disconnect()
-            except Exception as e:
-                logger.warning(f"[SWELL] Graphiti disconnect error: {e}")
-
-        if self.neo4j:
-            try:
-                await self.neo4j.disconnect()
-            except Exception as e:
-                logger.warning(f"[SWELL] Neo4j disconnect error: {e}")
-
-        logger.info("[BEACON] Klabautermann shutdown complete")
+        if not result.success:
+            logger.warning(
+                f"[SWELL] Shutdown completed with errors: {result.error}",
+                extra={"phase": result.phase.value},
+            )
 
     async def run(self) -> None:
         """Main entry point."""
