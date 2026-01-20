@@ -75,6 +75,7 @@ class CLIDriver(BaseChannel):
         super().__init__(orchestrator, config)
         self.session_id = str(uuid.uuid4())
         self._running = False
+        self._message_count = 0
         self._sanitizer = InputSanitizer()
         # Check for NO_SPINNER env var to disable animated spinner
         import os
@@ -146,10 +147,34 @@ class CLIDriver(BaseChannel):
                         self.renderer.render_help()
                         continue
 
-                    # Check for clear command
+                    # Check for clear command - resets session context
                     if user_input.lower() in ("/clear", "clear"):
+                        old_session = self.session_id[:8]
+                        self.session_id = str(uuid.uuid4())
+                        self._message_count = 0
                         self.renderer.clear()
                         self.renderer.render_banner()
+                        self.renderer.render_info(
+                            f"Session reset. Old: {old_session}... → New: {self.session_id[:8]}..."
+                        )
+                        logger.info(
+                            f"[CHART] Session reset: {old_session} -> {self.session_id[:8]}",
+                            extra={"agent_name": "cli"},
+                        )
+                        continue
+
+                    # Check for status command
+                    if user_input.lower() in ("/status", "status"):
+                        is_connected = self._orchestrator is not None
+                        agent_status = "ready" if is_connected else "offline"
+                        self.renderer.render_status(
+                            session_id=self.session_id,
+                            thread_id=self.get_thread_id(),
+                            is_connected=is_connected,
+                            agent_status=agent_status,
+                            thread_count=1 if is_connected else 0,
+                            message_count=self._message_count,
+                        )
                         continue
 
                     # Check for logs toggle command
@@ -247,6 +272,9 @@ class CLIDriver(BaseChannel):
         sanitized_thread_id = self._sanitizer.sanitize_thread_id(thread_id, trace_id=trace_id)
 
         try:
+            # Increment message count
+            self._message_count += 1
+
             # Show spinner during processing
             with self.renderer.spinner("Charting course..."):
                 response = await self._orchestrator.handle_user_input(

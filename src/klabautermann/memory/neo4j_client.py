@@ -9,6 +9,7 @@ Reference: specs/architecture/ONTOLOGY.md Section 5
 
 from __future__ import annotations
 
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,19 @@ from neo4j import AsyncGraphDatabase
 
 from klabautermann.core.exceptions import GraphConnectionError
 from klabautermann.core.logger import logger
+
+
+# Default query timeout in milliseconds
+DEFAULT_QUERY_TIMEOUT_MS = 30000  # 30 seconds
+
+
+class QueryTimeoutError(Exception):
+    """Raised when a query exceeds the timeout limit."""
+
+    def __init__(self, query: str, timeout_ms: float) -> None:
+        self.query = query[:100]  # Truncate for safety
+        self.timeout_ms = timeout_ms
+        super().__init__(f"Query timed out after {timeout_ms}ms: {self.query}...")
 
 
 if TYPE_CHECKING:
@@ -121,6 +135,7 @@ class Neo4jClient:
         query: str,
         parameters: dict[str, Any] | None = None,
         trace_id: str | None = None,
+        timeout_ms: float | None = None,
     ) -> list[dict[str, Any]]:
         """
         Execute a parametrized Cypher query.
@@ -132,17 +147,21 @@ class Neo4jClient:
             query: Cypher query string with $param placeholders
             parameters: Dictionary of parameter values
             trace_id: Optional trace ID for logging
+            timeout_ms: Query timeout in milliseconds. Defaults to DEFAULT_QUERY_TIMEOUT_MS.
+                       Set to None or 0 to disable timeout.
 
         Returns:
             List of record dictionaries
 
         Raises:
             GraphConnectionError: If not connected
+            QueryTimeoutError: If query exceeds timeout
         """
         if not self._driver:
             raise GraphConnectionError("Neo4j client not connected")
 
         parameters = parameters or {}
+        effective_timeout = timeout_ms if timeout_ms is not None else DEFAULT_QUERY_TIMEOUT_MS
 
         logger.debug(
             f"[WHISPER] Executing query: {query[:100]}...",
@@ -150,13 +169,31 @@ class Neo4jClient:
                 "trace_id": trace_id,
                 "agent_name": "neo4j_client",
                 "params": list(parameters.keys()),
+                "timeout_ms": effective_timeout,
             },
         )
 
-        async with self.session() as session:
-            result = await session.run(query, parameters)
-            records: list[dict[str, Any]] = await result.data()
-            return records
+        async def _run_query() -> list[dict[str, Any]]:
+            async with self.session() as session:
+                result = await session.run(query, parameters)
+                records: list[dict[str, Any]] = await result.data()
+                return records
+
+        # Execute with timeout if specified
+        if effective_timeout and effective_timeout > 0:
+            try:
+                return await asyncio.wait_for(
+                    _run_query(),
+                    timeout=effective_timeout / 1000.0,  # Convert ms to seconds
+                )
+            except TimeoutError:
+                logger.error(
+                    f"[STORM] Query timed out after {effective_timeout}ms: {query[:100]}...",
+                    extra={"trace_id": trace_id, "agent_name": "neo4j_client"},
+                )
+                raise QueryTimeoutError(query, effective_timeout) from None
+        else:
+            return await _run_query()
 
     async def execute_read(
         self,
@@ -335,4 +372,8 @@ class Neo4jClient:
 # Export
 # ===========================================================================
 
-__all__ = ["Neo4jClient"]
+__all__ = [
+    "DEFAULT_QUERY_TIMEOUT_MS",
+    "Neo4jClient",
+    "QueryTimeoutError",
+]

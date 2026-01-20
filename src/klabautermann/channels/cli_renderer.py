@@ -132,7 +132,8 @@ class CLIRenderer:
 | `[message]` | Chat with Klabautermann |
 | `help` | Show this help |
 | `exit` / `quit` | End the session |
-| `/clear` | Clear the screen |
+| `/clear` | Clear screen and reset session |
+| `/status` | Show system status |
 | `/logs` | Toggle log output on/off |
 
 ## Tips
@@ -282,6 +283,46 @@ class CLIRenderer:
             Prompt string with styling markup.
         """
         return "[bold cyan]>[/] "
+
+    def render_status(
+        self,
+        session_id: str,
+        thread_id: str,
+        is_connected: bool,
+        agent_status: str,
+        thread_count: int = 0,
+        message_count: int = 0,
+    ) -> None:
+        """
+        Display system status panel.
+
+        Args:
+            session_id: Current session identifier.
+            thread_id: Current thread identifier.
+            is_connected: Whether orchestrator is connected.
+            agent_status: Status of the agent system.
+            thread_count: Number of active threads.
+            message_count: Total messages in current session.
+        """
+        connection_icon = "🟢" if is_connected else "🔴"
+        connection_text = "Connected" if is_connected else "Disconnected"
+
+        status_content = f"""
+[info]Session ID:[/] [dim]{session_id}[/]
+[info]Thread ID:[/] [dim]{thread_id}[/]
+[info]Connection:[/] {connection_icon} {connection_text}
+[info]Agent Status:[/] [dim]{agent_status}[/]
+[info]Active Threads:[/] [dim]{thread_count}[/]
+[info]Messages:[/] [dim]{message_count}[/]
+""".strip()
+
+        panel = Panel(
+            status_content,
+            title="[bold cyan]⚓ Ship Status[/]",
+            border_style="cyan",
+            padding=(0, 2),
+        )
+        self.console.print(panel)
 
 
 # ===========================================================================
