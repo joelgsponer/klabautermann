@@ -922,7 +922,6 @@ class TestSkillsToExecutorIntegration:
     @pytest.mark.asyncio
     async def test_skill_execution_end_to_end(
         self,
-        mock_neo4j_client: MagicMock,
     ) -> None:
         """Complete skill execution flow from parsing to result."""
         # Setup: Create executor with mocked Google bridge
@@ -937,7 +936,6 @@ class TestSkillsToExecutorIntegration:
         # Create executor
         executor = Executor(
             google_bridge=mock_bridge,
-            neo4j_client=mock_neo4j_client,
         )
 
         # Mock the internal email handling
