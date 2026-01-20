@@ -16,8 +16,11 @@ calendar:
   lookahead_days: 14      # How far ahead to sync
 
 # Email sync settings
+# Only archived emails are ingested into the knowledge graph.
+# Archive = "worth remembering", Delete = "discard"
+# This uses user intent as the filter - no need for blocklists.
 email:
   enabled: true
-  lookback_hours: 24      # How far back to sync emails
+  lookback_hours: 168     # 7 days - archived emails may be older
   max_per_sync: 50        # Max emails per sync cycle
-  query: "is:inbox"       # Gmail query filter (can use "is:unread", etc.)
+  query: "-in:inbox -in:trash -in:spam"  # Archived emails only
