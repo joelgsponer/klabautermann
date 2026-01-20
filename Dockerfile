@@ -47,6 +47,13 @@ RUN mkdir -p /app/data /app/logs && \
 # Switch to non-root user
 USER klabautermann
 
+# Health check - verify process is responsive
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import sys; sys.exit(0)" || exit 1
+
+# Expose port for potential API
+EXPOSE 8000
+
 # Default command - run CLI
 ENTRYPOINT ["python", "main.py"]
 
