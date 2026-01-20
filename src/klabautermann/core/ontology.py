@@ -161,6 +161,55 @@ class RoutineType(BaseModel):
     is_active: bool = Field(description="Whether the routine is currently active", default=True)
 
 
+class PreferenceType(BaseModel):
+    """A personal like, dislike, taste, or opinion about something."""
+
+    category: str | None = Field(
+        description="Category of preference: food, music, travel, technology, style, etc.",
+        default=None,
+    )
+    sentiment: str | None = Field(
+        description="Sentiment: like, dislike, love, hate, neutral, indifferent", default=None
+    )
+    strength: float | None = Field(
+        description="Strength of preference from 0.0 (weak) to 1.0 (strong)", default=None
+    )
+    context: str | None = Field(description="Context or reason for the preference", default=None)
+
+
+class CommunityType(BaseModel):
+    """A knowledge island - a cluster of related concepts, topics, or entities."""
+
+    theme: str | None = Field(description="Primary theme or topic of the community", default=None)
+    summary: str | None = Field(
+        description="Brief summary of what this knowledge island represents", default=None
+    )
+    node_count: int | None = Field(
+        description="Number of nodes in this community/island", default=None
+    )
+    coherence_score: float | None = Field(
+        description="How tightly related the nodes are (0.0-1.0)", default=None
+    )
+
+
+class LoreEpisodeType(BaseModel):
+    """A story chapter or episode in the progressive disclosure lore system."""
+
+    saga_id: str | None = Field(
+        description="Identifier of the saga/story this episode belongs to", default=None
+    )
+    chapter: int | None = Field(description="Chapter number within the saga", default=None)
+    told_at: str | None = Field(
+        description="When this episode was told/revealed to the user", default=None
+    )
+    topic: str | None = Field(
+        description="Main topic or subject of this lore episode", default=None
+    )
+    is_revealed: bool = Field(
+        description="Whether this episode has been revealed to the user", default=False
+    )
+
+
 # Entity types dict for Graphiti's add_episode()
 ENTITY_TYPES: dict[str, type[BaseModel]] = {
     # Core Entities
@@ -177,6 +226,9 @@ ENTITY_TYPES: dict[str, type[BaseModel]] = {
     "Pet": PetType,
     "Milestone": MilestoneType,
     "Routine": RoutineType,
+    "Preference": PreferenceType,
+    "Community": CommunityType,
+    "LoreEpisode": LoreEpisodeType,
 }
 
 
@@ -491,6 +543,9 @@ __all__ = [
     "PetType",
     "MilestoneType",
     "RoutineType",
+    "PreferenceType",
+    "CommunityType",
+    "LoreEpisodeType",
     # Enums
     "NodeLabel",
     "RelationType",
