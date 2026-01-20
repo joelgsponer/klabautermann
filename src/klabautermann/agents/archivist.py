@@ -25,6 +25,7 @@ from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.agents.summarization import summarize_thread
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage, ThreadSummary
+from klabautermann.memory.entity_merge import find_duplicate_persons, merge_entities
 from klabautermann.memory.note_queries import create_note_with_links
 
 
@@ -281,6 +282,15 @@ class Archivist(BaseAgent):
             if note_uuid:
                 archived_count += 1
 
+        # Run deduplication after archival
+        if archived_count > 0:
+            merged_count = await self.detect_and_merge_duplicates(trace_id)
+            if merged_count > 0:
+                logger.debug(
+                    f"[WHISPER] Post-archival deduplication merged {merged_count} entities",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
         logger.info(
             f"[BEACON] Archival queue complete: {archived_count}/{len(thread_uuids)} threads archived",
             extra={
@@ -341,6 +351,82 @@ class Archivist(BaseAgent):
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
         return None
+
+    async def detect_and_merge_duplicates(
+        self,
+        trace_id: str | None = None,
+    ) -> int:
+        """
+        Detect and merge duplicate entities in the graph.
+
+        Scans for duplicate Person entities and merges high-confidence
+        duplicates (similarity >= 0.9).
+
+        Args:
+            trace_id: Trace ID for logging
+
+        Returns:
+            Number of entities merged
+        """
+        if not self.neo4j:
+            logger.warning(
+                "[SWELL] Cannot detect duplicates: Neo4j client not configured",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return 0
+
+        trace_id = trace_id or str(uuid.uuid4())
+
+        logger.info(
+            "[CHART] Scanning for duplicate entities",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Find high-confidence person duplicates
+        duplicates = await find_duplicate_persons(
+            self.neo4j,
+            limit=50,
+            trace_id=trace_id,
+        )
+
+        # Filter to high-confidence matches (>= 0.9 similarity)
+        high_confidence = [d for d in duplicates if d.similarity_score >= 0.9]
+
+        if not high_confidence:
+            logger.debug(
+                "[WHISPER] No high-confidence duplicates found",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return 0
+
+        merged_count = 0
+        for dup in high_confidence:
+            # Merge source (uuid2) into target (uuid1)
+            result = await merge_entities(
+                self.neo4j,
+                source_uuid=dup.uuid2,
+                target_uuid=dup.uuid1,
+                trace_id=trace_id,
+            )
+            if result.source_deleted:
+                merged_count += 1
+                logger.info(
+                    f"[BEACON] Merged duplicate: {dup.name2} -> {dup.name1} "
+                    f"(reason: {dup.match_reason}, score: {dup.similarity_score})",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+        logger.info(
+            f"[BEACON] Deduplication complete: {merged_count} entities merged",
+            extra={
+                "trace_id": trace_id,
+                "agent_name": self.name,
+                "merged_count": merged_count,
+                "candidates_found": len(duplicates),
+            },
+        )
+
+        return merged_count
 
     # ========================================================================
     # Stub Methods (to be implemented in future tasks)

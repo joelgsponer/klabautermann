@@ -11,16 +11,63 @@ Reference: specs/architecture/MEMORY.md Section 9
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.core.logger import logger
+from klabautermann.utils.retry import retry_on_llm_errors
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from klabautermann.memory.neo4j_client import Neo4jClient
+
+
+# =============================================================================
+# Constants
+# =============================================================================
+
+# Model to use for zoom level classification (Haiku for cost-effectiveness)
+ZOOM_CLASSIFICATION_MODEL = "claude-3-5-haiku-20241022"
+
+# System prompt for zoom level classification
+ZOOM_CLASSIFIER_SYSTEM_PROMPT = """You are a query analyzer for a personal knowledge management system.
+
+Your task is to classify user queries into one of three retrieval zoom levels:
+
+## MACRO Level
+Use for high-level overviews and broad questions about themes or life areas.
+Examples:
+- "What are the main themes in my life right now?"
+- "Give me an overview of my activities"
+- "What areas need attention?"
+- "Summarize what's been happening"
+
+## MESO Level
+Use for project-level or note-level context.
+Examples:
+- "What's the status of the Q1 budget project?"
+- "What did I discuss about the marketing campaign?"
+- "What are my current projects?"
+- "Show me notes about the conference"
+
+## MICRO Level
+Use for specific entity facts, exact details, or pointed questions.
+Examples:
+- "What is Sarah's email address?"
+- "When did John change jobs?"
+- "Who reported the bug last Tuesday?"
+- "Where does Alice work?"
+
+Analyze the semantic intent of the query, not just keywords. Consider:
+1. Is the user asking for broad context or specific facts?
+2. Does the query reference a particular entity or a general theme?
+3. Would the answer be a summary or a precise data point?
+
+Always classify into exactly one level."""
 
 
 # =============================================================================
@@ -451,7 +498,246 @@ async def get_entity_timeline(
 
 
 # =============================================================================
-# Automatic Zoom Level Selection
+# Zoom Level Classification
+# =============================================================================
+
+
+class ZoomLevel(str, Enum):
+    """Zoom level for retrieval granularity."""
+
+    MACRO = "macro"
+    MESO = "meso"
+    MICRO = "micro"
+
+
+@dataclass
+class ZoomClassification:
+    """Result from AI-based zoom level classification."""
+
+    level: ZoomLevel
+    confidence: float
+    reasoning: str
+
+
+# =============================================================================
+# AI-First Zoom Level Selection (#190)
+# =============================================================================
+
+
+class AIZoomLevelSelector:
+    """
+    Selects retrieval zoom level using LLM semantic understanding.
+
+    This is the AI-first approach that uses Claude to understand query
+    semantics rather than keyword matching.
+
+    Reference: Issue #190 - Auto zoom detection (AI-first)
+    """
+
+    @retry_on_llm_errors(max_retries=2)
+    async def classify_query(
+        self,
+        query: str,
+        trace_id: str | None = None,
+    ) -> ZoomClassification:
+        """
+        Classify a query into a zoom level using LLM semantic understanding.
+
+        Args:
+            query: Natural language search query
+            trace_id: Trace ID for logging
+
+        Returns:
+            ZoomClassification with level, confidence, and reasoning
+        """
+        import anthropic
+
+        trace_id = trace_id or f"zoom-{os.urandom(4).hex()}"
+
+        logger.debug(
+            f"[WHISPER] AI zoom classification for query: {query[:50]}...",
+            extra={"trace_id": trace_id, "agent_name": "zoom_search"},
+        )
+
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            logger.warning(
+                "[SWELL] ANTHROPIC_API_KEY not set, falling back to keyword selector",
+                extra={"trace_id": trace_id, "agent_name": "zoom_search"},
+            )
+            return self._fallback_classification(query)
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        # Tool schema for structured output
+        tool_schema = {
+            "name": "classify_zoom_level",
+            "description": "Classify a query into a retrieval zoom level",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "level": {
+                        "type": "string",
+                        "enum": ["macro", "meso", "micro"],
+                        "description": "The zoom level for this query",
+                    },
+                    "confidence": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "description": "Confidence in the classification (0.0-1.0)",
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "description": "Brief explanation for the classification",
+                    },
+                },
+                "required": ["level", "confidence", "reasoning"],
+            },
+        }
+
+        try:
+            response = client.messages.create(
+                model=ZOOM_CLASSIFICATION_MODEL,
+                max_tokens=200,
+                system=ZOOM_CLASSIFIER_SYSTEM_PROMPT,
+                tools=[tool_schema],
+                tool_choice={"type": "tool", "name": "classify_zoom_level"},
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Classify this query into a zoom level:\n\n{query}",
+                    }
+                ],
+            )
+
+            # Extract tool use block
+            tool_use_block = None
+            for block in response.content:
+                if hasattr(block, "type") and block.type == "tool_use":
+                    tool_use_block = block
+                    break
+
+            if not tool_use_block:
+                logger.warning(
+                    "[SWELL] No tool_use block in AI zoom response, using fallback",
+                    extra={"trace_id": trace_id, "agent_name": "zoom_search"},
+                )
+                return self._fallback_classification(query)
+
+            result = tool_use_block.input
+            classification = ZoomClassification(
+                level=ZoomLevel(result["level"]),
+                confidence=float(result.get("confidence", 0.8)),
+                reasoning=result.get("reasoning", ""),
+            )
+
+            logger.info(
+                f"[CHART] AI zoom classification: {classification.level.value} "
+                f"(confidence: {classification.confidence:.2f})",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "zoom_search",
+                    "level": classification.level.value,
+                    "confidence": classification.confidence,
+                },
+            )
+
+            return classification
+
+        except anthropic.APIError as e:
+            logger.error(
+                f"[STORM] Anthropic API error during zoom classification: {e}",
+                extra={"trace_id": trace_id, "agent_name": "zoom_search"},
+            )
+            return self._fallback_classification(query)
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Unexpected error during zoom classification: {e}",
+                extra={"trace_id": trace_id, "agent_name": "zoom_search"},
+            )
+            return self._fallback_classification(query)
+
+    def _fallback_classification(self, query: str) -> ZoomClassification:
+        """
+        Fallback to keyword-based classification when AI is unavailable.
+
+        This provides graceful degradation when the LLM call fails.
+        """
+        # Use the keyword-based selector as fallback
+        keyword_selector = ZoomLevelSelector()
+        level_str = keyword_selector.select_zoom_level(query)
+
+        return ZoomClassification(
+            level=ZoomLevel(level_str),
+            confidence=0.5,  # Lower confidence for keyword fallback
+            reasoning="Fallback to keyword-based classification",
+        )
+
+
+async def ai_zoom_search(
+    neo4j: Neo4jClient,
+    query: str,
+    captain_uuid: str | None = None,
+    limit: int = 10,
+    trace_id: str | None = None,
+) -> ZoomSearchResponse:
+    """
+    Execute search using AI-based zoom level selection.
+
+    Uses LLM semantic understanding to determine the appropriate
+    retrieval granularity instead of keyword matching.
+
+    Args:
+        neo4j: Connected Neo4jClient instance
+        query: Natural language search query
+        captain_uuid: Optional captain filter
+        limit: Maximum results to return
+        trace_id: Optional trace ID for logging
+
+    Returns:
+        ZoomSearchResponse with results at the AI-selected level
+    """
+    selector = AIZoomLevelSelector()
+    classification = await selector.classify_query(query, trace_id)
+
+    logger.info(
+        f"[CHART] AI zoom search: {classification.level.value} for query: {query[:50]}...",
+        extra={
+            "trace_id": trace_id,
+            "agent_name": "zoom_search",
+            "reasoning": classification.reasoning,
+        },
+    )
+
+    if classification.level == ZoomLevel.MACRO:
+        macro_results = await macro_search(neo4j, captain_uuid, limit, trace_id)
+        return ZoomSearchResponse(
+            zoom_level="macro",
+            results=macro_results,
+            result_count=len(macro_results),
+        )
+
+    elif classification.level == ZoomLevel.MESO:
+        meso_results = await meso_search(neo4j, query, None, limit, trace_id)
+        return ZoomSearchResponse(
+            zoom_level="meso",
+            results=meso_results,
+            result_count=len(meso_results),
+        )
+
+    else:  # ZoomLevel.MICRO
+        micro_results = await micro_search(neo4j, query, None, False, limit, trace_id)
+        return ZoomSearchResponse(
+            zoom_level="micro",
+            results=micro_results,
+            result_count=len(micro_results),
+        )
+
+
+# =============================================================================
+# Keyword-Based Zoom Level Selection (Legacy)
 # =============================================================================
 
 
@@ -583,18 +869,23 @@ async def auto_zoom_search(
 # =============================================================================
 
 __all__ = [
+    # AI-First Zoom Selection (#190)
+    "AIZoomLevelSelector",
     # Data Classes
     "MacroSearchResult",
     "MesoSearchResult",
     "MicroSearchResult",
+    "ZoomClassification",
+    "ZoomLevel",
+    # Auto Selection (Keyword-based - legacy)
+    "ZoomLevelSelector",
     "ZoomSearchResponse",
+    "ai_zoom_search",
+    "auto_zoom_search",
+    "get_entity_timeline",
+    "get_project_context",
     # Search Functions
     "macro_search",
     "meso_search",
     "micro_search",
-    "get_project_context",
-    "get_entity_timeline",
-    # Auto Selection
-    "ZoomLevelSelector",
-    "auto_zoom_search",
 ]

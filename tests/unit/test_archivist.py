@@ -571,3 +571,270 @@ class TestConfiguration:
         )
 
         assert archivist.max_threads_per_scan == 5
+
+
+class TestDetectAndMergeDuplicates:
+    """Test suite for duplicate detection and merging (#191)."""
+
+    @pytest.fixture
+    def mock_neo4j(self) -> Mock:
+        """Create a mock Neo4jClient."""
+        return Mock()
+
+    @pytest.fixture
+    def archivist(self, mock_neo4j: Mock) -> Archivist:
+        """Create an Archivist instance with mocked Neo4j client."""
+        return Archivist(
+            name="archivist",
+            config={},
+            thread_manager=None,
+            neo4j_client=mock_neo4j,
+        )
+
+    @pytest.mark.asyncio
+    async def test_detect_duplicates_merges_high_confidence(
+        self, archivist: Archivist, mock_neo4j: Mock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should merge duplicates with similarity >= 0.9."""
+        from datetime import datetime
+
+        from klabautermann.memory.entity_merge import DuplicateCandidate, MergeResult
+
+        mock_find = AsyncMock(
+            return_value=[
+                DuplicateCandidate(
+                    uuid1="person-001",
+                    uuid2="person-002",
+                    name1="John Doe",
+                    name2="John Doe",
+                    email1="john@example.com",
+                    email2="john@example.com",
+                    match_reason="both",
+                    similarity_score=1.0,
+                ),
+            ]
+        )
+        mock_merge = AsyncMock(
+            return_value=MergeResult(
+                source_uuid="person-002",
+                target_uuid="person-001",
+                relationships_transferred=5,
+                properties_merged=["bio"],
+                source_deleted=True,
+                timestamp=datetime.now(),
+            )
+        )
+
+        monkeypatch.setattr("klabautermann.agents.archivist.find_duplicate_persons", mock_find)
+        monkeypatch.setattr("klabautermann.agents.archivist.merge_entities", mock_merge)
+
+        result = await archivist.detect_and_merge_duplicates(trace_id="test-trace-001")
+
+        assert result == 1
+        mock_find.assert_called_once_with(mock_neo4j, limit=50, trace_id="test-trace-001")
+        mock_merge.assert_called_once_with(
+            mock_neo4j,
+            source_uuid="person-002",
+            target_uuid="person-001",
+            trace_id="test-trace-001",
+        )
+
+    @pytest.mark.asyncio
+    async def test_detect_duplicates_skips_low_confidence(
+        self, archivist: Archivist, mock_neo4j: Mock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should not merge duplicates with similarity < 0.9."""
+        from klabautermann.memory.entity_merge import DuplicateCandidate
+
+        mock_find = AsyncMock(
+            return_value=[
+                DuplicateCandidate(
+                    uuid1="person-001",
+                    uuid2="person-002",
+                    name1="John Doe",
+                    name2="John D.",
+                    email1=None,
+                    email2=None,
+                    match_reason="name",
+                    similarity_score=0.7,  # Below threshold
+                ),
+            ]
+        )
+        mock_merge = AsyncMock()
+
+        monkeypatch.setattr("klabautermann.agents.archivist.find_duplicate_persons", mock_find)
+        monkeypatch.setattr("klabautermann.agents.archivist.merge_entities", mock_merge)
+
+        result = await archivist.detect_and_merge_duplicates(trace_id="test-trace-002")
+
+        assert result == 0
+        mock_merge.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_detect_duplicates_returns_zero_without_neo4j(self) -> None:
+        """Should return 0 when Neo4j client not configured."""
+        archivist = Archivist(
+            name="archivist",
+            config={},
+            thread_manager=None,
+            neo4j_client=None,
+        )
+
+        result = await archivist.detect_and_merge_duplicates(trace_id="test-trace-003")
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_detect_duplicates_counts_only_deleted(
+        self, archivist: Archivist, mock_neo4j: Mock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Should only count merges where source was deleted."""
+        from datetime import datetime
+
+        from klabautermann.memory.entity_merge import DuplicateCandidate, MergeResult
+
+        mock_find = AsyncMock(
+            return_value=[
+                DuplicateCandidate(
+                    uuid1="person-001",
+                    uuid2="person-002",
+                    name1="John",
+                    name2="John",
+                    email1="john@test.com",
+                    email2="john@test.com",
+                    match_reason="both",
+                    similarity_score=1.0,
+                ),
+                DuplicateCandidate(
+                    uuid1="person-003",
+                    uuid2="person-004",
+                    name1="Jane",
+                    name2="Jane",
+                    email1="jane@test.com",
+                    email2="jane@test.com",
+                    match_reason="both",
+                    similarity_score=0.95,
+                ),
+            ]
+        )
+        # First merge succeeds, second fails (source_deleted=False)
+        mock_merge = AsyncMock(
+            side_effect=[
+                MergeResult(
+                    source_uuid="person-002",
+                    target_uuid="person-001",
+                    relationships_transferred=3,
+                    properties_merged=[],
+                    source_deleted=True,
+                    timestamp=datetime.now(),
+                ),
+                MergeResult(
+                    source_uuid="person-004",
+                    target_uuid="person-003",
+                    relationships_transferred=0,
+                    properties_merged=[],
+                    source_deleted=False,  # Failed to delete
+                    timestamp=datetime.now(),
+                ),
+            ]
+        )
+
+        monkeypatch.setattr("klabautermann.agents.archivist.find_duplicate_persons", mock_find)
+        monkeypatch.setattr("klabautermann.agents.archivist.merge_entities", mock_merge)
+
+        result = await archivist.detect_and_merge_duplicates(trace_id="test-trace-004")
+
+        assert result == 1  # Only one successful merge
+
+
+class TestProcessArchivalQueueWithDeduplication:
+    """Test suite for archival queue with deduplication integration (#191)."""
+
+    @pytest.fixture
+    def mock_thread_manager(self) -> Mock:
+        """Create a mock ThreadManager."""
+        mock = Mock()
+        mock.get_inactive_threads = AsyncMock()
+        mock.mark_archiving = AsyncMock(return_value=True)
+        mock.get_context_window = AsyncMock()
+        mock.mark_archived = AsyncMock(return_value=True)
+        mock.reactivate_thread = AsyncMock()
+        mock.prune_thread_messages = AsyncMock(return_value=5)
+        return mock
+
+    @pytest.fixture
+    def mock_neo4j(self) -> Mock:
+        """Create a mock Neo4jClient with AsyncMock methods."""
+        mock = Mock()
+        mock.execute_write = AsyncMock(return_value=[{"uuid": "note-uuid-001", "title": "Summary"}])
+        mock.execute_query = AsyncMock(return_value=[])
+        return mock
+
+    @pytest.fixture
+    def mock_summarize(self, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+        """Mock the summarize_thread function."""
+        mock = AsyncMock()
+        mock.return_value = ThreadSummary(
+            summary="Test summary",
+            topics=[],
+            action_items=[],
+            new_facts=[],
+            conflicts=[],
+            participants=[],
+            sentiment="neutral",
+        )
+        monkeypatch.setattr(
+            "klabautermann.agents.archivist.summarize_thread",
+            mock,
+        )
+        return mock
+
+    @pytest.fixture
+    def archivist(self, mock_thread_manager: Mock, mock_neo4j: Mock) -> Archivist:
+        """Create an Archivist instance with mocked dependencies."""
+        return Archivist(
+            name="archivist",
+            config={},
+            thread_manager=mock_thread_manager,
+            neo4j_client=mock_neo4j,
+        )
+
+    @pytest.mark.asyncio
+    async def test_runs_deduplication_after_archival(
+        self,
+        archivist: Archivist,
+        mock_thread_manager: Mock,
+        mock_summarize: AsyncMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should run deduplication after archiving threads."""
+        mock_thread_manager.get_inactive_threads.return_value = ["thread-uuid-001"]
+        mock_thread_manager.get_context_window.return_value = ThreadContext(
+            thread_uuid="thread-uuid-001",
+            channel_type=ChannelType.CLI,
+            messages=[{"role": "user", "content": "Test"}],
+        )
+
+        mock_dedup = AsyncMock(return_value=2)
+        monkeypatch.setattr(archivist, "detect_and_merge_duplicates", mock_dedup)
+
+        await archivist.process_archival_queue(trace_id="test-trace-001")
+
+        mock_dedup.assert_called_once_with("test-trace-001")
+
+    @pytest.mark.asyncio
+    async def test_skips_deduplication_when_no_threads_archived(
+        self,
+        archivist: Archivist,
+        mock_thread_manager: Mock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Should skip deduplication when no threads were archived."""
+        mock_thread_manager.get_inactive_threads.return_value = []
+
+        mock_dedup = AsyncMock(return_value=0)
+        monkeypatch.setattr(archivist, "detect_and_merge_duplicates", mock_dedup)
+
+        await archivist.process_archival_queue(trace_id="test-trace-002")
+
+        mock_dedup.assert_not_called()
