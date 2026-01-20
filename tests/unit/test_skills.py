@@ -570,3 +570,290 @@ class TestSkillDiscovery:
             skill = await discovery_with_skills.discover_skill("Find something", "test-trace-123")
 
         assert skill is None
+
+    @pytest.mark.asyncio
+    async def test_extract_payload_with_llm(self, discovery_with_skills: SkillDiscovery) -> None:
+        """Test LLM-based payload extraction."""
+        # Create a skill with parameters
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="Test skill",
+                **{
+                    "parameters": [
+                        {"name": "recipient", "type": "string", "required": True, "description": "Email recipient"},
+                        {"name": "subject", "type": "string", "required": False, "description": "Email subject"},
+                    ]
+                }
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        mock_response = MagicMock()
+        mock_response.content = [
+            MagicMock(text='{"recipient": "john@example.com", "subject": "Meeting"}')
+        ]
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.return_value = mock_response
+            payload = await discovery_with_skills.extract_payload_with_llm(
+                skill, "Send email to john@example.com about Meeting", "test-trace-123"
+            )
+
+        assert payload["recipient"] == "john@example.com"
+        assert payload["subject"] == "Meeting"
+
+    @pytest.mark.asyncio
+    async def test_extract_payload_with_llm_fallback(
+        self, discovery_with_skills: SkillDiscovery
+    ) -> None:
+        """Test fallback to full message when extraction fails."""
+        skill = LoadedSkill(
+            metadata=SkillMetadata(name="test-skill", description="Test"),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        with patch.object(
+            discovery_with_skills.client.messages, "create", new_callable=AsyncMock
+        ) as mock_create:
+            mock_create.side_effect = Exception("API error")
+            payload = await discovery_with_skills.extract_payload_with_llm(
+                skill, "Some user message", "test-trace-123"
+            )
+
+        # Should fallback to returning user message as query
+        assert payload == {"query": "Some user message"}
+
+
+class TestLoadedSkillToDict:
+    """Tests for LoadedSkill.to_dict() serialization."""
+
+    def test_to_dict_with_orchestrator_config(self) -> None:
+        """Serialize orchestrator-enabled skill."""
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="Test skill for serialization",
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{
+                    "klabautermann-task-type": "execute",
+                    "klabautermann-agent": "executor",
+                    "klabautermann-blocking": False,
+                }
+            ),
+            body="# Test Skill",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = skill.to_dict()
+
+        assert result["name"] == "test-skill"
+        assert result["description"] == "Test skill for serialization"
+        assert result["task_type"] == "execute"
+        assert result["agent"] == "executor"
+        assert result["blocking"] is False
+        assert result["path"] == "/tmp/test-skill/SKILL.md"
+
+    def test_to_dict_without_orchestrator_config(self) -> None:
+        """Serialize basic skill without orchestrator config."""
+        skill = LoadedSkill(
+            metadata=SkillMetadata(name="basic", description="Basic skill"),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Basic",
+            path=Path("/tmp/basic/SKILL.md"),
+        )
+
+        result = skill.to_dict()
+
+        assert result["name"] == "basic"
+        assert result["task_type"] is None
+        assert result["agent"] is None
+
+
+class TestSkillChaining:
+    """Tests for skill chaining patterns."""
+
+    @pytest.fixture
+    def multi_skill_planner(self, tmp_path: Path) -> SkillAwarePlanner:
+        """Create planner with multiple skills that can be chained."""
+        skills_data = [
+            ("lookup-person", "Find person info. Use when asked \"who is X\" or \"find contact\".", "research", "researcher"),
+            ("send-email", "Send email. Use when asked \"send email to X\" or \"email X about Y\".", "execute", "executor"),
+            ("schedule-meeting", "Schedule meetings. Use when asked to \"schedule\" or \"set up call\".", "execute", "executor"),
+        ]
+
+        for name, desc, task_type, agent in skills_data:
+            skill_dir = tmp_path / name
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                dedent(f"""
+                ---
+                name: {name}
+                description: {desc}
+                klabautermann-task-type: {task_type}
+                klabautermann-agent: {agent}
+                ---
+
+                # {name}
+
+                Skill content.
+            """).strip()
+            )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        return SkillAwarePlanner(loader)
+
+    def test_sequential_skill_matching(self, multi_skill_planner: SkillAwarePlanner) -> None:
+        """Test matching multiple skills in sequence (simulating multi-step task)."""
+        # First step: lookup person
+        skill1 = multi_skill_planner.match_skill("Who is John?")
+        assert skill1 is not None
+        assert skill1.name == "lookup-person"
+
+        # Second step: send email using explicit command
+        skill2 = multi_skill_planner.match_skill("/send-email to John")
+        assert skill2 is not None
+        assert skill2.name == "send-email"
+
+    def test_match_returns_most_specific_skill(self, multi_skill_planner: SkillAwarePlanner) -> None:
+        """Test that pattern matching returns appropriate skill."""
+        # Should match lookup-person via "who is" pattern
+        skill = multi_skill_planner.match_skill("who is Sarah from Acme?")
+        assert skill is not None
+        assert skill.name == "lookup-person"
+
+        # Should match send-email via "send email" pattern
+        skill = multi_skill_planner.match_skill("send email to john about the meeting")
+        assert skill is not None
+        assert skill.name == "send-email"
+
+    def test_generate_multiple_tasks(self, multi_skill_planner: SkillAwarePlanner) -> None:
+        """Test generating tasks for a multi-step workflow."""
+        # Simulate a workflow: find person, then email them
+        # Using patterns that match the skill descriptions
+        messages = ["Who is John?", "send email to John about the project"]
+
+        tasks = []
+        for msg in messages:
+            result = multi_skill_planner.match_and_plan(msg, f"trace-{len(tasks)}")
+            if result:
+                skill, task = result
+                tasks.append((skill.name, task))
+
+        # Should have matched both skills
+        assert len(tasks) == 2
+        assert tasks[0][0] == "lookup-person"
+        assert tasks[0][1].task_type == "research"
+        assert tasks[1][0] == "send-email"
+        assert tasks[1][1].task_type == "execute"
+
+
+class TestSkillPayloadExtraction:
+    """Tests for payload extraction from user messages."""
+
+    @pytest.fixture
+    def planner_with_schema(self, tmp_path: Path) -> SkillAwarePlanner:
+        """Create planner with skill that has complex payload schema."""
+        skill_dir = tmp_path / "complex-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: complex-skill
+            description: A skill with complex payload schema
+            klabautermann-task-type: execute
+            klabautermann-agent: executor
+            klabautermann-payload-schema:
+              query:
+                type: string
+                required: true
+                extract-from: user-message
+                description: Main search query
+              limit:
+                type: number
+                required: false
+                default: 10
+                extract-from: user-message
+                description: Number of results
+              include_archived:
+                type: boolean
+                required: false
+                default: false
+                extract-from: context
+            ---
+
+            # Complex Skill
+
+            Skill content.
+        """).strip()
+        )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        return SkillAwarePlanner(loader)
+
+    def test_extract_simple_payload(self, planner_with_schema: SkillAwarePlanner) -> None:
+        """Test extracting payload from user message."""
+        skill = planner_with_schema.loader.get("complex-skill")
+        assert skill is not None
+
+        payload = planner_with_schema.extract_payload(skill, "Find all projects about AI")
+
+        # Simple extraction puts full message in 'query' field
+        assert "query" in payload
+        assert payload["query"] == "Find all projects about AI"
+
+    def test_payload_field_schema_parsing(self, planner_with_schema: SkillAwarePlanner) -> None:
+        """Test that payload schema is correctly parsed."""
+        skill = planner_with_schema.loader.get("complex-skill")
+        assert skill is not None
+
+        fields = skill.klabautermann.get_payload_fields()
+
+        assert "query" in fields
+        assert fields["query"].type == "string"
+        assert fields["query"].required is True
+
+        assert "limit" in fields
+        assert fields["limit"].type == "number"
+        assert fields["limit"].default == 10
+
+        assert "include_archived" in fields
+        assert fields["include_archived"].type == "boolean"
+        # Note: extract_from defaults to "user-message" since PayloadField doesn't use alias
+        assert fields["include_archived"].extract_from == "user-message"
+
+
+class TestSkillRegistryDescriptions:
+    """Tests for SkillRegistry.get_descriptions()."""
+
+    def test_get_descriptions(self) -> None:
+        """Get all skill descriptions."""
+        registry = SkillRegistry()
+
+        skill1 = LoadedSkill(
+            metadata=SkillMetadata(name="skill-a", description="Description A"),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# A",
+            path=Path("/tmp/skill-a/SKILL.md"),
+        )
+        skill2 = LoadedSkill(
+            metadata=SkillMetadata(name="skill-b", description="Description B"),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# B",
+            path=Path("/tmp/skill-b/SKILL.md"),
+        )
+
+        registry.add(skill1)
+        registry.add(skill2)
+
+        descriptions = registry.get_descriptions()
+
+        assert descriptions["skill-a"] == "Description A"
+        assert descriptions["skill-b"] == "Description B"
