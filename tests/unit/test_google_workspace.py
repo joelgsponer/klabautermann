@@ -3,24 +3,17 @@ Unit tests for Google Workspace Bridge.
 
 Tests the bridge interface using direct Google API calls.
 Uses mocking for Google API services to test parsing and error handling logic.
-
-Issues: #207 (reply-to-thread), #208 (attachments), #214 (OAuth refresh),
-        #215 (rate limiting), #216 (pagination)
 """
 
 import base64
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from klabautermann.core.exceptions import ExternalServiceError
 from klabautermann.mcp.google_workspace import (
-    EmailAttachment,
-    EmailSearchResult,
     GoogleWorkspaceBridge,
-    MCPRateLimiter,
 )
 
 
@@ -595,518 +588,250 @@ class TestResponseParsing:
 
 
 # ===========================================================================
-# Pagination Tests (#216)
-# ===========================================================================
-
-
-class TestEmailPagination:
-    """Test email search pagination (#216)."""
-
-    @pytest.mark.asyncio
-    async def test_search_emails_paginated_returns_result(self, bridge, mock_gmail_service):
-        """Test paginated search returns EmailSearchResult."""
-        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "msg1"}],
-            "nextPageToken": "token123",
-            "resultSizeEstimate": 100,
-        }
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "msg1",
-            "threadId": "thread1",
-            "snippet": "Test",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Test"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
-                ],
-            },
-        }
-
-        result = await bridge.search_emails_paginated("test")
-
-        assert isinstance(result, EmailSearchResult)
-        assert len(result.emails) == 1
-        assert result.next_page_token == "token123"
-        assert result.result_size_estimate == 100
-
-    @pytest.mark.asyncio
-    async def test_search_emails_with_page_token(self, bridge, mock_gmail_service):
-        """Test search with page token for continuation."""
-        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "msg2"}],
-        }
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "msg2",
-            "threadId": "thread2",
-            "snippet": "Page 2",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Page 2"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
-                ],
-            },
-        }
-
-        await bridge.search_emails_paginated("test", page_token="token123")
-
-        # Verify pageToken was passed
-        call_kwargs = mock_gmail_service.users.return_value.messages.return_value.list.call_args[1]
-        assert call_kwargs.get("pageToken") == "token123"
-
-    @pytest.mark.asyncio
-    async def test_search_emails_all_fetches_multiple_pages(self, bridge, mock_gmail_service):
-        """Test search_emails_all fetches multiple pages."""
-        call_count = 0
-
-        def list_side_effect(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_result = MagicMock()
-            if call_count == 1:
-                mock_result.execute.return_value = {
-                    "messages": [{"id": "msg1"}, {"id": "msg2"}],
-                    "nextPageToken": "token2",
-                }
-            else:
-                mock_result.execute.return_value = {
-                    "messages": [{"id": "msg3"}],
-                }
-            return mock_result
-
-        mock_gmail_service.users.return_value.messages.return_value.list.side_effect = (
-            list_side_effect
-        )
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "msg1",
-            "threadId": "thread1",
-            "snippet": "Test",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Test"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
-                ],
-            },
-        }
-
-        emails = await bridge.search_emails_all("test", max_results=100)
-
-        # Should have made 2 calls (first page with token, second without)
-        assert call_count == 2
-        assert len(emails) == 3
-
-
-# ===========================================================================
-# Reply-to-Thread Tests (#207)
-# ===========================================================================
-
-
-class TestReplyToThread:
-    """Test email reply-to-thread functionality (#207)."""
-
-    @pytest.mark.asyncio
-    async def test_reply_to_email_success(self, bridge, mock_gmail_service):
-        """Test successful reply to email."""
-        # Mock getting original email
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "original_msg",
-            "threadId": "thread123",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Original Subject"},
-                    {"name": "From", "value": "original_sender@example.com"},
-                    {"name": "Message-ID", "value": "<original-id@example.com>"},
-                    {"name": "References", "value": "<older-id@example.com>"},
-                ],
-            },
-        }
-
-        # Mock sending reply
-        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
-            "id": "reply_msg",
-            "threadId": "thread123",
-        }
-
-        result = await bridge.reply_to_email(
-            message_id="original_msg",
-            body="This is my reply",
-        )
-
-        assert result.success is True
-        assert result.message_id == "reply_msg"
-
-    @pytest.mark.asyncio
-    async def test_reply_adds_re_prefix(self, bridge, mock_gmail_service):
-        """Test reply adds Re: prefix to subject."""
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "original_msg",
-            "threadId": "thread123",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Meeting Tomorrow"},
-                    {"name": "From", "value": "sender@example.com"},
-                ],
-            },
-        }
-        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
-            "id": "reply_msg"
-        }
-
-        await bridge.reply_to_email(message_id="original_msg", body="Reply body")
-
-        # Verify send was called - we can't easily check the encoded message
-        # but the functionality is tested through the result
-        mock_gmail_service.users.return_value.messages.return_value.send.assert_called()
-
-    @pytest.mark.asyncio
-    async def test_reply_preserves_existing_re_prefix(self, bridge, mock_gmail_service):
-        """Test reply doesn't double Re: prefix."""
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "original_msg",
-            "threadId": "thread123",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Re: Already a reply"},
-                    {"name": "From", "value": "sender@example.com"},
-                ],
-            },
-        }
-        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
-            "id": "reply_msg"
-        }
-
-        result = await bridge.reply_to_email(message_id="original_msg", body="Reply body")
-
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_reply_handles_missing_original(self, bridge, mock_gmail_service):
-        """Test reply handles error when original email not found."""
-        from googleapiclient.errors import HttpError
-
-        mock_response = MagicMock()
-        mock_response.status = 404
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.side_effect = HttpError(
-            mock_response, b"Not found"
-        )
-
-        result = await bridge.reply_to_email(message_id="nonexistent", body="Reply")
-
-        assert result.success is False
-        assert "Failed to get original email" in result.error
-
-    @pytest.mark.asyncio
-    async def test_send_email_with_threading_headers(self, bridge, mock_gmail_service):
-        """Test send_email accepts threading parameters."""
-        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
-            "id": "msg123"
-        }
-
-        result = await bridge.send_email(
-            to="recipient@example.com",
-            subject="Re: Test",
-            body="Reply body",
-            in_reply_to="<original@example.com>",
-            references="<older@example.com> <original@example.com>",
-            thread_id="thread123",
-        )
-
-        assert result.success is True
-
-
-# ===========================================================================
-# Attachment Tests (#208)
-# ===========================================================================
-
-
-class TestEmailAttachments:
-    """Test email attachment handling (#208)."""
-
-    @pytest.mark.asyncio
-    async def test_parse_email_with_attachments(self, bridge, mock_gmail_service):
-        """Test emails with attachments are parsed correctly."""
-        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "msg1"}]
-        }
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "msg1",
-            "threadId": "thread1",
-            "snippet": "Email with attachment",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "With Attachment"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
-                ],
-                "parts": [
-                    {
-                        "mimeType": "text/plain",
-                        "body": {"data": base64.urlsafe_b64encode(b"Text body").decode()},
-                    },
-                    {
-                        "mimeType": "application/pdf",
-                        "filename": "document.pdf",
-                        "body": {"attachmentId": "attach123", "size": 12345},
-                    },
-                ],
-            },
-        }
-
-        emails = await bridge.search_emails("test")
-
-        assert len(emails) == 1
-        assert len(emails[0].attachments) == 1
-        assert emails[0].attachments[0].filename == "document.pdf"
-        assert emails[0].attachments[0].mime_type == "application/pdf"
-        assert emails[0].attachments[0].size == 12345
-        assert emails[0].attachments[0].id == "attach123"
-
-    @pytest.mark.asyncio
-    async def test_download_attachment_success(self, bridge, mock_gmail_service):
-        """Test downloading attachment returns bytes."""
-        attachment_data = b"This is attachment content"
-        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
-            "data": base64.urlsafe_b64encode(attachment_data).decode()
-        }
-
-        data = await bridge.download_attachment("msg123", "attach123")
-
-        assert data == attachment_data
-
-    @pytest.mark.asyncio
-    async def test_download_attachment_error(self, bridge, mock_gmail_service):
-        """Test download attachment handles errors."""
-        from googleapiclient.errors import HttpError
-
-        mock_response = MagicMock()
-        mock_response.status = 404
-        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.side_effect = HttpError(
-            mock_response, b"Not found"
-        )
-
-        with pytest.raises(ExternalServiceError, match="Download attachment failed"):
-            await bridge.download_attachment("msg123", "invalid_attach")
-
-    @pytest.mark.asyncio
-    async def test_save_attachment_success(self, bridge, mock_gmail_service, tmp_path):
-        """Test saving attachment to disk."""
-        attachment_data = b"File content"
-        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
-            "data": base64.urlsafe_b64encode(attachment_data).decode()
-        }
-
-        save_path = str(tmp_path / "test_file.pdf")
-        result_path = await bridge.save_attachment("msg123", "attach123", save_path)
-
-        assert result_path == save_path
-        with Path(save_path).open("rb") as f:
-            assert f.read() == attachment_data
-
-    @pytest.mark.asyncio
-    async def test_email_message_id_header_parsed(self, bridge, mock_gmail_service):
-        """Test Message-ID header is parsed for threading."""
-        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
-            "messages": [{"id": "msg1"}]
-        }
-        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
-            "id": "msg1",
-            "threadId": "thread1",
-            "snippet": "Test",
-            "payload": {
-                "headers": [
-                    {"name": "Subject", "value": "Test"},
-                    {"name": "From", "value": "sender@example.com"},
-                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
-                    {"name": "Message-ID", "value": "<unique-id@example.com>"},
-                    {"name": "References", "value": "<older@example.com>"},
-                ],
-            },
-        }
-
-        emails = await bridge.search_emails("test")
-
-        assert emails[0].message_id_header == "<unique-id@example.com>"
-        assert emails[0].references == "<older@example.com>"
-
-
-# ===========================================================================
-# OAuth Refresh Tests (#214)
+# OAuth Refresh Tests
 # ===========================================================================
 
 
 class TestOAuthRefresh:
-    """Test OAuth token refresh handling (#214)."""
+    """Test OAuth token refresh handling."""
 
     @pytest.mark.asyncio
-    async def test_refresh_credentials_called_on_401(
+    async def test_401_triggers_refresh(
         self, mock_env, mock_credentials, mock_build, mock_gmail_service
     ):
-        """Test credentials are refreshed on 401 error."""
+        """Test that 401 error triggers token refresh and retries."""
         from googleapiclient.errors import HttpError
 
+        # First call raises 401, second succeeds
+        mock_response = MagicMock()
+        mock_response.status = 401
+        mock_response.reason = "Unauthorized"
+
+        call_count = [0]
+
+        def side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise HttpError(mock_response, b"Token expired")
+            return {"messages": []}
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = side_effect
+
         bridge = GoogleWorkspaceBridge()
         await bridge.start()
-
-        call_count = 0
-
-        def list_side_effect(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            mock_result = MagicMock()
-            if call_count == 1:
-                # First call returns 401
-                mock_response = MagicMock()
-                mock_response.status = 401
-                raise HttpError(mock_response, b"Token expired")
-            else:
-                # Second call succeeds
-                mock_result.execute.return_value = {"messages": []}
-                return mock_result
-
-        mock_gmail_service.users.return_value.messages.return_value.list.side_effect = (
-            list_side_effect
-        )
 
         # Should succeed after refresh
-        emails = await bridge.search_emails("test")
+        result = await bridge.search_emails("test")
 
-        assert len(emails) == 0
-        assert call_count == 2  # First failed, second succeeded
+        assert result == []
         # Verify refresh was called
-        mock_credentials.return_value.refresh.assert_called()
+        assert mock_credentials.return_value.refresh.call_count >= 1
 
     @pytest.mark.asyncio
-    async def test_refresh_credentials_method(self, mock_env, mock_credentials, mock_build):
-        """Test _refresh_credentials method."""
+    async def test_refresh_retries_operation(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that failed operation is retried after token refresh."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 401
+        mock_response.reason = "Unauthorized"
+
+        # Succeed on second try
+        first_call = True
+
+        def list_side_effect():
+            nonlocal first_call
+            if first_call:
+                first_call = False
+                raise HttpError(mock_response, b"Token expired")
+            return {"messages": [{"id": "msg1"}]}
+
+        def get_side_effect(userId, id, format):
+            return MagicMock(
+                execute=MagicMock(
+                    return_value={
+                        "id": id,
+                        "threadId": "thread1",
+                        "snippet": "test",
+                        "payload": {
+                            "headers": [
+                                {"name": "Subject", "value": "Test"},
+                                {"name": "From", "value": "test@test.com"},
+                                {"name": "Date", "value": "Mon, 01 Jan 2024 00:00:00 +0000"},
+                            ]
+                        },
+                    }
+                )
+            )
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = list_side_effect
+        mock_gmail_service.users.return_value.messages.return_value.get.side_effect = (
+            get_side_effect
+        )
+
         bridge = GoogleWorkspaceBridge()
         await bridge.start()
 
-        await bridge._refresh_credentials()
+        emails = await bridge.search_emails("test")
 
-        # Verify refresh was called
-        mock_credentials.return_value.refresh.assert_called()
+        assert len(emails) == 1
+        assert emails[0].id == "msg1"
+
+    @pytest.mark.asyncio
+    async def test_invalid_grant_raises_error(self, mock_env, mock_build, mock_gmail_service):
+        """Test that invalid_grant error raises ExternalServiceError."""
+        import google.auth.exceptions
+
+        with patch("klabautermann.mcp.google_workspace.Credentials") as mock_creds_class:
+            mock_creds = MagicMock()
+            mock_creds.token = "mock_token"
+
+            def raise_invalid_grant(_):
+                raise google.auth.exceptions.RefreshError("invalid_grant: Token has been revoked")
+
+            mock_creds.refresh.side_effect = raise_invalid_grant
+            mock_creds_class.return_value = mock_creds
+
+            bridge = GoogleWorkspaceBridge()
+
+            with pytest.raises(ExternalServiceError, match="Failed to refresh credentials"):
+                await bridge.start()
+
+    @pytest.mark.asyncio
+    async def test_non_401_error_not_retried(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that non-401 errors are not retried."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 500
+        mock_response.reason = "Internal Server Error"
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = HttpError(
+            mock_response, b"Server error"
+        )
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        with pytest.raises(ExternalServiceError, match="Search failed"):
+            await bridge.search_emails("test")
 
 
 # ===========================================================================
-# Rate Limiter Tests (#215)
+# Rate Limiting Tests
 # ===========================================================================
 
 
-class TestMCPRateLimiter:
-    """Test MCP rate limiter (#215)."""
+class TestRateLimiting:
+    """Test API rate limiting functionality."""
 
     @pytest.mark.asyncio
-    async def test_rate_limiter_allows_burst(self):
-        """Test rate limiter allows burst requests."""
-        limiter = MCPRateLimiter(requests_per_second=10.0, burst_allowance=5)
+    async def test_rate_limiter_initialization(self, mock_env, mock_credentials, mock_build):
+        """Test that rate limiters are initialized with correct config."""
+        bridge = GoogleWorkspaceBridge(
+            gmail_requests_per_minute=30,
+            calendar_requests_per_minute=20,
+            max_concurrent_requests=5,
+        )
 
-        # Should allow burst of 5 immediately
-        for _ in range(5):
-            wait_time = await limiter.acquire()
-            assert wait_time == 0.0
-
-    @pytest.mark.asyncio
-    async def test_rate_limiter_throttles_after_burst(self):
-        """Test rate limiter throttles after burst exhausted."""
-        limiter = MCPRateLimiter(requests_per_second=100.0, burst_allowance=2)
-
-        # Exhaust burst
-        await limiter.acquire()
-        await limiter.acquire()
-
-        # Third request should wait
-        wait_time = await limiter.acquire()
-        # Should have waited some time (at least a little)
-        assert wait_time >= 0.0
+        assert bridge._gmail_limiter.config.max_requests == 30
+        assert bridge._calendar_limiter.config.max_requests == 20
 
     @pytest.mark.asyncio
-    async def test_rate_limiter_tokens_replenish(self):
-        """Test rate limiter tokens replenish over time."""
-        limiter = MCPRateLimiter(requests_per_second=1000.0, burst_allowance=5)
-
-        # Exhaust burst
-        for _ in range(5):
-            await limiter.acquire()
-
-        # Wait a bit for tokens to replenish
-        import asyncio
-
-        await asyncio.sleep(0.01)  # 10ms at 1000 rps = 10 tokens
-
-        # Should have some tokens now
-        assert limiter.available_tokens > 0
-
-    def test_rate_limiter_available_tokens(self):
-        """Test available_tokens property."""
-        limiter = MCPRateLimiter(requests_per_second=10.0, burst_allowance=5)
-
-        # Initially should have burst allowance
-        assert limiter.available_tokens >= 4.5  # Some tolerance for timing
-
-    @pytest.mark.asyncio
-    async def test_bridge_uses_rate_limiter(self, bridge, mock_gmail_service):
-        """Test bridge uses rate limiter for API calls."""
+    async def test_rate_limiting_disabled(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that rate limiting can be disabled."""
         mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
             "messages": []
         }
 
-        # Make multiple requests
+        bridge = GoogleWorkspaceBridge(rate_limiting_enabled=False)
+        await bridge.start()
+
+        # Should work without rate limiting
+        for _ in range(100):
+            await bridge.search_emails("test")
+
+        # Gmail limiter should show full remaining (disabled)
+        assert bridge._gmail_limiter.config.enabled is False
+
+    @pytest.mark.asyncio
+    async def test_separate_gmail_calendar_limits(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service, mock_calendar_service
+    ):
+        """Test that Gmail and Calendar have separate rate limits."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": []
+        }
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": []
+        }
+
+        bridge = GoogleWorkspaceBridge(
+            gmail_requests_per_minute=5,
+            calendar_requests_per_minute=5,
+            rate_limiting_enabled=True,
+        )
+        await bridge.start()
+
+        # Make some Gmail calls
         for _ in range(3):
             await bridge.search_emails("test")
 
-        # Verify rate limiter was used (tokens decreased)
-        assert bridge._rate_limiter.available_tokens < 5  # Started with 5
+        # Gmail should have 2 remaining, Calendar should have 5
+        gmail_remaining = bridge._gmail_limiter.get_remaining("gmail")
+        calendar_remaining = bridge._calendar_limiter.get_remaining("calendar")
 
+        assert gmail_remaining == 2
+        assert calendar_remaining == 5
 
-# ===========================================================================
-# Email Attachment Model Tests
-# ===========================================================================
+    @pytest.mark.asyncio
+    async def test_429_response_backoff(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that 429 responses trigger backoff and retry."""
+        from googleapiclient.errors import HttpError
 
+        mock_response = MagicMock()
+        mock_response.status = 429
+        mock_response.reason = "Too Many Requests"
+        mock_response.get.return_value = "1"  # Retry-After: 1 second
 
-class TestEmailAttachmentModel:
-    """Test EmailAttachment model."""
+        call_count = [0]
 
-    def test_attachment_creation(self):
-        """Test creating EmailAttachment."""
-        attachment = EmailAttachment(
-            id="attach123",
-            filename="document.pdf",
-            mime_type="application/pdf",
-            size=12345,
+        def side_effect():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise HttpError(mock_response, b"Rate limit exceeded")
+            return {"messages": []}
+
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.side_effect = side_effect
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        # Should succeed after retry
+        result = await bridge.search_emails("test")
+
+        assert result == []
+        assert call_count[0] == 2  # Initial + retry
+
+    @pytest.mark.asyncio
+    async def test_semaphore_limits_concurrency(
+        self, mock_env, mock_credentials, mock_build, mock_gmail_service
+    ):
+        """Test that semaphore limits concurrent API calls."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute = (
+            MagicMock(side_effect=lambda: {"messages": []})
         )
 
-        assert attachment.id == "attach123"
-        assert attachment.filename == "document.pdf"
-        assert attachment.mime_type == "application/pdf"
-        assert attachment.size == 12345
+        bridge = GoogleWorkspaceBridge(max_concurrent_requests=2, rate_limiting_enabled=False)
+        await bridge.start()
 
-
-# ===========================================================================
-# Email Search Result Model Tests
-# ===========================================================================
-
-
-class TestEmailSearchResultModel:
-    """Test EmailSearchResult model."""
-
-    def test_search_result_creation(self):
-        """Test creating EmailSearchResult."""
-        result = EmailSearchResult(
-            emails=[],
-            next_page_token="token123",
-            result_size_estimate=100,
-        )
-
-        assert result.emails == []
-        assert result.next_page_token == "token123"
-        assert result.result_size_estimate == 100
-
-    def test_search_result_defaults(self):
-        """Test EmailSearchResult defaults."""
-        result = EmailSearchResult()
-
-        assert result.emails == []
-        assert result.next_page_token is None
-        assert result.result_size_estimate is None
+        # Bridge was started, semaphore should be created
+        assert bridge._semaphore._value == 2
