@@ -325,16 +325,20 @@ class Syncer(BaseAgent):
 
         # 5. Extract additional entities from event content via Graphiti
         # Call when there's meaningful content: attendees, description, or location
+        # Check entities_extracted flag to ensure idempotency
         has_extractable_content = event.description or event.attendees or event.location
         if self.graphiti and has_extractable_content:
-            content = self._format_calendar_event(event)
-            await self.graphiti.add_episode(
-                content=content,
-                source="calendar",
-                reference_time=event.start,
-                group_id="sync",
-                trace_id=trace_id,
-            )
+            already_extracted = await self._check_entities_extracted(event.id, trace_id)
+            if not already_extracted:
+                content = self._format_calendar_event(event)
+                await self.graphiti.add_episode(
+                    content=content,
+                    source="calendar",
+                    reference_time=event.start,
+                    group_id="sync",
+                    trace_id=trace_id,
+                )
+                await self._mark_entities_extracted(event.id, "calendar", trace_id)
 
         logger.debug(
             f"[WHISPER] Ingested calendar event: {event.title}",
@@ -537,15 +541,19 @@ class Syncer(BaseAgent):
         await self._link_to_day(email_uuid, email.date, trace_id)
 
         # 5. Extract additional entities from body via Graphiti
+        # Check entities_extracted flag to ensure idempotency
         if self.graphiti and email.body:
-            content = self._format_email(email)
-            await self.graphiti.add_episode(
-                content=content,
-                source="email",
-                reference_time=email.date,
-                group_id="sync",
-                trace_id=trace_id,
-            )
+            already_extracted = await self._check_entities_extracted(email.id, trace_id)
+            if not already_extracted:
+                content = self._format_email(email)
+                await self.graphiti.add_episode(
+                    content=content,
+                    source="email",
+                    reference_time=email.date,
+                    group_id="sync",
+                    trace_id=trace_id,
+                )
+                await self._mark_entities_extracted(email.id, "gmail", trace_id)
 
         logger.debug(
             f"[WHISPER] Ingested email: {email.subject}",
@@ -797,6 +805,82 @@ class Syncer(BaseAgent):
         # Calendar events are tracked via SyncState node
         # Email deduplication is handled by the Email node's external_id constraint
         pass
+
+    async def _check_entities_extracted(
+        self,
+        external_id: str,
+        trace_id: str,
+    ) -> bool:
+        """
+        Check if Graphiti entity extraction was already done for this item.
+
+        This provides idempotency for entity extraction, preventing duplicate
+        Episodic nodes from being created if the main sync dedup fails.
+
+        Args:
+            external_id: External ID of the item (Gmail message ID or Calendar event ID)
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if entities were already extracted, False otherwise
+        """
+        if not self.neo4j:
+            return False
+
+        query = """
+        MATCH (n {external_id: $external_id})
+        WHERE n:Email OR n:CalendarEvent
+        RETURN n.entities_extracted = true AS extracted
+        """
+        result = await self.neo4j.execute_read(
+            query,
+            {"external_id": external_id},
+            trace_id=trace_id,
+        )
+
+        return bool(result and result[0].get("extracted", False))
+
+    async def _mark_entities_extracted(
+        self,
+        external_id: str,
+        source: str,
+        trace_id: str,
+    ) -> None:
+        """
+        Mark node as having had entity extraction done.
+
+        Sets the entities_extracted flag on the Email or CalendarEvent node
+        to prevent duplicate Graphiti add_episode() calls.
+
+        Args:
+            external_id: External ID of the item
+            source: Source system ("gmail" or "calendar")
+            trace_id: Trace ID for logging
+        """
+        if not self.neo4j:
+            return
+
+        if source == "gmail":
+            query = """
+            MATCH (e:Email {external_id: $id})
+            SET e.entities_extracted = true
+            """
+        else:
+            query = """
+            MATCH (c:CalendarEvent {external_id: $id})
+            SET c.entities_extracted = true
+            """
+
+        await self.neo4j.execute_write(
+            query,
+            {"id": external_id},
+            trace_id=trace_id,
+        )
+
+        logger.debug(
+            f"[WHISPER] Marked entities_extracted for {source} {external_id}",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
 
     async def _update_sync_state(self, trace_id: str) -> None:
         """
