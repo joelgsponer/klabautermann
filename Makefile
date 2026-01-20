@@ -22,6 +22,7 @@ help:
 	@echo ""
 	@echo "Quality:"
 	@echo "  make test         Run all tests"
+	@echo "  make test-cov     Run tests with coverage report"
 	@echo "  make lint         Run linter (ruff)"
 	@echo "  make type-check   Run type checker (mypy)"
 	@echo "  make format       Format code (ruff format)"
