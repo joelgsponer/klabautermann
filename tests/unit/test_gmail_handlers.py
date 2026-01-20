@@ -350,7 +350,7 @@ class TestEmailFormatter:
 
         result = EmailFormatter.format_email_list(emails)
 
-        assert "Found 2 email(s):" in result
+        assert "Showing 2 email(s):" in result
         assert "1. [NEW] From: sarah@example.com" in result
         assert "Subject: Meeting Tomorrow" in result
         assert "2. From: john@example.com" in result
@@ -393,12 +393,51 @@ class TestEmailFormatter:
 
         result = EmailFormatter.format_email_list(emails, max_display=3)
 
-        assert "Found 10 email(s):" in result
+        assert "Showing 3 of 10 email(s):" in result
         assert "1. From: user0@example.com" in result
         assert "3. From: user2@example.com" in result
-        assert "... and 7 more" in result
+        assert "... and 7 more in results" in result
         # Should not show 4th email
         assert "4. From: user3@example.com" not in result
+
+    def test_format_email_list_with_total_available(self):
+        """Test format with total_available parameter."""
+        emails = [
+            EmailMessage(
+                id=str(i),
+                thread_id=f"t{i}",
+                subject=f"Email {i}",
+                sender=f"user{i}@example.com",
+                date=datetime(2026, 1, 15, 10, i),
+                snippet=f"Content {i}",
+            )
+            for i in range(20)
+        ]
+
+        # When results hit the total_available limit, show hint
+        result = EmailFormatter.format_email_list(emails, max_display=5, total_available=20)
+
+        assert "Showing 5 of 20 email(s):" in result
+        assert "(More emails may exist - ask for more results if needed)" in result
+
+    def test_format_email_list_under_total_available(self):
+        """Test format when results are under total_available limit."""
+        emails = [
+            EmailMessage(
+                id="1",
+                thread_id="t1",
+                subject="Test Email",
+                sender="test@example.com",
+                date=datetime(2026, 1, 15, 10, 0),
+                snippet="Test content",
+            ),
+        ]
+
+        # When results are under total_available, no hint
+        result = EmailFormatter.format_email_list(emails, max_display=5, total_available=20)
+
+        assert "Showing 1 email(s):" in result
+        assert "(More emails may exist" not in result
 
     def test_format_email_list_long_snippet(self):
         """Test snippet truncation."""
