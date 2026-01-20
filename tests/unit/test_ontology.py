@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from klabautermann.core.ontology import (
     ENTITY_TYPES,
+    CommunityType,
     HealthMetricType,
     HobbyType,
+    LoreEpisodeType,
     MilestoneType,
     NodeLabel,
     OrganizationType,
     PersonType,
     PetType,
+    PreferenceType,
     ProjectType,
     RelationType,
     RoutineType,
@@ -293,6 +296,122 @@ class TestRoutineType:
             assert routine.frequency == freq
 
 
+class TestPreferenceType:
+    """Tests for PreferenceType model."""
+
+    def test_default_values(self) -> None:
+        """Test PreferenceType with default values."""
+        pref = PreferenceType()
+        assert pref.category is None
+        assert pref.sentiment is None
+        assert pref.strength is None
+        assert pref.context is None
+
+    def test_with_all_fields(self) -> None:
+        """Test PreferenceType with all fields populated."""
+        pref = PreferenceType(
+            category="food",
+            sentiment="love",
+            strength=0.9,
+            context="Grew up in Italy",
+        )
+        assert pref.category == "food"
+        assert pref.sentiment == "love"
+        assert pref.strength == 0.9
+        assert pref.context == "Grew up in Italy"
+
+    def test_various_sentiments(self) -> None:
+        """Test various sentiment values."""
+        sentiments = ["like", "dislike", "love", "hate", "neutral", "indifferent"]
+        for sent in sentiments:
+            pref = PreferenceType(sentiment=sent)
+            assert pref.sentiment == sent
+
+    def test_strength_bounds(self) -> None:
+        """Test strength values at boundaries."""
+        pref_weak = PreferenceType(strength=0.0)
+        assert pref_weak.strength == 0.0
+
+        pref_strong = PreferenceType(strength=1.0)
+        assert pref_strong.strength == 1.0
+
+
+class TestCommunityType:
+    """Tests for CommunityType model."""
+
+    def test_default_values(self) -> None:
+        """Test CommunityType with default values."""
+        community = CommunityType()
+        assert community.theme is None
+        assert community.summary is None
+        assert community.node_count is None
+        assert community.coherence_score is None
+
+    def test_with_all_fields(self) -> None:
+        """Test CommunityType with all fields populated."""
+        community = CommunityType(
+            theme="work_projects",
+            summary="All nodes related to ongoing work projects",
+            node_count=25,
+            coherence_score=0.85,
+        )
+        assert community.theme == "work_projects"
+        assert community.summary == "All nodes related to ongoing work projects"
+        assert community.node_count == 25
+        assert community.coherence_score == 0.85
+
+    def test_various_themes(self) -> None:
+        """Test various community themes."""
+        themes = ["family", "work", "hobbies", "health", "finance", "travel"]
+        for theme in themes:
+            community = CommunityType(theme=theme)
+            assert community.theme == theme
+
+
+class TestLoreEpisodeType:
+    """Tests for LoreEpisodeType model."""
+
+    def test_default_values(self) -> None:
+        """Test LoreEpisodeType with default values."""
+        episode = LoreEpisodeType()
+        assert episode.saga_id is None
+        assert episode.chapter is None
+        assert episode.told_at is None
+        assert episode.topic is None
+        assert episode.is_revealed is False
+
+    def test_with_all_fields(self) -> None:
+        """Test LoreEpisodeType with all fields populated."""
+        episode = LoreEpisodeType(
+            saga_id="career_journey",
+            chapter=3,
+            told_at="2024-01-15T10:00:00",
+            topic="First promotion",
+            is_revealed=True,
+        )
+        assert episode.saga_id == "career_journey"
+        assert episode.chapter == 3
+        assert episode.told_at == "2024-01-15T10:00:00"
+        assert episode.topic == "First promotion"
+        assert episode.is_revealed is True
+
+    def test_unrevealed_episode(self) -> None:
+        """Test unrevealed lore episode."""
+        episode = LoreEpisodeType(
+            saga_id="family_history",
+            chapter=1,
+            is_revealed=False,
+        )
+        assert episode.saga_id == "family_history"
+        assert episode.is_revealed is False
+
+    def test_chapter_sequence(self) -> None:
+        """Test various chapter numbers."""
+        for chapter in [1, 5, 10, 50, 100]:
+            episode = LoreEpisodeType(chapter=chapter)
+            assert episode.chapter == chapter
+
+
 # =============================================================================
 # Test ENTITY_TYPES Dict
 # =============================================================================
@@ -318,6 +437,9 @@ class TestEntityTypes:
         assert "Pet" in ENTITY_TYPES
         assert "Milestone" in ENTITY_TYPES
         assert "Routine" in ENTITY_TYPES
+        assert "Preference" in ENTITY_TYPES
+        assert "Community" in ENTITY_TYPES
+        assert "LoreEpisode" in ENTITY_TYPES
 
     def test_types_are_pydantic_models(self) -> None:
         """Test that all entity types are Pydantic BaseModel subclasses."""
@@ -328,8 +450,8 @@ class TestEntityTypes:
 
     def test_total_entity_count(self) -> None:
         """Test total number of entity types."""
-        # 7 core + 5 personal life = 12
-        assert len(ENTITY_TYPES) == 12
+        # 7 core + 8 personal life = 15
+        assert len(ENTITY_TYPES) == 15
 
 
 # =============================================================================
