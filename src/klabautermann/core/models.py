@@ -757,6 +757,11 @@ class ActionType(str, Enum):
 
     EMAIL_SEND = "email_send"
     EMAIL_SEARCH = "email_search"
+    EMAIL_DELETE = "email_delete"
+    EMAIL_ARCHIVE = "email_archive"
+    EMAIL_LABEL = "email_label"
+    EMAIL_UNLABEL = "email_unlabel"
+    LABEL_LIST = "label_list"
     CALENDAR_CREATE = "calendar_create"
     CALENDAR_LIST = "calendar_list"
 
