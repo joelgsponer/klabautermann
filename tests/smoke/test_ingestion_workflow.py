@@ -10,7 +10,6 @@ Reference: CLAUDE.md testing philosophy
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -231,4 +230,4 @@ class TestTaskPlanningPromptSchema:
     def test_prompt_includes_execute_payload_schema(self) -> None:
         """TASK_PLANNING_PROMPT documents execute payload format."""
         assert "execute tasks:" in Orchestrator.TASK_PLANNING_PROMPT.lower()
-        assert '"action"' in Orchestrator.TASK_PLANNING_PROMPT
+        assert '"action_type"' in Orchestrator.TASK_PLANNING_PROMPT

@@ -361,6 +361,8 @@ class EmailFormatter:
         emails: list[EmailMessage],
         max_display: int = 5,
         include_snippet: bool = True,
+        include_body: bool = False,
+        body_max_length: int = 500,
     ) -> str:
         """
         Format list of emails for display.
@@ -369,6 +371,8 @@ class EmailFormatter:
             emails: List of email messages to format
             max_display: Maximum number of emails to show (default: 5)
             include_snippet: Whether to include preview snippets
+            include_body: Whether to include full body content (preferred over snippet)
+            body_max_length: Maximum length for body content truncation
 
         Returns:
             Formatted string for display
@@ -399,8 +403,11 @@ class EmailFormatter:
             date_str = email.date.strftime("%Y-%m-%d %H:%M")
             lines.append(f"   Date: {date_str}")
 
-            # Add snippet if requested
-            if include_snippet and email.snippet:
+            # Add body content if requested (preferred over snippet)
+            if include_body and email.body:
+                body = cls._truncate_text(email.body, max_length=body_max_length)
+                lines.append(f"   Content: {body}")
+            elif include_snippet and email.snippet:
                 snippet = cls._truncate_text(email.snippet, max_length=100)
                 lines.append(f"   Preview: {snippet}")
 

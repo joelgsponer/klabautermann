@@ -396,9 +396,9 @@ ERROR HANDLING:
                 context=invocation_ctx,
             )
 
-            # Format results using EmailFormatter
+            # Format results using EmailFormatter with full body content
             formatted = EmailFormatter.format_email_list(
-                emails, max_display=5, include_snippet=True
+                emails, max_display=5, include_body=True, body_max_length=500
             )
 
             logger.info(
