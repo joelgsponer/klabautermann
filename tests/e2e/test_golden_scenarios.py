@@ -118,9 +118,9 @@ class TestGoldenScenario1NewContact:
         )
 
         # Must find organization entity
-        assert (
-            len(result) >= 1
-        ), f"Organization entity for 'Acme Corp' must be created. Found {len(result)} entities."
+        assert len(result) >= 1, (
+            f"Organization entity for 'Acme Corp' must be created. Found {len(result)} entities."
+        )
 
     @pytest.mark.asyncio
     async def test_creates_works_at_fact(
@@ -231,9 +231,9 @@ class TestGoldenScenario2ContextualRetrieval:
 
         # Either facts about Bob or Bob's entity should be findable
         total_found = len(results) + len(entity_results)
-        assert (
-            total_found >= 0
-        ), "Should be able to find information about Bob via search or entity search"
+        assert total_found >= 0, (
+            "Should be able to find information about Bob via search or entity search"
+        )
 
     @pytest.mark.asyncio
     async def test_retrieves_relationship_facts(
