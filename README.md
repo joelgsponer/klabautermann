@@ -10,8 +10,23 @@ Klabautermann extracts entities from your conversations, stores them in Neo4j vi
 - **Temporal Knowledge Graph**: Neo4j + Graphiti for time-aware entity storage and retrieval
 - **Entity Extraction**: Automatically extracts people, organizations, tasks, and relationships from conversations
 - **Hybrid Search**: Combines semantic (vector), structural (graph), and temporal search strategies
-- **Google Workspace Integration**: Gmail and Calendar access via MCP
+- **Email Management**: Full Gmail integration - search, send, delete, archive, and label emails
+- **Calendar Integration**: View and create calendar events with conflict detection
 - **Hot-Reload Configuration**: Change agent configs without restarting
+
+### Current Capabilities
+
+| Feature | Status | Description |
+|---------|--------|-------------|
+| Entity Extraction | ✅ | Extract people, orgs, tasks from conversations |
+| Email Search | ✅ | Search emails with natural language queries |
+| Email Send | ✅ | Compose and send emails (draft first for safety) |
+| Email Delete | ✅ | Move emails to trash |
+| Email Archive | ✅ | Archive emails (remove from inbox) |
+| Email Labels | ✅ | Apply/remove labels, list available labels |
+| Calendar List | ✅ | View today's events |
+| Calendar Create | ✅ | Create events with conflict detection |
+| CLI Interface | ✅ | Rich terminal interface with markdown |
 
 ## Quick Start
 
@@ -136,7 +151,29 @@ Agent configurations live in `config/agents/`. Changes are hot-reloaded without 
 | `orchestrator.yaml` | Orchestrator | Intent classification, delegation rules |
 | `ingestor.yaml` | Ingestor | Entity extraction prompts |
 | `researcher.yaml` | Researcher | Search strategies, result formatting |
-| `executor.yaml` | Executor | Action validation, safety rules |
+| `executor.yaml` | Executor | Action validation, email/calendar settings |
+
+### Email Settings (executor.yaml)
+
+```yaml
+email:
+  max_results: 20    # Max emails to fetch from Gmail API
+  max_display: 10    # Max emails to show in output
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | Claude API key for agents |
+| `NEO4J_PASSWORD` | Yes | Neo4j database password |
+| `OPENAI_API_KEY` | No | For entity extraction (Graphiti) |
+| `GOOGLE_CLIENT_ID` | No | For Gmail/Calendar integration |
+| `GOOGLE_CLIENT_SECRET` | No | For Gmail/Calendar integration |
+| `GOOGLE_REFRESH_TOKEN` | No | OAuth2 refresh token |
+| `LOG_LEVEL` | No | Logging level (default: WARNING in CLI) |
+| `NO_COLOR` | No | Disable colored output |
+| `KLABAUTERMANN_NO_SPINNER` | No | Disable animated spinner |
 
 ## Project Structure
 
@@ -170,6 +207,10 @@ klabautermann3/
 
 See `specs/ROADMAP.md` for detailed planning.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow, git practices, and coding standards.
+
 ## License
 
-Private project.
+MIT License. See [LICENSE](LICENSE) for details.
