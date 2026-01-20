@@ -264,6 +264,29 @@ class TestIntentClassification:
             assert intent.type == IntentType.CONVERSATION
             assert intent.confidence == 0.7
 
+    @pytest.mark.asyncio
+    async def test_graceful_degradation_on_llm_failure(
+        self,
+        orchestrator: Orchestrator,
+    ) -> None:
+        """AI-first: LLM failures gracefully degrade to low-confidence CONVERSATION.
+
+        When the LLM fails both the initial call and the retry, we return
+        CONVERSATION with 0.3 confidence (not keyword-based heuristics).
+        """
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            # Simulate LLM failure on both initial call and retry
+            mock_llm.side_effect = Exception("LLM unavailable")
+            intent = await orchestrator._classify_intent("Send email to John", None, "test-trace")
+            # Should gracefully degrade to CONVERSATION with low confidence
+            # NOT use keyword-based heuristics (which would return ACTION)
+            assert intent.type == IntentType.CONVERSATION
+            assert intent.confidence == 0.3  # Low confidence signals uncertainty
+            # LLM should have been called twice (initial + retry)
+            assert mock_llm.call_count == 2
+
 
 # ====================
 # AGENT DELEGATION TESTS

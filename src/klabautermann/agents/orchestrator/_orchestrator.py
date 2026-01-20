@@ -823,10 +823,11 @@ class Orchestrator(BaseAgent):
         trace_id: str,
     ) -> IntentClassification:
         """
-        Classify user intent using LLM with structured JSON output.
+        Classify user intent using LLM with structured JSON output (AI-first).
 
-        Uses Claude Haiku for fast, semantic intent classification. Falls back
-        to simple heuristics if LLM call fails.
+        Uses Claude Haiku for fast, semantic intent classification. On failure,
+        retries once then gracefully degrades to low-confidence CONVERSATION.
+        No keyword-based heuristics - pure LLM semantic understanding.
 
         Args:
             text: User's message text.
@@ -883,67 +884,54 @@ class Orchestrator(BaseAgent):
             )
 
         except Exception as e:
-            # Fallback to simple heuristics if LLM fails
+            # AI-first: Retry once with LLM, then gracefully degrade
+            # No keyword-based fallback - use pure semantic understanding
             logger.warning(
-                f"[SWELL] LLM classification failed, using fallback: {e}",
+                f"[SWELL] LLM classification failed, attempting retry: {e}",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
-            return self._classify_intent_fallback(text, trace_id)
 
-    def _classify_intent_fallback(self, text: str, trace_id: str) -> IntentClassification:
-        """
-        Simple fallback classification when LLM is unavailable.
+            try:
+                # Single retry - gives LLM another chance for transient errors
+                response_text = await self._call_classification_model(
+                    self.CLASSIFICATION_PROMPT.format(message=text), trace_id
+                )
+                json_str = response_text.strip()
+                if json_str.startswith("```"):
+                    lines = json_str.split("\n")
+                    json_lines = [line for line in lines if not line.startswith("```")]
+                    json_str = "\n".join(json_lines)
 
-        Uses basic heuristics - much less accurate than LLM but works offline.
-        """
-        text_lower = text.lower().strip()
+                import json as json_module
 
-        # Question mark -> SEARCH
-        if "?" in text:
-            logger.debug(
-                "[WHISPER] Fallback: question mark -> SEARCH",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return IntentClassification(
-                type=IntentType.SEARCH,
-                confidence=0.6,
-                query=text,
-            )
+                parsed = json_module.loads(json_str)
+                if "intent_type" in parsed and isinstance(parsed["intent_type"], str):
+                    parsed["intent_type"] = parsed["intent_type"].lower()
+                json_str = json_module.dumps(parsed)
 
-        # Action keywords
-        action_starts = ("send", "email", "schedule", "create", "draft", "book")
-        if any(text_lower.startswith(kw) for kw in action_starts):
-            logger.debug(
-                "[WHISPER] Fallback: action keyword -> ACTION",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return IntentClassification(
-                type=IntentType.ACTION,
-                confidence=0.6,
-                action=text,
-            )
+                result = IntentClassificationResponse.model_validate_json(json_str)
+                logger.info(
+                    f"[CHART] LLM retry succeeded: {result.intent_type.value}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                return IntentClassification(
+                    type=result.intent_type,
+                    confidence=result.confidence,
+                    query=result.extracted_query,
+                    action=result.extracted_action,
+                )
 
-        # Ingestion keywords
-        ingest_starts = ("i met", "i talked", "i spoke", "i learned", "i just")
-        if any(text_lower.startswith(kw) for kw in ingest_starts):
-            logger.debug(
-                "[WHISPER] Fallback: ingestion keyword -> INGESTION",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return IntentClassification(
-                type=IntentType.INGESTION,
-                confidence=0.6,
-            )
-
-        # Default to conversation
-        logger.debug(
-            "[WHISPER] Fallback: default -> CONVERSATION",
-            extra={"trace_id": trace_id, "agent_name": self.name},
-        )
-        return IntentClassification(
-            type=IntentType.CONVERSATION,
-            confidence=0.5,
-        )
+            except Exception as retry_error:
+                # Graceful degradation - return low-confidence CONVERSATION
+                # This signals to upstream that classification was uncertain
+                logger.error(
+                    f"[STORM] LLM classification retry failed, graceful degradation: {retry_error}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                return IntentClassification(
+                    type=IntentType.CONVERSATION,
+                    confidence=0.3,  # Low confidence signals uncertainty
+                )
 
     # =========================================================================
     # Intent Handlers (T021 - Full Delegation)

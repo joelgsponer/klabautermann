@@ -614,19 +614,9 @@ personality: klabautermann
 temperature: 0.7
 
 intent_classification:
-  search_keywords:
-    - "who"
-    - "what"
-    - "when"
-    - "where"
-    - "find"
-    - "tell me about"
-  action_keywords:
-    - "send"
-    - "email"
-    - "schedule"
-    - "create"
-    - "draft"
+  # AI-first: Uses LLM semantic understanding, no keyword matching
+  model: claude-3-5-haiku-20241022  # Fast model for classification
+  timeout: 5.0  # Seconds before graceful degradation
 
 delegation:
   search: researcher
