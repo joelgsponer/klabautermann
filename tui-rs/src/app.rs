@@ -1,9 +1,16 @@
 //! Main application state for Klabautermann TUI.
 
+use arboard::Clipboard;
 use chrono::{DateTime, Utc};
+use serde::Serialize;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::Command;
 use std::time::Instant;
 use tui_textarea::TextArea;
 
+use crate::commands::{CommandResult, CopyFormat};
 use crate::theme::LOADING_MESSAGES;
 use crate::ws::Entity;
 
@@ -26,7 +33,7 @@ pub enum InputMode {
 }
 
 /// A chat message in the history.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChatMessage {
     /// True if this is a user message, false for bot
     pub is_user: bool,
@@ -34,6 +41,14 @@ pub struct ChatMessage {
     pub content: String,
     /// When the message was received
     pub timestamp: DateTime<Utc>,
+}
+
+/// JSON-serializable message format for export.
+#[derive(Debug, Serialize)]
+struct ExportMessage {
+    role: String,
+    content: String,
+    timestamp: String,
 }
 
 /// Main application state.
@@ -230,5 +245,188 @@ impl App {
         self.input.select_all();
         self.input.delete_char();
         content
+    }
+
+    // =========================================================================
+    // Copy Command Handlers
+    // =========================================================================
+
+    /// Handle the /copy command to export messages.
+    pub fn handle_copy_command(&self, count: usize, format: CopyFormat) -> CommandResult {
+        if self.messages.is_empty() {
+            return CommandResult::Error("No messages to copy.".to_string());
+        }
+
+        // Get last N messages
+        let start = self.messages.len().saturating_sub(count);
+        let messages = &self.messages[start..];
+        let actual_count = messages.len();
+
+        // Format messages
+        let content = self.format_messages(messages, format);
+
+        // Try export destinations in order: clipboard -> neovim -> file
+        if self.try_clipboard(&content) {
+            return CommandResult::Success(format!(
+                "Copied {} message(s) to clipboard",
+                actual_count
+            ));
+        }
+
+        if let Some(path) = self.try_neovim(&content, format) {
+            return CommandResult::Success(format!(
+                "Exported {} message(s) to neovim: {}",
+                actual_count, path
+            ));
+        }
+
+        match self.export_to_file(&content, format) {
+            Ok(path) => CommandResult::Success(format!(
+                "Exported {} message(s) to {}",
+                actual_count, path
+            )),
+            Err(e) => CommandResult::Error(format!("Failed to export: {}", e)),
+        }
+    }
+
+    /// Format messages according to the specified format.
+    fn format_messages(&self, messages: &[ChatMessage], format: CopyFormat) -> String {
+        match format {
+            CopyFormat::Markdown => self.format_markdown(messages),
+            CopyFormat::Plain => self.format_plain(messages),
+            CopyFormat::Json => self.format_json(messages),
+        }
+    }
+
+    /// Format messages as Markdown.
+    fn format_markdown(&self, messages: &[ChatMessage]) -> String {
+        messages
+            .iter()
+            .map(|msg| {
+                let role = if msg.is_user { "User" } else { "Assistant" };
+                let timestamp = msg.timestamp.format("%Y-%m-%d %H:%M:%S");
+                format!("## {} ({})\n\n{}", role, timestamp, msg.content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n")
+    }
+
+    /// Format messages as plain text.
+    fn format_plain(&self, messages: &[ChatMessage]) -> String {
+        messages
+            .iter()
+            .map(|msg| {
+                let label = if msg.is_user {
+                    "You"
+                } else {
+                    "Klabautermann"
+                };
+                format!("[{}] {}", label, msg.content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// Format messages as JSON.
+    fn format_json(&self, messages: &[ChatMessage]) -> String {
+        let export_messages: Vec<ExportMessage> = messages
+            .iter()
+            .map(|msg| ExportMessage {
+                role: if msg.is_user {
+                    "user".to_string()
+                } else {
+                    "assistant".to_string()
+                },
+                content: msg.content.clone(),
+                timestamp: msg.timestamp.to_rfc3339(),
+            })
+            .collect();
+
+        serde_json::to_string_pretty(&export_messages).unwrap_or_else(|_| "[]".to_string())
+    }
+
+    /// Try to copy content to system clipboard.
+    fn try_clipboard(&self, content: &str) -> bool {
+        match Clipboard::new() {
+            Ok(mut clipboard) => clipboard.set_text(content).is_ok(),
+            Err(_) => false,
+        }
+    }
+
+    /// Try to export to neovim buffer via temp file.
+    fn try_neovim(&self, content: &str, format: CopyFormat) -> Option<String> {
+        // Check if nvim is available
+        if Command::new("which")
+            .arg("nvim")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+        {
+            // Create temp file
+            let ext = format.extension();
+            let temp_path = std::env::temp_dir().join(format!(
+                "klabautermann_export_{}{}",
+                uuid::Uuid::new_v4(),
+                ext
+            ));
+
+            if let Ok(mut file) = fs::File::create(&temp_path) {
+                if file.write_all(content.as_bytes()).is_ok() {
+                    // Open in nvim (non-blocking)
+                    let path_str = temp_path.to_string_lossy().to_string();
+                    if Command::new("nvim").arg(&path_str).spawn().is_ok() {
+                        return Some(path_str);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Export content to a file in the exports directory.
+    fn export_to_file(&self, content: &str, format: CopyFormat) -> Result<String, String> {
+        // Get export directory
+        let export_dir = self.get_export_dir()?;
+
+        // Create filename with timestamp
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let ext = format.extension();
+        let filename = format!("conversation_{}{}", timestamp, ext);
+        let filepath = export_dir.join(filename);
+
+        // Write file
+        fs::write(&filepath, content).map_err(|e| format!("Write failed: {}", e))?;
+
+        Ok(filepath.to_string_lossy().to_string())
+    }
+
+    /// Get or create the exports directory.
+    fn get_export_dir(&self) -> Result<PathBuf, String> {
+        let export_dir = dirs::home_dir()
+            .ok_or("Could not find home directory")?
+            .join(".klabautermann")
+            .join("exports");
+
+        fs::create_dir_all(&export_dir).map_err(|e| format!("Could not create export dir: {}", e))?;
+
+        Ok(export_dir)
+    }
+
+    /// Get connection status as a formatted string.
+    pub fn status_text(&self) -> String {
+        let conn_status = match &self.connection_state {
+            ConnectionState::Connecting => "Connecting...".to_string(),
+            ConnectionState::Connected => "Connected".to_string(),
+            ConnectionState::Disconnected => "Disconnected".to_string(),
+            ConnectionState::Error(e) => format!("Error: {}", e),
+        };
+
+        format!(
+            "Connection: {}\nThread ID: {}\nMessages: {}\nEntities: {}",
+            conn_status,
+            self.thread_id,
+            self.messages.len(),
+            self.entities.len()
+        )
     }
 }

@@ -16,12 +16,14 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 mod app;
+mod commands;
 mod event;
 mod theme;
 mod ui;
 mod ws;
 
 use app::{App, ConnectionState};
+use commands::{help_text, Command, CommandResult};
 use event::{AppEvent, EventHandler};
 use ws::{ServerMessage, WsClient};
 
@@ -296,16 +298,37 @@ async fn handle_insert_mode_key(
                 app.input.input(key);
             }
         }
-        // Enter: Send message (if not waiting)
+        // Enter: Send message or execute command (if not waiting)
         Enter if !app.waiting => {
             let content = app.take_input();
-            if !content.trim().is_empty() {
+            if content.trim().is_empty() {
+                return;
+            }
+
+            // Check if this is a local command
+            let command = Command::parse(&content);
+
+            if command.is_local() {
+                // Execute local command
+                let result = execute_command(app, command);
+
+                // Display result as bot message
+                match result {
+                    CommandResult::Success(msg) => {
+                        app.add_bot_message(msg);
+                    }
+                    CommandResult::Error(msg) => {
+                        app.add_bot_message(format!("Error: {}", msg));
+                    }
+                    CommandResult::None => {}
+                }
+            } else {
+                // Send to backend via WebSocket
                 app.add_user_message(content.clone());
                 app.waiting = true;
                 app.loading_index = 0;
                 app.loading_message = theme::LOADING_MESSAGES[0].to_string();
 
-                // Send via WebSocket
                 if let Some(ref client) = ws_client {
                     client.send_chat(content, Some(app.thread_id.clone())).await;
                 }
@@ -315,5 +338,25 @@ async fn handle_insert_mode_key(
         _ => {
             app.input.input(key);
         }
+    }
+}
+
+/// Execute a local command and return the result.
+fn execute_command(app: &mut App, command: Command) -> CommandResult {
+    match command {
+        Command::Copy { count, format } => app.handle_copy_command(count, format),
+        Command::Clear => {
+            app.clear_messages();
+            CommandResult::Success("Chat history cleared.".to_string())
+        }
+        Command::Help => {
+            app.add_bot_message(help_text());
+            CommandResult::None
+        }
+        Command::Status => {
+            app.add_bot_message(app.status_text());
+            CommandResult::None
+        }
+        Command::NotACommand => CommandResult::None,
     }
 }
