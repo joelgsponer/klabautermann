@@ -9,13 +9,20 @@ Features:
 - Progress spinners during LLM processing
 - Command history with up/down arrow navigation
 - Styled prompts and output
+- Message export to neovim buffer for headless environments
 
 Reference: specs/architecture/CHANNELS.md
 """
 
 from __future__ import annotations
 
+import re
+import shutil
+import subprocess
+import tempfile
 import uuid
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +38,15 @@ from klabautermann.core.logger import (
     restore_console_logging,
     suppress_console_logging,
 )
+
+
+@dataclass
+class ChatMessage:
+    """Represents a chat message in the conversation history."""
+
+    role: str  # "user" or "assistant"
+    content: str
+    timestamp: datetime
 
 
 # Track log visibility state
@@ -77,6 +93,7 @@ class CLIDriver(BaseChannel):
         self._running = False
         self._message_count = 0
         self._sanitizer = InputSanitizer()
+        self._message_history: list[ChatMessage] = []
         # Check for NO_SPINNER env var to disable animated spinner
         import os
 
@@ -189,13 +206,34 @@ class CLIDriver(BaseChannel):
                             self.renderer.render_info("Logs disabled")
                         continue
 
+                    # Check for copy/export command
+                    copy_match = re.match(
+                        r"^/(?:copy|export)(?:\s+(\d+))?(?:\s+--format=(\w+))?$",
+                        user_input.lower(),
+                    )
+                    if copy_match:
+                        count = int(copy_match.group(1) or 1)
+                        format_type = copy_match.group(2) or "markdown"
+                        await self._handle_copy_command(count, format_type)
+                        continue
+
                     # Echo user input with distinct styling
                     self.renderer.render_user_input(user_input)
+
+                    # Track user message in history
+                    self._message_history.append(
+                        ChatMessage(role="user", content=user_input, timestamp=datetime.now())
+                    )
 
                     # Process the message with spinner
                     response = await self.receive_message(
                         thread_id=self.get_thread_id(),
                         content=user_input,
+                    )
+
+                    # Track assistant response in history
+                    self._message_history.append(
+                        ChatMessage(role="assistant", content=response, timestamp=datetime.now())
                     )
 
                     # Display the response with markdown rendering
@@ -306,6 +344,199 @@ class CLIDriver(BaseChannel):
 
         result: str = (await self._prompt_session.prompt_async(prompt)).strip()
         return result
+
+    async def _handle_copy_command(
+        self,
+        count: int = 1,
+        format_type: str = "markdown",
+    ) -> None:
+        """
+        Handle the /copy command to export messages.
+
+        Args:
+            count: Number of recent messages to export
+            format_type: Output format (markdown, plain, json)
+        """
+        if not self._message_history:
+            self.renderer.render_info("No messages to copy.")
+            return
+
+        # Get the last N messages
+        messages = self._message_history[-count:]
+
+        if not messages:
+            self.renderer.render_info("No messages to copy.")
+            return
+
+        # Format the messages
+        content = self._format_messages(messages, format_type)
+
+        # Try to export to neovim or fallback options
+        if self._export_to_neovim(content, format_type):
+            self.renderer.render_info(f"Exported {len(messages)} message(s) to neovim buffer")
+        elif self._try_clipboard(content):
+            self.renderer.render_info(f"Copied {len(messages)} message(s) to clipboard")
+        else:
+            # Fallback: write to temp file and display path
+            temp_path = self._export_to_file(content, format_type)
+            self.renderer.render_info(f"Exported {len(messages)} message(s) to {temp_path}")
+
+    def _format_messages(
+        self,
+        messages: list[ChatMessage],
+        format_type: str = "markdown",
+    ) -> str:
+        """
+        Format messages for export.
+
+        Args:
+            messages: Messages to format
+            format_type: Output format (markdown, plain, json)
+
+        Returns:
+            Formatted content string
+        """
+        if format_type == "json":
+            import json
+
+            return json.dumps(
+                [
+                    {
+                        "role": m.role,
+                        "content": m.content,
+                        "timestamp": m.timestamp.isoformat(),
+                    }
+                    for m in messages
+                ],
+                indent=2,
+            )
+
+        if format_type == "plain":
+            parts = []
+            for msg in messages:
+                role_label = "You" if msg.role == "user" else "Klabautermann"
+                parts.append(f"[{role_label}] {msg.content}")
+            return "\n\n".join(parts)
+
+        # Default: markdown format
+        parts = []
+        for msg in messages:
+            role_label = "User" if msg.role == "user" else "Assistant"
+            timestamp_str = msg.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            parts.append(f"## {role_label} ({timestamp_str})\n\n{msg.content}")
+        return "\n\n---\n\n".join(parts)
+
+    def _export_to_neovim(self, content: str, format_type: str = "markdown") -> bool:
+        """
+        Export content to a neovim buffer.
+
+        Args:
+            content: Content to export
+            format_type: Format type for file extension
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Check if neovim is available
+        if not shutil.which("nvim"):
+            return False
+
+        # Determine file extension
+        ext_map = {"markdown": ".md", "plain": ".txt", "json": ".json"}
+        ext = ext_map.get(format_type, ".md")
+
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=ext, delete=False, prefix="klabautermann_export_"
+        ) as f:
+            f.write(content)
+            temp_path = f.name
+
+        try:
+            # Open in neovim (works over SSH without X11)
+            subprocess.run(["nvim", temp_path], check=False)
+            return True
+        except Exception as e:
+            logger.debug(f"[WHISPER] Failed to open neovim: {e}")
+            return False
+
+    def _try_clipboard(self, content: str) -> bool:
+        """
+        Try to copy content to system clipboard.
+
+        Args:
+            content: Content to copy
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Try xclip (Linux with X11)
+        if shutil.which("xclip"):
+            try:
+                process = subprocess.run(
+                    ["xclip", "-selection", "clipboard"],
+                    input=content.encode(),
+                    check=True,
+                    capture_output=True,
+                )
+                return process.returncode == 0
+            except Exception:
+                pass
+
+        # Try pbcopy (macOS)
+        if shutil.which("pbcopy"):
+            try:
+                process = subprocess.run(
+                    ["pbcopy"],
+                    input=content.encode(),
+                    check=True,
+                    capture_output=True,
+                )
+                return process.returncode == 0
+            except Exception:
+                pass
+
+        # Try wl-copy (Wayland)
+        if shutil.which("wl-copy"):
+            try:
+                process = subprocess.run(
+                    ["wl-copy"],
+                    input=content.encode(),
+                    check=True,
+                    capture_output=True,
+                )
+                return process.returncode == 0
+            except Exception:
+                pass
+
+        return False
+
+    def _export_to_file(self, content: str, format_type: str = "markdown") -> str:
+        """
+        Export content to a file (fallback option).
+
+        Args:
+            content: Content to export
+            format_type: Format type for file extension
+
+        Returns:
+            Path to the exported file
+        """
+        ext_map = {"markdown": ".md", "plain": ".txt", "json": ".json"}
+        ext = ext_map.get(format_type, ".md")
+
+        # Create export directory if it doesn't exist
+        export_dir = HISTORY_DIR / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = export_dir / f"conversation_{timestamp}{ext}"
+
+        with filepath.open("w") as f:
+            f.write(content)
+
+        return str(filepath)
 
 
 # ===========================================================================

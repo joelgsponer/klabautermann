@@ -681,7 +681,11 @@ class Researcher(BaseAgent):
         limit: int,
         trace_id: str,
     ) -> list[RawSearchResult]:
-        """Execute time-filtered search."""
+        """Execute time-filtered search.
+
+        Handles both general temporal queries (using created_at) and
+        schedule-specific queries (using start_time for CalendarEvent nodes).
+        """
         if not self.neo4j:
             logger.debug(
                 "[WHISPER] Neo4j not available for temporal search",
@@ -696,36 +700,83 @@ class Researcher(BaseAgent):
         if not time_range or (time_range.start is None and time_range.end is None):
             return []
 
+        query_lower = query.lower()
+        results: list[RawSearchResult] = []
+
         try:
-            cypher = """
-            MATCH (n)
-            WHERE n.created_at >= $start AND n.created_at <= $end
-            RETURN n, labels(n) as labels
-            ORDER BY n.created_at DESC
-            LIMIT $limit
-            """
+            # Check if this is a schedule/calendar query
+            is_schedule_query = any(
+                kw in query_lower
+                for kw in ["schedule", "calendar", "event", "meeting", "appointment"]
+            )
 
-            params = {
-                "start": time_range.start or 0,
-                "end": time_range.end or datetime.now(UTC).timestamp(),
-                "limit": limit,
-            }
+            if is_schedule_query:
+                # Query CalendarEvent nodes by event start_time from all calendars
+                calendar_cypher = """
+                MATCH (c:CalendarEvent)
+                WHERE c.start_time >= $start AND c.start_time <= $end
+                RETURN c, labels(c) as labels
+                ORDER BY c.start_time ASC
+                LIMIT $limit
+                """
 
-            records = await self.neo4j.execute_query(cypher, params, trace_id=trace_id)
+                params = {
+                    "start": time_range.start or 0,
+                    "end": time_range.end or datetime.now(UTC).timestamp(),
+                    "limit": limit,
+                }
 
-            return [
-                RawSearchResult(
-                    content=self._format_node(record),
-                    source_technique=SearchTechnique.TEMPORAL,
-                    source_id=record.get("n", {}).get("uuid"),
-                    temporal_context=TemporalContext(
-                        created_at=record.get("n", {}).get("created_at", 0),
-                        is_current=True,
-                        human_readable=time_range.relative,
-                    ),
-                )
-                for record in records
-            ]
+                records = await self.neo4j.execute_query(calendar_cypher, params, trace_id=trace_id)
+
+                for record in records:
+                    node = record.get("c", {})
+                    # Format calendar event nicely
+                    content = self._format_calendar_event_node(node)
+                    results.append(
+                        RawSearchResult(
+                            content=content,
+                            source_technique=SearchTechnique.TEMPORAL,
+                            source_id=node.get("uuid"),
+                            temporal_context=TemporalContext(
+                                created_at=node.get("start_time", 0),
+                                is_current=True,
+                                human_readable=time_range.relative,
+                            ),
+                        )
+                    )
+            else:
+                # General temporal search using created_at
+                cypher = """
+                MATCH (n)
+                WHERE n.created_at >= $start AND n.created_at <= $end
+                RETURN n, labels(n) as labels
+                ORDER BY n.created_at DESC
+                LIMIT $limit
+                """
+
+                params = {
+                    "start": time_range.start or 0,
+                    "end": time_range.end or datetime.now(UTC).timestamp(),
+                    "limit": limit,
+                }
+
+                records = await self.neo4j.execute_query(cypher, params, trace_id=trace_id)
+
+                for record in records:
+                    results.append(
+                        RawSearchResult(
+                            content=self._format_node(record),
+                            source_technique=SearchTechnique.TEMPORAL,
+                            source_id=record.get("n", {}).get("uuid"),
+                            temporal_context=TemporalContext(
+                                created_at=record.get("n", {}).get("created_at", 0),
+                                is_current=True,
+                                human_readable=time_range.relative,
+                            ),
+                        )
+                    )
+
+            return results
 
         except Exception as e:
             logger.warning(
@@ -733,6 +784,44 @@ class Researcher(BaseAgent):
                 extra={"trace_id": trace_id},
             )
             return []
+
+    def _format_calendar_event_node(self, node: dict) -> str:
+        """Format a CalendarEvent node for display.
+
+        Args:
+            node: CalendarEvent node data from Neo4j
+
+        Returns:
+            Human-readable event description
+        """
+        title = node.get("title", "(no title)")
+        start_ts = node.get("start_time", 0)
+        end_ts = node.get("end_time", 0)
+        location = node.get("location")
+        calendar_name = node.get("calendar_name")
+
+        # Format datetime
+        if start_ts:
+            start_dt = datetime.fromtimestamp(start_ts, tz=UTC)
+            start_str = start_dt.strftime("%a %b %d at %I:%M %p")
+        else:
+            start_str = "unknown time"
+
+        if end_ts and start_ts:
+            duration = (end_ts - start_ts) / 60  # minutes
+            duration_str = f"{duration / 60:.1f}h" if duration >= 60 else f"{int(duration)}min"
+        else:
+            duration_str = ""
+
+        parts = [f"{title} - {start_str}"]
+        if duration_str:
+            parts[0] += f" ({duration_str})"
+        if location:
+            parts.append(f"  Location: {location}")
+        if calendar_name:
+            parts.append(f"  Calendar: {calendar_name}")
+
+        return "\n".join(parts)
 
     # =========================================================================
     # Result Aggregation and Scoring
@@ -1114,10 +1203,15 @@ class Researcher(BaseAgent):
         return "\n".join(lines)
 
     def _parse_time_reference(self, query: str) -> TimeRange | None:
-        """Parse time references from query into TimeRange."""
+        """Parse time references from query into TimeRange.
+
+        Handles both past and future time references for comprehensive
+        temporal queries including schedule lookups.
+        """
         query_lower = query.lower()
         now = datetime.now(UTC)
 
+        # Past references
         if "yesterday" in query_lower:
             start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0)
             end = start.replace(hour=23, minute=59, second=59)
@@ -1134,6 +1228,31 @@ class Researcher(BaseAgent):
             start = now - timedelta(days=365)
             end = now
             relative = "last year"
+        # Future references for schedule queries
+        elif "this week" in query_lower:
+            # Start of today to end of week (Sunday)
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            days_until_sunday = 6 - now.weekday()  # 0=Mon, 6=Sun
+            end = (now + timedelta(days=days_until_sunday)).replace(hour=23, minute=59, second=59)
+            relative = "this week"
+        elif "next week" in query_lower:
+            # Next Monday to next Sunday
+            days_until_monday = (7 - now.weekday()) % 7
+            if days_until_monday == 0:
+                days_until_monday = 7  # If today is Monday, skip to next Monday
+            start = (now + timedelta(days=days_until_monday)).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            end = (start + timedelta(days=6)).replace(hour=23, minute=59, second=59)
+            relative = "next week"
+        elif "tomorrow" in query_lower:
+            start = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0)
+            end = start.replace(hour=23, minute=59, second=59)
+            relative = "tomorrow"
+        elif "today" in query_lower:
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            end = now.replace(hour=23, minute=59, second=59)
+            relative = "today"
         else:
             # Try "X days/weeks/months ago"
             match = re.search(r"(\d+)\s*(day|week|month)s?\s*ago", query_lower)
@@ -1149,7 +1268,20 @@ class Researcher(BaseAgent):
                 end = now
                 relative = f"{count} {unit}s ago"
             else:
-                return None
+                # Try "next X days/weeks"
+                match = re.search(r"next\s+(\d+)\s*(day|week)s?", query_lower)
+                if match:
+                    count = int(match.group(1))
+                    unit = match.group(2)
+                    start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    if unit == "day":
+                        end = now + timedelta(days=count)
+                    else:
+                        end = now + timedelta(weeks=count)
+                    end = end.replace(hour=23, minute=59, second=59)
+                    relative = f"next {count} {unit}s"
+                else:
+                    return None
 
         return TimeRange(
             start=start.timestamp(),
@@ -1206,12 +1338,12 @@ class Researcher(BaseAgent):
 # ===========================================================================
 
 __all__ = [
-    "Researcher",
-    # Re-export models for convenience
-    "SearchTechnique",
     "ConfidenceLevel",
-    "ZoomLevel",
     "GraphIntelligenceReport",
     "RawSearchResult",
+    "Researcher",
     "SearchPlan",
+    # Re-export models for convenience
+    "SearchTechnique",
+    "ZoomLevel",
 ]

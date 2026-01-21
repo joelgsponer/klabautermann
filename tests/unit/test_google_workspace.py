@@ -474,6 +474,127 @@ class TestCalendarOperations:
         # Verify list was called
         mock_calendar_service.events.return_value.list.assert_called()
 
+    @pytest.mark.asyncio
+    async def test_list_calendars_owned_only(self, bridge, mock_calendar_service):
+        """Test listing only owned calendars."""
+        mock_calendar_service.calendarList.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {"id": "primary", "summary": "Main Calendar", "accessRole": "owner"},
+                {"id": "work@example.com", "summary": "Work", "accessRole": "owner"},
+                {"id": "holidays@google.com", "summary": "Holidays", "accessRole": "reader"},
+            ]
+        }
+
+        calendars = await bridge.list_calendars(owned_only=True)
+
+        assert len(calendars) == 2
+        assert calendars[0]["id"] == "primary"
+        assert calendars[1]["id"] == "work@example.com"
+
+    @pytest.mark.asyncio
+    async def test_list_calendars_all(self, bridge, mock_calendar_service):
+        """Test listing all calendars including shared."""
+        mock_calendar_service.calendarList.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {"id": "primary", "summary": "Main Calendar", "accessRole": "owner"},
+                {"id": "shared@example.com", "summary": "Shared", "accessRole": "reader"},
+            ]
+        }
+
+        calendars = await bridge.list_calendars(owned_only=False)
+
+        assert len(calendars) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_events_with_calendar_id(self, bridge, mock_calendar_service):
+        """Test listing events from a specific calendar."""
+        start_time = datetime(2024, 1, 15, 10, 0)
+        end_time = datetime(2024, 1, 15, 11, 0)
+
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {
+                    "id": "event1",
+                    "summary": "Work Meeting",
+                    "start": {"dateTime": start_time.isoformat() + "Z"},
+                    "end": {"dateTime": end_time.isoformat() + "Z"},
+                    "eventType": "default",
+                    "transparency": "opaque",
+                }
+            ]
+        }
+
+        events = await bridge.list_events(
+            start=datetime(2024, 1, 15),
+            end=datetime(2024, 1, 16),
+            calendar_id="work@example.com",
+            calendar_name="Work Calendar",
+        )
+
+        assert len(events) == 1
+        assert events[0].calendar_id == "work@example.com"
+        assert events[0].calendar_name == "Work Calendar"
+        assert events[0].event_type == "default"
+        assert events[0].transparency == "opaque"
+
+    @pytest.mark.asyncio
+    async def test_list_events_from_all_calendars(self, bridge, mock_calendar_service):
+        """Test listing events from all owned calendars."""
+        # Mock calendarList response
+        mock_calendar_service.calendarList.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {"id": "primary", "summary": "Main Calendar", "accessRole": "owner"},
+                {"id": "work@example.com", "summary": "Work", "accessRole": "owner"},
+            ]
+        }
+
+        # Mock events for each calendar
+        primary_events = {
+            "items": [
+                {
+                    "id": "event1",
+                    "summary": "Personal Event",
+                    "start": {"dateTime": "2024-01-15T09:00:00Z"},
+                    "end": {"dateTime": "2024-01-15T10:00:00Z"},
+                }
+            ]
+        }
+        work_events = {
+            "items": [
+                {
+                    "id": "event2",
+                    "summary": "Work Event",
+                    "start": {"dateTime": "2024-01-15T11:00:00Z"},
+                    "end": {"dateTime": "2024-01-15T12:00:00Z"},
+                }
+            ]
+        }
+
+        def list_events_side_effect(calendarId, **kwargs):
+            mock_result = MagicMock()
+            if calendarId == "primary":
+                mock_result.execute.return_value = primary_events
+            else:
+                mock_result.execute.return_value = work_events
+            return mock_result
+
+        mock_calendar_service.events.return_value.list.side_effect = list_events_side_effect
+
+        events = await bridge.list_events_from_all_calendars(
+            start=datetime(2024, 1, 15),
+            end=datetime(2024, 1, 16),
+            owned_only=True,
+        )
+
+        # Should have events from both calendars, sorted by start time
+        assert len(events) == 2
+        assert events[0].title == "Personal Event"
+        assert events[0].calendar_id == "primary"
+        assert events[0].calendar_name == "Main Calendar"
+        assert events[1].title == "Work Event"
+        assert events[1].calendar_id == "work@example.com"
+        assert events[1].calendar_name == "Work"
+
 
 # ===========================================================================
 # Lifecycle Tests

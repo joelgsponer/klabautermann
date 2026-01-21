@@ -55,6 +55,10 @@ class CalendarEvent(BaseModel):
     location: str | None = None
     description: str | None = None
     attendees: list[str] = Field(default_factory=list)
+    calendar_id: str = "primary"  # Which calendar this event belongs to
+    calendar_name: str | None = None  # Human-readable calendar name
+    event_type: str | None = None  # "default", "outOfOffice", "focusTime", "workingLocation"
+    transparency: str | None = None  # "opaque" (busy) or "transparent" (free)
 
 
 class SendEmailResult(BaseModel):
@@ -643,20 +647,71 @@ class GoogleWorkspaceBridge:
     # Calendar Operations
     # ===========================================================================
 
+    async def list_calendars(
+        self,
+        owned_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """
+        List all calendars accessible to the user.
+
+        Args:
+            owned_only: If True, only return calendars where user is owner
+
+        Returns:
+            List of calendar metadata dicts with id, summary, accessRole, etc.
+
+        Raises:
+            ExternalServiceError: If listing fails
+        """
+        await self.start()
+
+        loop = asyncio.get_event_loop()
+
+        def do_list() -> list[dict[str, Any]]:
+            try:
+                calendars: list[dict[str, Any]] = []
+                page_token = None
+
+                while True:
+                    results = (
+                        self._calendar_service.calendarList().list(pageToken=page_token).execute()
+                    )
+                    calendars.extend(results.get("items", []))
+                    page_token = results.get("nextPageToken")
+                    if not page_token:
+                        break
+
+                if owned_only:
+                    calendars = [c for c in calendars if c.get("accessRole") == "owner"]
+
+                return calendars
+            except HttpError as e:
+                raise ExternalServiceError("calendar", f"List calendars failed: {e}") from e
+
+        try:
+            return await loop.run_in_executor(None, do_list)
+        except Exception as e:
+            logger.error(f"[STORM] Calendar list failed: {e}")
+            raise
+
     async def list_events(
         self,
         start: datetime | None = None,
         end: datetime | None = None,
         max_results: int = 10,
+        calendar_id: str = "primary",
+        calendar_name: str | None = None,
         context: Any = None,  # noqa: ARG002
     ) -> list[CalendarEvent]:
         """
-        List calendar events in a time range.
+        List calendar events in a time range from a specific calendar.
 
         Args:
             start: Start of time range (default: now)
             end: End of time range (default: 7 days from start)
             max_results: Maximum number of events to return (default: 10)
+            calendar_id: Calendar ID to fetch from (default: "primary")
+            calendar_name: Human-readable calendar name for display
             context: Ignored (kept for interface compatibility)
 
         Returns:
@@ -683,7 +738,7 @@ class GoogleWorkspaceBridge:
                 results = (
                     self._calendar_service.events()
                     .list(
-                        calendarId="primary",
+                        calendarId=calendar_id,
                         timeMin=time_min,
                         timeMax=time_max,
                         maxResults=max_results,
@@ -699,13 +754,55 @@ class GoogleWorkspaceBridge:
 
         try:
             raw_events = await loop.run_in_executor(None, do_list)
-            return self._parse_calendar_events(raw_events)
+            return self._parse_calendar_events(raw_events, calendar_id, calendar_name)
         except Exception as e:
             logger.error(
                 f"[STORM] Calendar list failed: {e}",
                 extra={"start": start.isoformat(), "end": end.isoformat()},
             )
             raise
+
+    async def list_events_from_all_calendars(
+        self,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        max_results_per_calendar: int = 50,
+        owned_only: bool = True,
+    ) -> list[CalendarEvent]:
+        """
+        List events from all owned calendars.
+
+        Args:
+            start: Start of time range (default: now)
+            end: End of time range (default: 7 days from start)
+            max_results_per_calendar: Max events per calendar (default: 50)
+            owned_only: Only fetch from calendars where user is owner
+
+        Returns:
+            Combined list of events from all calendars, sorted by start time
+        """
+        calendars = await self.list_calendars(owned_only=owned_only)
+
+        all_events: list[CalendarEvent] = []
+        for cal in calendars:
+            cal_id = cal.get("id", "primary")
+            cal_name = cal.get("summary", "Unknown Calendar")
+            try:
+                events = await self.list_events(
+                    start=start,
+                    end=end,
+                    max_results=max_results_per_calendar,
+                    calendar_id=cal_id,
+                    calendar_name=cal_name,
+                )
+                all_events.extend(events)
+            except Exception as e:
+                logger.warning(f"[SWELL] Failed to fetch events from calendar {cal_name}: {e}")
+                continue
+
+        # Sort by start time
+        all_events.sort(key=lambda e: e.start)
+        return all_events
 
     async def create_event(
         self,
@@ -852,8 +949,19 @@ class GoogleWorkspaceBridge:
 
         return parsed
 
-    def _parse_calendar_events(self, events: list[dict[str, Any]]) -> list[CalendarEvent]:
-        """Parse Calendar API response into CalendarEvent models."""
+    def _parse_calendar_events(
+        self,
+        events: list[dict[str, Any]],
+        calendar_id: str = "primary",
+        calendar_name: str | None = None,
+    ) -> list[CalendarEvent]:
+        """Parse Calendar API response into CalendarEvent models.
+
+        Args:
+            events: Raw event data from Google Calendar API
+            calendar_id: The calendar ID these events belong to
+            calendar_name: Human-readable calendar name
+        """
         parsed: list[CalendarEvent] = []
 
         for evt in events:
@@ -882,6 +990,10 @@ class GoogleWorkspaceBridge:
                     location=evt.get("location"),
                     description=evt.get("description"),
                     attendees=[a.get("email", "") for a in evt.get("attendees", [])],
+                    calendar_id=calendar_id,
+                    calendar_name=calendar_name,
+                    event_type=evt.get("eventType"),  # "default", "outOfOffice", "focusTime", etc.
+                    transparency=evt.get("transparency"),  # "opaque" (busy) or "transparent" (free)
                 )
                 parsed.append(event)
 

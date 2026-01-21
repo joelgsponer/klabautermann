@@ -18,6 +18,7 @@ Reference: specs/architecture/AGENTS.md
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -73,6 +74,21 @@ class Syncer(BaseAgent):
         self.calendar_enabled = calendar_config.get("enabled", True)
         self.calendar_lookback_days = calendar_config.get("lookback_days", 7)
         self.calendar_lookahead_days = calendar_config.get("lookahead_days", 14)
+        self.calendar_sync_all = calendar_config.get("sync_all_calendars", True)
+        self.calendar_owned_only = calendar_config.get("owned_only", True)
+        self.calendar_sync_deletions = calendar_config.get("sync_deletions", True)
+
+        # Calendar filtering config
+        filter_config = calendar_config.get("filter", {})
+        self.calendar_blocked_patterns: list[re.Pattern[str]] = []
+        for pattern in filter_config.get("blocked_title_patterns", []):
+            try:
+                self.calendar_blocked_patterns.append(re.compile(pattern, re.IGNORECASE))
+            except re.error as e:
+                logger.warning(
+                    f"[SWELL] Invalid regex pattern '{pattern}': {e}",
+                    extra={"agent_name": self.name},
+                )
 
         email_config = self.config.get("email", {})
         self.email_enabled = email_config.get("enabled", True)
@@ -194,6 +210,10 @@ class Syncer(BaseAgent):
         """
         Sync calendar events from Google Calendar.
 
+        Supports syncing from all owned calendars or just the primary calendar,
+        controlled by configuration options. Also supports filtering out status
+        events and syncing deletions.
+
         Args:
             trace_id: Trace ID for logging
 
@@ -203,8 +223,10 @@ class Syncer(BaseAgent):
         if not self.google_bridge:
             return 0
 
+        sync_mode = "all calendars" if self.calendar_sync_all else "primary calendar"
         logger.info(
-            f"[CHART] Syncing calendar events (lookback: {self.calendar_lookback_days} days, "
+            f"[CHART] Syncing calendar events from {sync_mode} "
+            f"(lookback: {self.calendar_lookback_days} days, "
             f"lookahead: {self.calendar_lookahead_days} days)",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
@@ -214,17 +236,42 @@ class Syncer(BaseAgent):
         start = now - timedelta(days=self.calendar_lookback_days)
         end = now + timedelta(days=self.calendar_lookahead_days)
 
-        # Fetch events
-        events = await self.google_bridge.list_events(
-            start=start,
-            end=end,
-            max_results=100,
-        )
+        # Fetch events from all calendars or just primary
+        if self.calendar_sync_all:
+            events = await self.google_bridge.list_events_from_all_calendars(
+                start=start,
+                end=end,
+                max_results_per_calendar=100,
+                owned_only=self.calendar_owned_only,
+            )
+        else:
+            events = await self.google_bridge.list_events(
+                start=start,
+                end=end,
+                max_results=100,
+            )
+
+        # Collect external IDs of fetched events for deletion sync
+        fetched_external_ids: set[str] = set()
 
         synced_count = 0
+        filtered_count = 0
         for event in events:
-            # Check if already synced
-            if await self._is_already_synced(event.id, "calendar", trace_id):
+            # Build composite external ID
+            sync_key = f"{event.calendar_id}:{event.id}"
+            fetched_external_ids.add(sync_key)
+
+            # Filter out status events based on title patterns
+            if self._should_filter_event(event.title):
+                filtered_count += 1
+                logger.debug(
+                    f"[WHISPER] Filtered out status event: {event.title}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                continue
+
+            # Check if already synced (using composite key: calendar_id + event_id)
+            if await self._is_already_synced(sync_key, "calendar", trace_id):
                 continue
 
             try:
@@ -236,12 +283,101 @@ class Syncer(BaseAgent):
                     extra={"trace_id": trace_id, "agent_name": self.name},
                 )
 
+        # Sync deletions: remove CalendarEvent nodes that no longer exist in Google Calendar
+        deleted_count = 0
+        if self.calendar_sync_deletions:
+            deleted_count = await self._sync_calendar_deletions(
+                fetched_external_ids, start, end, trace_id
+            )
+
         logger.info(
-            f"[BEACON] Synced {synced_count} calendar events",
+            f"[BEACON] Calendar sync complete: {synced_count} synced, "
+            f"{filtered_count} filtered, {deleted_count} deleted",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
         return synced_count
+
+    def _should_filter_event(self, title: str) -> bool:
+        """
+        Check if an event should be filtered out based on title patterns.
+
+        Args:
+            title: Event title to check
+
+        Returns:
+            True if the event should be filtered out, False otherwise
+        """
+        return any(pattern.search(title) for pattern in self.calendar_blocked_patterns)
+
+    async def _sync_calendar_deletions(
+        self,
+        fetched_external_ids: set[str],
+        start: datetime,
+        end: datetime,
+        trace_id: str,
+    ) -> int:
+        """
+        Delete CalendarEvent nodes that no longer exist in Google Calendar.
+
+        Only deletes the CalendarEvent node itself, keeping derived entities
+        (Person, Location, Day) that may be referenced elsewhere.
+
+        Args:
+            fetched_external_ids: Set of external IDs from the current sync
+            start: Start of the sync time range
+            end: End of the sync time range
+            trace_id: Trace ID for logging
+
+        Returns:
+            Number of events deleted from the graph
+        """
+        if not self.neo4j:
+            return 0
+
+        # Query existing CalendarEvent nodes in the time range
+        query = """
+        MATCH (c:CalendarEvent)
+        WHERE c.start_time >= $start_ts AND c.start_time <= $end_ts
+        RETURN c.external_id AS external_id
+        """
+        existing_nodes = await self.neo4j.execute_read(
+            query,
+            {
+                "start_ts": start.timestamp(),
+                "end_ts": end.timestamp(),
+            },
+            trace_id=trace_id,
+        )
+
+        # Find nodes that exist in graph but not in fetched events
+        existing_ids = {node["external_id"] for node in existing_nodes if node.get("external_id")}
+        orphaned_ids = existing_ids - fetched_external_ids
+
+        # Delete orphaned nodes (but keep derived entities)
+        deleted_count = 0
+        for external_id in orphaned_ids:
+            try:
+                await self.neo4j.execute_write(
+                    """
+                    MATCH (c:CalendarEvent {external_id: $external_id})
+                    DETACH DELETE c
+                    """,
+                    {"external_id": external_id},
+                    trace_id=trace_id,
+                )
+                deleted_count += 1
+                logger.debug(
+                    f"[WHISPER] Deleted orphaned CalendarEvent: {external_id}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[SWELL] Failed to delete orphaned CalendarEvent {external_id}: {e}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+        return deleted_count
 
     async def sync_emails(self, trace_id: str) -> int:
         """
@@ -326,9 +462,11 @@ class Syncer(BaseAgent):
         # 5. Extract additional entities from event content via Graphiti
         # Call when there's meaningful content: attendees, description, or location
         # Check entities_extracted flag to ensure idempotency
+        # Use composite external_id for multi-calendar deduplication
+        composite_id = f"{event.calendar_id}:{event.id}"
         has_extractable_content = event.description or event.attendees or event.location
         if self.graphiti and has_extractable_content:
-            already_extracted = await self._check_entities_extracted(event.id, trace_id)
+            already_extracted = await self._check_entities_extracted(composite_id, trace_id)
             if not already_extracted:
                 content = self._format_calendar_event(event)
                 await self.graphiti.add_episode(
@@ -338,7 +476,7 @@ class Syncer(BaseAgent):
                     group_id="sync",
                     trace_id=trace_id,
                 )
-                await self._mark_entities_extracted(event.id, "calendar", trace_id)
+                await self._mark_entities_extracted(composite_id, "calendar", trace_id)
 
         logger.debug(
             f"[WHISPER] Ingested calendar event: {event.title}",
@@ -371,6 +509,8 @@ class Syncer(BaseAgent):
             location: $location,
             description: $description,
             external_id: $external_id,
+            calendar_id: $calendar_id,
+            calendar_name: $calendar_name,
             source: $source,
             created_at: $created_at
         })
@@ -379,6 +519,9 @@ class Syncer(BaseAgent):
         description = event.description
         if description and len(description) > 2000:
             description = description[:2000] + "..."
+
+        # Use composite external_id for multi-calendar deduplication
+        composite_id = f"{event.calendar_id}:{event.id}"
 
         await self.neo4j.execute_write(
             query,
@@ -389,7 +532,9 @@ class Syncer(BaseAgent):
                 "end_time": event.end.timestamp(),
                 "location": event.location,
                 "description": description,
-                "external_id": event.id,
+                "external_id": composite_id,
+                "calendar_id": event.calendar_id,
+                "calendar_name": event.calendar_name,
                 "source": "google_calendar",
                 "created_at": datetime.now(tz=UTC).timestamp(),
             },
@@ -936,6 +1081,8 @@ class Syncer(BaseAgent):
             f"Calendar Event: {event.title}",
             f"When: {start_fmt} to {end_fmt}",
         ]
+        if event.calendar_name:
+            parts.append(f"Calendar: {event.calendar_name}")
         if event.location:
             parts.append(f"Location: {event.location}")
         if event.attendees:
