@@ -145,10 +145,12 @@ class Orchestrator(BaseAgent):
         self._agent_registry["researcher"] = researcher
 
         # Create and register Ingestor agent for entity extraction
+        # Pass neo4j_client for entity linking (Bug #350)
         ingestor = Ingestor(
             name="ingestor",
             config=config,
             graphiti_client=graphiti,
+            neo4j_client=neo4j_client,
         )
         self._agent_registry["ingestor"] = ingestor
 
@@ -337,14 +339,17 @@ class Orchestrator(BaseAgent):
                     context = None
 
             # Store user message in thread (if thread_manager available)
+            # Capture message UUID for entity linking (Bug #350)
+            user_message_uuid: str | None = None
             if self.thread_manager:
                 try:
-                    await self.thread_manager.add_message(
+                    user_message = await self.thread_manager.add_message(
                         thread_uuid=thread_uuid,
                         role="user",
                         content=text,
                         trace_id=trace_id,
                     )
+                    user_message_uuid = user_message.uuid
                 except Exception as e:
                     logger.warning(
                         f"[SWELL] Could not store user message: {e}",
@@ -398,7 +403,9 @@ class Orchestrator(BaseAgent):
             # Fire-and-forget ingestion only for INGESTION intent (don't pollute graph with queries)
             if self.graphiti and intent.type == IntentType.INGESTION:
                 self._track_background_task(
-                    self._ingest_conversation(text, response_text, trace_id),
+                    self._ingest_conversation(
+                        text, response_text, trace_id, message_uuid=user_message_uuid
+                    ),
                     trace_id=trace_id,
                     task_name=f"ingest-v1-{trace_id}",
                 )
@@ -539,6 +546,7 @@ class Orchestrator(BaseAgent):
         user_text: str,
         _assistant_text: str,  # Reserved - not ingested to avoid meta-garbage
         trace_id: str,
+        message_uuid: str | None = None,
     ) -> None:
         """
         Fire-and-forget: ingest user message into knowledge graph.
@@ -555,10 +563,14 @@ class Orchestrator(BaseAgent):
         - Roleplay markers (*actions*, **Researcher**: etc.)
         - System mentions (The Locker, etc.)
 
+        After ingestion, creates MENTIONED_IN relationships between extracted
+        entities and the source Message node (Bug #350 fix).
+
         Args:
             user_text: User's message to ingest.
             _assistant_text: Reserved for future use (currently ignored).
             trace_id: Request trace ID.
+            message_uuid: UUID of the Message node to link entities to.
         """
         if not self.graphiti:
             return
@@ -580,7 +592,7 @@ class Orchestrator(BaseAgent):
             )
 
             # Ingest cleaned user message - Graphiti handles entity extraction
-            await self.graphiti.add_episode(
+            episode_name = await self.graphiti.add_episode(
                 content=cleaned_text,
                 source="conversation",
                 trace_id=trace_id,
@@ -588,14 +600,109 @@ class Orchestrator(BaseAgent):
 
             logger.debug(
                 "[WHISPER] Conversation ingested to Graphiti",
-                extra={"trace_id": trace_id, "agent_name": self.name},
+                extra={"trace_id": trace_id, "agent_name": self.name, "episode_name": episode_name},
             )
+
+            # Link extracted entities to the message (Bug #350 fix)
+            if message_uuid and self.neo4j_client:
+                await self._link_ingested_entities_to_message(
+                    episode_name=episode_name,
+                    message_uuid=message_uuid,
+                    trace_id=trace_id,
+                )
 
         except Exception as e:
             # Don't fail the response if ingestion fails
             logger.warning(
                 f"[SWELL] Ingestion failed (non-blocking): {e}",
                 extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+    async def _link_ingested_entities_to_message(
+        self,
+        episode_name: str,
+        message_uuid: str,
+        trace_id: str,
+    ) -> None:
+        """
+        Link entities extracted by Graphiti to the source message.
+
+        After Graphiti ingestion, queries for entities created by that episode
+        and creates MENTIONED_IN relationships to the Message node.
+
+        This enables queries like "What did I talk about with John?" to find
+        the specific message where John was mentioned.
+
+        Bug #350 fix: Closes the gap between Graphiti extraction and message linking.
+
+        Args:
+            episode_name: Name of the Graphiti episode (from add_episode).
+            message_uuid: UUID of the Message node to link entities to.
+            trace_id: Request trace ID for logging.
+        """
+        if not self.graphiti or not self.neo4j_client:
+            return
+
+        try:
+            # Get entities extracted by this episode
+            entities = await self.graphiti.get_entities_from_episode(
+                episode_name=episode_name,
+                trace_id=trace_id,
+            )
+
+            if not entities:
+                logger.debug(
+                    "[WHISPER] No entities found from episode to link",
+                    extra={
+                        "trace_id": trace_id,
+                        "episode_name": episode_name,
+                        "message_uuid": message_uuid[:8],
+                    },
+                )
+                return
+
+            # Convert to EntityReference objects for link_entities_to_message
+            from klabautermann.agents.researcher_models import EntityReference
+
+            entity_refs = [
+                EntityReference(
+                    uuid=e["uuid"],
+                    name=e.get("name", "Unknown"),
+                    entity_type=e.get("labels", ["Entity"])[0] if e.get("labels") else "Entity",
+                    confidence=1.0,  # High confidence since Graphiti extracted them
+                    source_technique="graphiti_ingestion",
+                )
+                for e in entities
+            ]
+
+            # Create MENTIONED_IN relationships
+            link_count = await link_entities_to_message(
+                neo4j=self.neo4j_client,
+                message_uuid=message_uuid,
+                entity_refs=entity_refs,
+                trace_id=trace_id,
+            )
+
+            logger.info(
+                f"[BEACON] Linked {link_count} ingested entities to message",
+                extra={
+                    "trace_id": trace_id,
+                    "episode_name": episode_name,
+                    "message_uuid": message_uuid[:8],
+                    "entity_count": len(entities),
+                    "link_count": link_count,
+                },
+            )
+
+        except Exception as e:
+            # Non-blocking: log but don't fail
+            logger.warning(
+                f"[SWELL] Entity linking failed (non-blocking): {e}",
+                extra={
+                    "trace_id": trace_id,
+                    "episode_name": episode_name,
+                    "message_uuid": message_uuid[:8],
+                },
             )
 
     # =========================================================================
@@ -1780,6 +1887,7 @@ Analyze this message and return a JSON task plan.
         task_plan: TaskPlan,
         trace_id: str,
         original_text: str = "",
+        message_uuid: str | None = None,
     ) -> dict[str, Any]:
         """
         Execute all planned tasks in parallel.
@@ -1794,18 +1902,23 @@ Analyze this message and return a JSON task plan.
             task_plan: TaskPlan from _plan_tasks()
             trace_id: For logging
             original_text: Original user message (fallback for ingest payloads)
+            message_uuid: UUID of user message for entity linking (Bug #350)
 
         Returns:
             Dictionary mapping task descriptions to results
         """
         # Validate and fix ingest task payloads before dispatch
         for task in task_plan.tasks:
-            if task.task_type == "ingest" and not task.payload.get("text"):
-                logger.warning(
-                    "[SWELL] Ingest task missing 'text' in payload, using original message",
-                    extra={"trace_id": trace_id, "description": task.description[:50]},
-                )
-                task.payload["text"] = original_text
+            if task.task_type == "ingest":
+                if not task.payload.get("text"):
+                    logger.warning(
+                        "[SWELL] Ingest task missing 'text' in payload, using original message",
+                        extra={"trace_id": trace_id, "description": task.description[:50]},
+                    )
+                    task.payload["text"] = original_text
+                # Add message_uuid for entity linking (Bug #350)
+                if message_uuid:
+                    task.payload["message_uuid"] = message_uuid
 
         blocking_count = sum(1 for t in task_plan.tasks if t.blocking)
         non_blocking_count = len(task_plan.tasks) - blocking_count
@@ -2163,14 +2276,17 @@ Analyze this message and return a JSON task plan.
             )
 
             # Store user message in thread
+            # Capture message UUID for entity linking (Bug #350)
+            user_message_uuid_v2: str | None = None
             if self.thread_manager:
                 try:
-                    await self.thread_manager.add_message(
+                    user_message = await self.thread_manager.add_message(
                         thread_uuid=thread_uuid,
                         role="user",
                         content=text,
                         trace_id=trace_id,
                     )
+                    user_message_uuid_v2 = user_message.uuid
                 except Exception as e:
                     logger.warning(
                         f"[SWELL] Failed to store user message: {e}",
@@ -2226,7 +2342,9 @@ Analyze this message and return a JSON task plan.
 
             # 4. Dispatch: Execute tasks in parallel (individual failures captured)
             exec_start = time.time()
-            results = await self._execute_parallel_safe(task_plan, trace_id, original_text=text)
+            results = await self._execute_parallel_safe(
+                task_plan, trace_id, original_text=text, message_uuid=user_message_uuid_v2
+            )
             logger.info(
                 "[BEACON] Parallel execution complete",
                 extra={
@@ -2580,6 +2698,7 @@ Analyze this message and return a JSON task plan.
         task_plan: TaskPlan,
         trace_id: str,
         original_text: str = "",
+        message_uuid: str | None = None,
     ) -> dict[str, Any]:
         """
         Execute all planned tasks in parallel with individual failure capture.
@@ -2593,13 +2712,14 @@ Analyze this message and return a JSON task plan.
             task_plan: TaskPlan from _plan_tasks()
             trace_id: For logging
             original_text: Original user message (fallback for ingest payloads)
+            message_uuid: UUID of user message for entity linking (Bug #350)
 
         Returns:
             Dictionary mapping task descriptions to results (includes errors)
         """
         try:
             # Use the existing _execute_parallel which already has return_exceptions=True
-            results = await self._execute_parallel(task_plan, trace_id, original_text)
+            results = await self._execute_parallel(task_plan, trace_id, original_text, message_uuid)
 
             # Count successes and failures
             success_count = sum(

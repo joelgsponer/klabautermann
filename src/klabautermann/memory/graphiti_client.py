@@ -129,7 +129,7 @@ class GraphitiClient:
         reference_time: datetime | None = None,
         group_id: str | None = None,
         trace_id: str | None = None,
-    ) -> None:
+    ) -> str:
         """
         Ingest new information into the knowledge graph.
 
@@ -145,6 +145,9 @@ class GraphitiClient:
             reference_time: When the events in content occurred
             group_id: Optional group identifier for related episodes
             trace_id: Trace ID for logging
+
+        Returns:
+            Episode name (can be used to query entities later)
         """
         self._ensure_connected()
         assert self._client is not None  # Guaranteed by _ensure_connected
@@ -169,8 +172,10 @@ class GraphitiClient:
             # Use current time if no reference time provided
             ref_time = reference_time or datetime.now(tz=UTC)
 
+            episode_name = f"episode_{trace_id or 'unknown'}_{ref_time.timestamp():.0f}"
+
             await self._client.add_episode(
-                name=f"episode_{trace_id or 'unknown'}_{ref_time.timestamp():.0f}",
+                name=episode_name,
                 episode_body=content,
                 source=episode_type,
                 source_description=f"Klabautermann {source} channel",
@@ -181,8 +186,14 @@ class GraphitiClient:
 
             logger.info(
                 "[BEACON] Episode ingested successfully",
-                extra={"trace_id": trace_id, "agent_name": "graphiti"},
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "graphiti",
+                    "episode_name": episode_name,
+                },
             )
+
+            return episode_name
 
         except Exception as e:
             logger.error(
@@ -383,6 +394,91 @@ class GraphitiClient:
                 extra={"trace_id": trace_id, "agent_name": "graphiti"},
             )
             return None
+
+    async def get_entities_from_episode(
+        self,
+        episode_name: str,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Retrieve entities that were extracted from a specific episode.
+
+        Queries the graph for EntityNode instances that are connected to
+        the episode via Graphiti's internal EXTRACTED_FROM or similar relationships.
+
+        Args:
+            episode_name: The name of the episode (returned from add_episode)
+            trace_id: Trace ID for logging
+
+        Returns:
+            List of entity dicts with uuid, name, and labels
+        """
+        self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
+
+        logger.debug(
+            f"[WHISPER] Querying entities from episode: {episode_name}",
+            extra={"trace_id": trace_id, "agent_name": "graphiti"},
+        )
+
+        try:
+            # Access the Neo4j driver from Graphiti client
+            driver = self._client.driver
+
+            # Query entities connected to this episode
+            # Graphiti stores Episode nodes and links entities via edges
+            # We need to find entities created/updated by this episode
+            cypher = """
+                MATCH (ep:EpisodicNode {name: $episode_name})
+                MATCH (e:EntityNode)-[r:MENTIONED_IN]->(ep)
+                RETURN DISTINCT e.uuid as uuid, e.name as name, labels(e) as labels
+                UNION
+                MATCH (ep:EpisodicNode {name: $episode_name})
+                MATCH (e:EntityNode)<-[:RELATES_TO]-(edge)-[:RELATES_TO]->(ep)
+                RETURN DISTINCT e.uuid as uuid, e.name as name, labels(e) as labels
+            """
+
+            async with driver.session() as session:
+                result = await session.run(cypher, parameters={"episode_name": episode_name})
+                records = await result.data()
+
+            entities: list[dict[str, Any]] = []
+            seen_uuids: set[str] = set()
+
+            for record in records:
+                uuid = record.get("uuid")
+                if uuid and uuid not in seen_uuids:
+                    seen_uuids.add(uuid)
+                    entities.append(
+                        {
+                            "uuid": uuid,
+                            "name": record.get("name", "Unknown"),
+                            "labels": record.get("labels", ["Entity"]),
+                        }
+                    )
+
+            logger.info(
+                f"[BEACON] Found {len(entities)} entities from episode",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "graphiti",
+                    "episode_name": episode_name,
+                    "entity_count": len(entities),
+                },
+            )
+
+            return entities
+
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Failed to get entities from episode: {e}",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "graphiti",
+                    "episode_name": episode_name,
+                },
+            )
+            return []
 
 
 # ===========================================================================

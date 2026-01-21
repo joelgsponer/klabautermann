@@ -297,8 +297,8 @@ class TestExecuteParallelSafe:
         ) as mock_execute:
             results = await orchestrator._execute_parallel_safe(task_plan, "trace-456")
 
-            # _execute_parallel now takes original_text parameter (defaults to "")
-            mock_execute.assert_called_once_with(task_plan, "trace-456", "")
+            # _execute_parallel now takes original_text and message_uuid parameters
+            mock_execute.assert_called_once_with(task_plan, "trace-456", "", None)
             assert "Find Sarah" in results
 
     @pytest.mark.asyncio
