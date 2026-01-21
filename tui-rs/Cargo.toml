@@ -20,8 +20,18 @@ tui-textarea = "0.7"
 clap = { version = "4.5", features = ["derive"] }
 uuid = { version = "1.11", features = ["v4"] }
 textwrap = "0.16"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 pulldown-cmark = "0.12"
+arboard = "3.4"
+regex = "1.10"
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[lib]
+name = "klabautermann_tui"
+path = "src/lib.rs"
 
 [profile.release]
 lto = true
