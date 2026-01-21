@@ -14,6 +14,19 @@ calendar:
   enabled: true
   lookback_days: 7        # How far back to sync on first run
   lookahead_days: 14      # How far ahead to sync
+  sync_all_calendars: true  # Sync all owned calendars, not just primary
+  owned_only: true          # Only sync calendars where user is owner (vs shared)
+  sync_deletions: true      # Remove CalendarEvent nodes when events are deleted from Calendar
+  filter:
+    # Block status events that pollute the knowledge graph
+    blocked_title_patterns:
+      - "^Home Office$"
+      - "^OOO"
+      - "^Out of Office"
+      - "^Focus Time"
+      - "^Busy$"
+      - "^Working from home$"
+      - "^WFH$"
 
 # Email sync settings
 # Only archived emails are ingested into the knowledge graph.

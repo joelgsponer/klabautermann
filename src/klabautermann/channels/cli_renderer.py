@@ -135,6 +135,20 @@ class CLIRenderer:
 | `/clear` | Clear screen and reset session |
 | `/status` | Show system status |
 | `/logs` | Toggle log output on/off |
+| `/copy [N]` | Copy last N messages (default: 1) |
+| `/export [N]` | Same as /copy (alias) |
+
+### /copy Options
+
+```
+/copy           # Copy last message
+/copy 5         # Copy last 5 messages
+/copy 5 --format=markdown  # Markdown format (default)
+/copy 5 --format=plain     # Plain text format
+/copy 5 --format=json      # JSON format
+```
+
+Opens in neovim if available, or falls back to clipboard/file.
 
 ## Tips
 

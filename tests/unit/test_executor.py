@@ -354,7 +354,7 @@ class TestEmailExecution:
         result = await executor._execute_action(request, {}, "trace-123")
 
         assert result.success is True
-        assert "Found 2 email(s)" in result.message
+        assert "Showing 2 email(s)" in result.message
         assert "sarah@example.com" in result.message
         assert "Meeting tomorrow" in result.message
 

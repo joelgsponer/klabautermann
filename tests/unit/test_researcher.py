@@ -408,6 +408,53 @@ class TestTimeReferenceParsing:
         result = researcher._parse_time_reference("Who is John?")
         assert result is None
 
+    # Future time references (for schedule queries)
+
+    def test_parse_this_week(self, researcher: Researcher) -> None:
+        """Parse 'this week' time reference for schedule queries."""
+        result = researcher._parse_time_reference("What's on my schedule this week?")
+        assert result is not None
+        assert result.relative == "this week"
+        assert result.start is not None
+        assert result.end is not None
+        # End should be after start (within 7 days)
+        assert result.end > result.start
+
+    def test_parse_next_week(self, researcher: Researcher) -> None:
+        """Parse 'next week' time reference for schedule queries."""
+        result = researcher._parse_time_reference("What's happening next week?")
+        assert result is not None
+        assert result.relative == "next week"
+        assert result.start is not None
+        assert result.end is not None
+        # Should be in the future
+        from datetime import UTC, datetime
+
+        now_ts = datetime.now(UTC).timestamp()
+        assert result.start > now_ts
+
+    def test_parse_tomorrow(self, researcher: Researcher) -> None:
+        """Parse 'tomorrow' time reference."""
+        result = researcher._parse_time_reference("What's on my schedule tomorrow?")
+        assert result is not None
+        assert result.relative == "tomorrow"
+        assert result.start is not None
+        assert result.end is not None
+
+    def test_parse_today(self, researcher: Researcher) -> None:
+        """Parse 'today' time reference."""
+        result = researcher._parse_time_reference("Show me today's events")
+        assert result is not None
+        assert result.relative == "today"
+
+    def test_parse_next_n_days(self, researcher: Researcher) -> None:
+        """Parse 'next N days' time reference."""
+        result = researcher._parse_time_reference("What's happening in the next 7 days?")
+        assert result is not None
+        assert result.relative == "next 7 days"
+        assert result.start is not None
+        assert result.end is not None
+
 
 # ===========================================================================
 # Test Structural Queries

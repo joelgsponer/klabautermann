@@ -212,6 +212,8 @@ class CalendarEventNode(BaseNode):
     location: str | None = None
     description: str | None = None
     external_id: str  # Google Calendar event ID (for deduplication)
+    calendar_id: str = "primary"  # Which calendar this event belongs to
+    calendar_name: str | None = None  # Human-readable calendar name
     source: str = "google_calendar"  # Source system
     is_all_day: bool = False
 
