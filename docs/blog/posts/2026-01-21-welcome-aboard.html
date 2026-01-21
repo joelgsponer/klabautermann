@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-21">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="welcome-aboard">
+    <meta name="post-excerpt" content="An introduction to our agentic personal knowledge management system, its multi-agent architecture, and the temporal knowledge graph at its heart.">
+    <title>Welcome Aboard the Klabautermann | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-21">January 21, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Welcome Aboard the Klabautermann</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>In German maritime folklore, the <em>Klabautermann</em> is a helpful ship's spirit - a kobold who lives in the vessel's woodwork, warning sailors of danger and assisting with maintenance. Our project carries this name because, like its mythological namesake, it works quietly in the background to maintain and organize your knowledge.</p>
+
+                <h2>What is Klabautermann?</h2>
+                <p>Klabautermann is an agentic personal knowledge management (PKM) system. Unlike traditional note-taking apps that rely on manual organization, Klabautermann uses a multi-agent architecture to automatically extract, connect, and retrieve information from your conversations.</p>
+
+                <p>At its core is a <strong>temporal knowledge graph</strong> - powered by Neo4j and Graphiti - that doesn't just store what you know, but <em>when</em> you knew it. This temporal awareness means the system can answer questions like "Where did John work when we first met?" even if John has since changed jobs.</p>
+
+                <h2>The Crew</h2>
+                <p>The system operates with specialized agents, each with a distinct role:</p>
+
+                <ul>
+                    <li><strong>Orchestrator</strong> - The captain, classifying intent and delegating to the right specialist</li>
+                    <li><strong>Ingestor</strong> - Extracts entities (people, organizations, tasks) from conversations</li>
+                    <li><strong>Researcher</strong> - Performs hybrid search combining vector, graph, and temporal queries</li>
+                    <li><strong>Executor</strong> - Takes action via MCP tools (email, calendar, filesystem)</li>
+                    <li><strong>Archivist</strong> - Summarizes threads and maintains the knowledge base</li>
+                    <li><strong>Scribe</strong> - Generates daily journals and notes</li>
+                </ul>
+
+                <h2>A Simple Example</h2>
+                <p>Consider telling Klabautermann:</p>
+
+                <blockquote>
+                    "I met Sarah Chen at the conference yesterday. She's the CTO at DataFlow Labs and is interested in collaborating on the ML pipeline."
+                </blockquote>
+
+                <p>The Ingestor automatically extracts:</p>
+
+                <pre><code>Person: Sarah Chen
+  - role: CTO
+  - met: 2026-01-20
+
+Organization: DataFlow Labs
+  - relationship: WORKS_AT (Sarah Chen)
+
+Topic: ML pipeline collaboration
+  - involves: [Sarah Chen, DataFlow Labs]
+  - status: interested</code></pre>
+
+                <p>Later, you can ask "Who did I meet about ML?" and the Researcher will find Sarah through the knowledge graph, complete with context about when you met and what you discussed.</p>
+
+                <h2>Core Principles</h2>
+                <p>The codebase adheres to several key principles:</p>
+
+                <ol>
+                    <li><strong>Validate Everything</strong> - LLM outputs are untrusted until parsed through Pydantic models</li>
+                    <li><strong>Never Block</strong> - Async/await throughout; no <code>time.sleep()</code></li>
+                    <li><strong>Parametrize Queries</strong> - Never use f-strings for Cypher (prevents injection)</li>
+                    <li><strong>Log Extensively</strong> - Nautical log levels: [CHART], [STORM], [ANCHOR]</li>
+                    <li><strong>Fail Gracefully</strong> - Inform the user, don't crash</li>
+                </ol>
+
+                <h2>What's Next</h2>
+                <p>This blog will document our journey as we develop Klabautermann - the architectural decisions, debugging adventures, and feature implementations. Expect technical deep dives, tutorials for contributors, and release notes as we progress through the roadmap.</p>
+
+                <p>Welcome aboard. May the winds be favorable.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

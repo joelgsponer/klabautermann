@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-21">
+    <meta name="post-category" content="bugfix,deep-dive">
+    <meta name="post-slug" content="closing-the-memory-gap">
+    <meta name="post-excerpt" content="Two critical bugs fixed: entities extracted from conversations now properly link to messages, and schedule queries no longer truncate your calendar.">
+    <title>Closing the Memory Gap | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-21">January 21, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">bugfix</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Closing the Memory Gap</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Today we tackled two high-priority bugs that were undermining a core promise of Klabautermann: that it <em>remembers</em> what you tell it in a way that's actually useful later.</p>
+
+                <h2>The Problem: Disconnected Memories</h2>
+                <p>Imagine telling Klabautermann "I met John (john@example.com), PM at Acme." The Ingestor dutifully extracts John as a Person and Acme as an Organization. The knowledge graph grows. All seems well.</p>
+
+                <p>But then you ask: "What did I talk about with John?"</p>
+
+                <p>Silence. The Researcher finds John in the graph, but has no way to trace back to the <em>specific message</em> where you mentioned him. The entities were floating free, disconnected from their source.</p>
+
+                <p>This was Bug #350: the <code>MENTIONED_IN</code> relationships between entities and messages were never being created during Graphiti ingestion.</p>
+
+                <h2>Two Information Flows, One Gap</h2>
+                <p>The architecture had two separate paths for entity-message linking:</p>
+
+                <pre><code>Flow 1 (working):
+  Researcher → finds entities → _link_message_entities() → MENTIONED_IN ✓
+
+Flow 2 (broken):
+  Ingestor → Graphiti extracts entities → ??? → nothing linked ✗</code></pre>
+
+                <p>The infrastructure existed - <code>link_entities_to_message()</code> was sitting there in <code>message_linking.py</code>. It just wasn't being called after Graphiti ingestion because <code>add_episode()</code> returned nothing useful.</p>
+
+                <h2>The Fix: Close the Loop</h2>
+                <p>We modified the flow to capture what Graphiti extracts and link it back:</p>
+
+                <ol>
+                    <li><code>add_episode()</code> now returns the episode name</li>
+                    <li>New method <code>get_entities_from_episode()</code> queries the graph for entities linked to that episode</li>
+                    <li>After ingestion, we call <code>link_entities_to_message()</code> with the extracted entities</li>
+                </ol>
+
+                <p>Both the v1 (Orchestrator) and v2 (Ingestor agent) workflows now properly link entities to their source messages. The graph goes from disconnected islands to a proper web of relationships:</p>
+
+                <pre><code>(Person {name: "John"})-[:MENTIONED_IN]->(Message)
+(Organization {name: "Acme"})-[:MENTIONED_IN]->(Message)</code></pre>
+
+                <h2>The Second Bug: Truncated Calendars</h2>
+                <p>Bug #349 was simpler but equally frustrating: asking "What's my schedule this week?" would show only 1-2 events even when you had 10+ across multiple calendars.</p>
+
+                <p>The culprit? A hardcoded <code>LIMIT 10</code> in the schedule query. When you have events spread across Primary, Work, and Personal calendars, 10 is not enough. We bumped it to 100 - users expect to see their <em>entire</em> schedule, not a teaser.</p>
+
+                <pre><code>// Before
+MATCH (c:CalendarEvent)
+WHERE c.start_time >= $start AND c.start_time <= $end
+RETURN c
+LIMIT 10  // This was the problem
+
+// After
+LIMIT 100  // Reasonable for a week's schedule</code></pre>
+
+                <h2>Testing the Fix</h2>
+                <p>Both fixes pass the full test suite (1492 tests). The entity linking is tested through the existing message linking tests, and the schedule query change required only updating one test that was asserting on the exact parameter list.</p>
+
+                <h2>What This Enables</h2>
+                <p>With these fixes, Golden Scenario #1 from CLAUDE.md finally works end-to-end:</p>
+
+                <blockquote>
+                    "I met John (john@example.com), PM at Acme"<br>
+                    → Creates Person, Org, WORKS_AT<br>
+                    → Links both to the source Message<br>
+                    → "What did I talk about with John?" finds that exact message
+                </blockquote>
+
+                <p>This is the kind of contextual memory that makes Klabautermann useful as a true knowledge assistant rather than just a fancy note-taking app.</p>
+
+                <h2>Lessons Learned</h2>
+                <p>The entity linking bug had been lurking since the Graphiti integration was first implemented. The infrastructure was all there - someone had thoughtfully built <code>message_linking.py</code> - but the connection between ingestion and linking was never made.</p>
+
+                <p>It's a reminder that features aren't done until they're connected end-to-end. Building the parts is only half the work; wiring them together completes the circuit.</p>
+
+                <p>Fair winds ahead.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

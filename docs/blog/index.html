@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ship's Log | Klabautermann</title>
+    <meta name="description" content="Development log and technical writings from the Klabautermann project - an agentic personal knowledge management system.">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <h1 class="site-title">Ship's Log</h1>
+            <p class="site-description">Tales from the temporal knowledge graph</p>
+            <nav class="site-nav">
+                <a href="https://github.com/joelgsponer/klabautermann">GitHub</a>
+                <a href="https://github.com/joelgsponer/klabautermann#readme">Documentation</a>
+            </nav>
+        </div>
+    </header>
+
+    <nav class="category-filter">
+        <div class="container">
+            <button class="filter-btn active" data-category="all">All</button>
+            <button class="filter-btn" data-category="feature">Feature</button>
+            <button class="filter-btn" data-category="bugfix">Bugfix</button>
+            <button class="filter-btn" data-category="deep-dive">Deep Dive</button>
+            <button class="filter-btn" data-category="tutorial">Tutorial</button>
+            <button class="filter-btn" data-category="debug">Debug</button>
+            <button class="filter-btn" data-category="release">Release</button>
+        </div>
+    </nav>
+
+    <main class="posts-container">
+        <div class="container">
+            <div class="posts-grid" id="posts-grid">
+                <!-- Session wrap-up: Bug fixes #349 and #350 -->
+                <article class="post-card" data-categories="bugfix,deep-dive">
+                    <a href="posts/2026-01-21-closing-the-memory-gap.html" class="post-link">
+                        <div class="post-content">
+                            <div class="post-meta">
+                                <time datetime="2026-01-21">January 21, 2026</time>
+                                <div class="post-categories">
+                                    <span class="category-tag">bugfix</span>
+                                    <span class="category-tag">deep-dive</span>
+                                </div>
+                            </div>
+                            <h2 class="post-title">Closing the Memory Gap</h2>
+                            <p class="post-excerpt">Two critical bugs fixed: entities extracted from conversations now properly link to messages, and schedule queries no longer truncate your calendar.</p>
+                        </div>
+                    </a>
+                </article>
+                <!-- Introduction post -->
+                <article class="post-card" data-categories="feature,deep-dive">
+                    <a href="posts/2026-01-21-welcome-aboard.html" class="post-link">
+                        <div class="post-content">
+                            <div class="post-meta">
+                                <time datetime="2026-01-21">January 21, 2026</time>
+                                <div class="post-categories">
+                                    <span class="category-tag">feature</span>
+                                    <span class="category-tag">deep-dive</span>
+                                </div>
+                            </div>
+                            <h2 class="post-title">Welcome Aboard the Klabautermann</h2>
+                            <p class="post-excerpt">An introduction to our agentic personal knowledge management system, its multi-agent architecture, and the temporal knowledge graph at its heart.</p>
+                        </div>
+                    </a>
+                </article>
+            </div>
+        </div>
+    </main>
+
+    <footer class="site-footer">
+        <div class="container">
+            <p>Powered by <a href="https://github.com/joelgsponer/klabautermann">Klabautermann</a> - the helpful ship's spirit</p>
+        </div>
+    </footer>
+
+    <script>
+    // Category filtering with vanilla JavaScript
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const category = btn.dataset.category;
+
+            // Update active button
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            // Filter posts
+            document.querySelectorAll('.post-card').forEach(post => {
+                const categories = post.dataset.categories.split(',');
+                if (category === 'all' || categories.includes(category)) {
+                    post.style.display = 'block';
+                } else {
+                    post.style.display = 'none';
+                }
+            });
+        });
+    });
+    </script>
+</body>
+</html>
