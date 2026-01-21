@@ -22,8 +22,8 @@ from klabautermann.agents.orchestrator.prompts import (
 __all__ = [
     "CLASSIFICATION_MODEL",
     "CLASSIFICATION_PROMPT",
-    "Orchestrator",
     "SYNTHESIS_PROMPT",
     "SYSTEM_PROMPT",
     "TASK_PLANNING_PROMPT",
+    "Orchestrator",
 ]

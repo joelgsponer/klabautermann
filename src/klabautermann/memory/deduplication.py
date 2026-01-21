@@ -632,9 +632,9 @@ async def process_duplicates(
 # ===========================================================================
 
 __all__ = [
-    "find_duplicate_persons",
     "find_duplicate_organizations",
-    "merge_entities",
+    "find_duplicate_persons",
     "flag_for_review",
+    "merge_entities",
     "process_duplicates",
 ]

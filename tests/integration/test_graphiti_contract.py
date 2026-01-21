@@ -195,9 +195,9 @@ class TestGraphitiSearchEntitiesContract:
         if results:
             # Should find organization by name
             names = [r.name.lower() if r.name else "" for r in results]
-            assert any(
-                "tech" in name for name in names
-            ), f"Should find 'TechCorp' by name. Got names: {names}"
+            assert any("tech" in name for name in names), (
+                f"Should find 'TechCorp' by name. Got names: {names}"
+            )
 
     @pytest.mark.asyncio
     async def test_search_entities_returns_empty_gracefully(

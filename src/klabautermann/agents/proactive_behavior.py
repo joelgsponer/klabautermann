@@ -301,10 +301,10 @@ class ProactiveBehavior:
         """
         suggestions = {
             "calendar": (
-                "Would you like me to create a calendar event for this? " f"{context_hint}"
+                f"Would you like me to create a calendar event for this? {context_hint}"
             ).strip(),
             "followup": (
-                "Should I add this to your task list so you don't forget? " f"{context_hint}"
+                f"Should I add this to your task list so you don't forget? {context_hint}"
             ).strip(),
             "clarification": (
                 "I want to make sure I understand correctly. "

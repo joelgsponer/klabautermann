@@ -12,18 +12,28 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-from datetime import datetime, timedelta
+import random
+from datetime import UTC, datetime, timedelta
 from email.mime.text import MIMEText
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+import google.auth.exceptions
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, Field
 
-from klabautermann.core.exceptions import ExternalServiceError
+from klabautermann.channels.rate_limiter import RateLimitConfig, RateLimiter
+from klabautermann.core.exceptions import ExternalServiceError, RateLimitError
 from klabautermann.core.logger import logger
+
+
+T = TypeVar("T")
 
 
 # ===========================================================================
@@ -98,6 +108,19 @@ class GmailLabel(BaseModel):
     unread_count: int | None = None
 
 
+class EmailSearchResult(BaseModel):
+    """Email search results with pagination metadata."""
+
+    emails: list[EmailMessage]
+    next_page_token: str | None = None
+    result_size_estimate: int | None = None
+
+    @property
+    def has_more(self) -> bool:
+        """Whether more results are available."""
+        return self.next_page_token is not None
+
+
 # ===========================================================================
 # Google Workspace Bridge
 # ===========================================================================
@@ -126,12 +149,61 @@ class GoogleWorkspaceBridge:
     GMAIL_SCOPES: ClassVar[list[str]] = ["https://www.googleapis.com/auth/gmail.modify"]
     CALENDAR_SCOPES: ClassVar[list[str]] = ["https://www.googleapis.com/auth/calendar"]
 
-    def __init__(self) -> None:
-        """Initialize the Google Workspace bridge."""
+    # Default rate limit configuration
+    DEFAULT_REQUESTS_PER_MINUTE: ClassVar[int] = 60
+    DEFAULT_MAX_CONCURRENT: ClassVar[int] = 10
+
+    def __init__(
+        self,
+        gmail_requests_per_minute: int | None = None,
+        calendar_requests_per_minute: int | None = None,
+        max_concurrent_requests: int | None = None,
+        rate_limiting_enabled: bool = True,
+    ) -> None:
+        """
+        Initialize the Google Workspace bridge.
+
+        Args:
+            gmail_requests_per_minute: Rate limit for Gmail API (default: 60)
+            calendar_requests_per_minute: Rate limit for Calendar API (default: 60)
+            max_concurrent_requests: Max concurrent API calls (default: 10)
+            rate_limiting_enabled: Whether to enable rate limiting (default: True)
+        """
         self._credentials: Credentials | None = None
         self._gmail_service: Any = None
         self._calendar_service: Any = None
         self._started = False
+
+        # OAuth refresh handling
+        self._refresh_lock = asyncio.Lock()
+        self._last_refresh: datetime | None = None
+
+        # Rate limiting configuration
+        self._rate_limiting_enabled = rate_limiting_enabled
+        gmail_rpm = gmail_requests_per_minute or self.DEFAULT_REQUESTS_PER_MINUTE
+        calendar_rpm = calendar_requests_per_minute or self.DEFAULT_REQUESTS_PER_MINUTE
+        max_concurrent = max_concurrent_requests or self.DEFAULT_MAX_CONCURRENT
+
+        # Create per-service rate limiters
+        self._gmail_limiter = RateLimiter(
+            RateLimitConfig(
+                max_requests=gmail_rpm,
+                window_seconds=60,
+                burst_allowance=10,
+                enabled=rate_limiting_enabled,
+            )
+        )
+        self._calendar_limiter = RateLimiter(
+            RateLimitConfig(
+                max_requests=calendar_rpm,
+                window_seconds=60,
+                burst_allowance=10,
+                enabled=rate_limiting_enabled,
+            )
+        )
+
+        # Semaphore for limiting concurrent requests
+        self._semaphore = asyncio.Semaphore(max_concurrent)
 
     async def start(self) -> None:
         """
@@ -200,7 +272,125 @@ class GoogleWorkspaceBridge:
         self._started = False
         self._gmail_service = None
         self._calendar_service = None
+        self._last_refresh = None
         logger.info("[CHART] Google Workspace API services stopped")
+
+    # ===========================================================================
+    # OAuth Refresh Handling
+    # ===========================================================================
+
+    async def _refresh_if_expired(self) -> None:
+        """
+        Refresh token if expired or about to expire.
+
+        Uses asyncio.Lock to serialize concurrent refresh attempts.
+        On invalid_grant error (revoked token), raises ExternalServiceError
+        with instructions to re-run bootstrap_auth.py.
+        """
+        if self._credentials is None:
+            raise ExternalServiceError("google", "Credentials not initialized. Call start() first.")
+
+        async with self._refresh_lock:
+            try:
+                # Run refresh in executor to avoid blocking
+                loop = asyncio.get_event_loop()
+                credentials = self._credentials  # Capture for type narrowing
+                await loop.run_in_executor(None, lambda: credentials.refresh(Request()))
+                self._last_refresh = datetime.now(UTC)
+                logger.info("[CHART] Token refreshed successfully")
+            except google.auth.exceptions.RefreshError as e:
+                if "invalid_grant" in str(e).lower():
+                    raise ExternalServiceError(
+                        "google",
+                        "Refresh token revoked or expired. Please run bootstrap_auth.py to re-authenticate.",
+                    ) from e
+                raise ExternalServiceError("google", f"Token refresh failed: {e}") from e
+
+    # ===========================================================================
+    # Rate Limiting
+    # ===========================================================================
+
+    async def _rate_limited_call(
+        self,
+        service: str,
+        operation: Callable[[], T],
+    ) -> T:
+        """
+        Execute API call with rate limiting, OAuth refresh, concurrency control, and 429 handling.
+
+        Combines rate limiting check, OAuth 401 refresh, and Google 429 backoff
+        into a single unified wrapper for all API calls.
+
+        Args:
+            service: Service name ("gmail" or "calendar") for rate limit tracking
+            operation: Callable that performs the API call
+
+        Returns:
+            Result of the operation
+
+        Raises:
+            RateLimitError: If rate limit exceeded and cannot wait
+            ExternalServiceError: If operation fails
+        """
+        # Select the appropriate rate limiter
+        limiter = self._gmail_limiter if service == "gmail" else self._calendar_limiter
+
+        # Check rate limit
+        result = limiter.check(service)
+        if not result.allowed:
+            if result.reset_after > 0:
+                logger.warning(
+                    f"[SWELL] {service} rate limited, waiting {result.reset_after:.1f}s",
+                    extra={"service": service, "reset_after": result.reset_after},
+                )
+                await asyncio.sleep(result.reset_after)
+            else:
+                raise RateLimitError(service, result.reset_after)
+        elif result.is_warning:
+            logger.debug(
+                f"[WHISPER] {service} in rate limit burst zone",
+                extra={"service": service, "remaining": result.remaining},
+            )
+
+        # Execute with semaphore for concurrency control
+        async with self._semaphore:
+            loop = asyncio.get_event_loop()
+            try:
+                return await loop.run_in_executor(None, operation)
+            except HttpError as e:
+                if e.resp.status == 401:
+                    # OAuth token expired, refresh and retry
+                    logger.info(f"[CHART] {service} token expired, refreshing...")
+                    await self._refresh_if_expired()
+                    return await loop.run_in_executor(None, operation)
+                elif e.resp.status == 429:
+                    # Handle Google's rate limit response
+                    retry_after = self._parse_retry_after(e)
+                    logger.warning(
+                        f"[STORM] {service} API rate limited (429), waiting {retry_after}s",
+                        extra={"service": service, "retry_after": retry_after},
+                    )
+                    await asyncio.sleep(retry_after)
+                    # Retry once
+                    return await loop.run_in_executor(None, operation)
+                raise
+
+    def _parse_retry_after(self, error: HttpError) -> float:
+        """
+        Parse Retry-After header from Google API 429 response.
+
+        Returns seconds to wait, with exponential backoff jitter.
+        """
+        try:
+            # Try to get Retry-After header
+            retry_after = error.resp.get("Retry-After")
+            if retry_after:
+                return float(retry_after)
+        except (ValueError, AttributeError):
+            pass
+
+        # Default: 60s + random jitter (0-10s)
+        return 60.0 + random.uniform(0, 10)
 
     # ===========================================================================
     # Gmail Operations
@@ -228,43 +418,160 @@ class GoogleWorkspaceBridge:
         """
         await self.start()
 
-        loop = asyncio.get_event_loop()
-
         def do_search() -> list[dict[str, Any]]:
-            try:
-                # List message IDs matching query
-                results = (
+            # List message IDs matching query
+            results = (
+                self._gmail_service.users()
+                .messages()
+                .list(userId="me", q=query, maxResults=max_results)
+                .execute()
+            )
+
+            messages = results.get("messages", [])
+            if not messages:
+                return []
+
+            # Fetch full message details
+            full_messages = []
+            for msg in messages:
+                full = (
                     self._gmail_service.users()
                     .messages()
-                    .list(userId="me", q=query, maxResults=max_results)
+                    .get(userId="me", id=msg["id"], format="full")
                     .execute()
                 )
+                full_messages.append(full)
 
-                messages = results.get("messages", [])
-                if not messages:
-                    return []
-
-                # Fetch full message details
-                full_messages = []
-                for msg in messages:
-                    full = (
-                        self._gmail_service.users()
-                        .messages()
-                        .get(userId="me", id=msg["id"], format="full")
-                        .execute()
-                    )
-                    full_messages.append(full)
-
-                return full_messages
-
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Search failed: {e}") from e
+            return full_messages
 
         try:
-            raw_messages = await loop.run_in_executor(None, do_search)
+            raw_messages = await self._rate_limited_call("gmail", do_search)
             return self._parse_gmail_messages(raw_messages)
+        except HttpError as e:
+            logger.error(f"[STORM] Gmail search failed: {e}", extra={"query": query})
+            raise ExternalServiceError("gmail", f"Search failed: {e}") from e
         except Exception as e:
             logger.error(f"[STORM] Gmail search failed: {e}", extra={"query": query})
+            raise
+
+    async def search_emails_paginated(
+        self,
+        query: str,
+        max_results: int = 100,
+        page_token: str | None = None,
+        context: Any = None,  # noqa: ARG002  # Kept for interface compatibility
+    ) -> EmailSearchResult:
+        """
+        Search Gmail messages with pagination support.
+
+        Supports retrieving large result sets efficiently by returning
+        a page token for subsequent requests. Each page requires N+1 API calls
+        where N is the number of messages (1 list + N individual fetches).
+
+        Args:
+            query: Gmail search query (e.g., "from:sarah@acme.com" or "is:unread")
+            max_results: Maximum messages per page (1-500, default: 100)
+            page_token: Token from previous response to continue pagination
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            EmailSearchResult with emails, next_page_token, and result_size_estimate
+
+        Raises:
+            ExternalServiceError: If search fails
+
+        Example:
+            result = await bridge.search_emails_paginated("is:unread")
+            for email in result.emails:
+                process_email(email)
+
+            if result.has_more:
+                next_result = await bridge.search_emails_paginated(
+                    "is:unread",
+                    page_token=result.next_page_token
+                )
+        """
+        await self.start()
+
+        # Enforce Gmail API limits (max 500 per page)
+        max_results = min(max_results, 500)
+
+        def do_search() -> tuple[list[dict[str, Any]], str | None, int | None]:
+            # Build list request with optional page token
+            list_request = (
+                self._gmail_service.users()
+                .messages()
+                .list(
+                    userId="me",
+                    q=query,
+                    maxResults=max_results,
+                )
+            )
+            if page_token:
+                list_request = (
+                    self._gmail_service.users()
+                    .messages()
+                    .list(
+                        userId="me",
+                        q=query,
+                        maxResults=max_results,
+                        pageToken=page_token,
+                    )
+                )
+
+            results = list_request.execute()
+
+            messages = results.get("messages", [])
+            next_token = results.get("nextPageToken")
+            size_estimate = results.get("resultSizeEstimate")
+
+            if not messages:
+                return [], next_token, size_estimate
+
+            # Fetch full message details
+            full_messages = []
+            for msg in messages:
+                full = (
+                    self._gmail_service.users()
+                    .messages()
+                    .get(userId="me", id=msg["id"], format="full")
+                    .execute()
+                )
+                full_messages.append(full)
+
+            return full_messages, next_token, size_estimate
+
+        try:
+            raw_messages, next_token, size_estimate = await self._rate_limited_call(
+                "gmail", do_search
+            )
+            emails = self._parse_gmail_messages(raw_messages)
+
+            logger.info(
+                f"[CHART] Email search returned {len(emails)} results",
+                extra={
+                    "query": query,
+                    "has_more": next_token is not None,
+                    "estimate": size_estimate,
+                },
+            )
+
+            return EmailSearchResult(
+                emails=emails,
+                next_page_token=next_token,
+                result_size_estimate=size_estimate,
+            )
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Gmail paginated search failed: {e}",
+                extra={"query": query, "page_token": page_token},
+            )
+            raise ExternalServiceError("gmail", f"Paginated search failed: {e}") from e
+        except Exception as e:
+            logger.error(
+                f"[STORM] Gmail paginated search failed: {e}",
+                extra={"query": query, "page_token": page_token},
+            )
             raise
 
     async def send_email(
@@ -292,48 +599,48 @@ class GoogleWorkspaceBridge:
         """
         await self.start()
 
-        loop = asyncio.get_event_loop()
-
         def do_send() -> dict[str, Any]:
-            try:
-                # Create message
-                message = MIMEText(body)
-                message["to"] = to
-                message["subject"] = subject
-                if cc:
-                    message["cc"] = cc
+            # Create message
+            message = MIMEText(body)
+            message["to"] = to
+            message["subject"] = subject
+            if cc:
+                message["cc"] = cc
 
-                raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
-                if draft_only:
-                    # Create draft
-                    draft = (
-                        self._gmail_service.users()
-                        .drafts()
-                        .create(userId="me", body={"message": {"raw": raw}})
-                        .execute()
-                    )
-                    return {"id": draft["id"], "is_draft": True}
-                else:
-                    # Send message
-                    sent = (
-                        self._gmail_service.users()
-                        .messages()
-                        .send(userId="me", body={"raw": raw})
-                        .execute()
-                    )
-                    return {"id": sent["id"], "is_draft": False}
-
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Send failed: {e}") from e
+            if draft_only:
+                # Create draft
+                draft = (
+                    self._gmail_service.users()
+                    .drafts()
+                    .create(userId="me", body={"message": {"raw": raw}})
+                    .execute()
+                )
+                return {"id": draft["id"], "is_draft": True}
+            else:
+                # Send message
+                sent = (
+                    self._gmail_service.users()
+                    .messages()
+                    .send(userId="me", body={"raw": raw})
+                    .execute()
+                )
+                return {"id": sent["id"], "is_draft": False}
 
         try:
-            result = await loop.run_in_executor(None, do_send)
+            result = await self._rate_limited_call("gmail", do_send)
             return SendEmailResult(
                 success=True,
                 message_id=result["id"],
                 is_draft=result.get("is_draft", False),
             )
+        except (HttpError, ExternalServiceError) as e:
+            logger.error(
+                f"[STORM] Email {'draft' if draft_only else 'send'} failed: {e}",
+                extra={"to": to, "subject": subject},
+            )
+            return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
         except Exception as e:
             logger.error(
                 f"[STORM] Email {'draft' if draft_only else 'send'} failed: {e}",
@@ -370,23 +677,19 @@ class GoogleWorkspaceBridge:
             Result indicating success or failure
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_trash() -> str:
-            try:
-                self._gmail_service.users().messages().trash(userId="me", id=message_id).execute()
-                return message_id
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Trash failed: {e}") from e
+            self._gmail_service.users().messages().trash(userId="me", id=message_id).execute()
+            return message_id
 
         try:
-            result_id = await loop.run_in_executor(None, do_trash)
+            result_id = await self._rate_limited_call("gmail", do_trash)
             logger.info(
                 f"[BEACON] Email trashed: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
             return EmailOperationResult(success=True, message_id=result_id, operation="trash")
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Email trash failed: {e}",
                 extra={"message_id": message_id},
@@ -411,23 +714,19 @@ class GoogleWorkspaceBridge:
             Result indicating success or failure
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_delete() -> str:
-            try:
-                self._gmail_service.users().messages().delete(userId="me", id=message_id).execute()
-                return message_id
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Delete failed: {e}") from e
+            self._gmail_service.users().messages().delete(userId="me", id=message_id).execute()
+            return message_id
 
         try:
-            result_id = await loop.run_in_executor(None, do_delete)
+            result_id = await self._rate_limited_call("gmail", do_delete)
             logger.info(
                 f"[BEACON] Email permanently deleted: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
             return EmailOperationResult(success=True, message_id=result_id, operation="delete")
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Email delete failed: {e}",
                 extra={"message_id": message_id},
@@ -452,28 +751,24 @@ class GoogleWorkspaceBridge:
             Result indicating success or failure
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_archive() -> str:
-            try:
-                # Archive = remove INBOX label
-                self._gmail_service.users().messages().modify(
-                    userId="me",
-                    id=message_id,
-                    body={"removeLabelIds": ["INBOX"]},
-                ).execute()
-                return message_id
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Archive failed: {e}") from e
+            # Archive = remove INBOX label
+            self._gmail_service.users().messages().modify(
+                userId="me",
+                id=message_id,
+                body={"removeLabelIds": ["INBOX"]},
+            ).execute()
+            return message_id
 
         try:
-            result_id = await loop.run_in_executor(None, do_archive)
+            result_id = await self._rate_limited_call("gmail", do_archive)
             logger.info(
                 f"[BEACON] Email archived: {result_id[:8]}...",
                 extra={"message_id": message_id},
             )
             return EmailOperationResult(success=True, message_id=result_id, operation="archive")
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Email archive failed: {e}",
                 extra={"message_id": message_id},
@@ -500,27 +795,23 @@ class GoogleWorkspaceBridge:
             Result indicating success or failure
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_add_label() -> str:
-            try:
-                self._gmail_service.users().messages().modify(
-                    userId="me",
-                    id=message_id,
-                    body={"addLabelIds": label_ids},
-                ).execute()
-                return message_id
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Add label failed: {e}") from e
+            self._gmail_service.users().messages().modify(
+                userId="me",
+                id=message_id,
+                body={"addLabelIds": label_ids},
+            ).execute()
+            return message_id
 
         try:
-            result_id = await loop.run_in_executor(None, do_add_label)
+            result_id = await self._rate_limited_call("gmail", do_add_label)
             logger.info(
                 f"[BEACON] Labels added to email: {result_id[:8]}...",
                 extra={"message_id": message_id, "labels": label_ids},
             )
             return EmailOperationResult(success=True, message_id=result_id, operation="label")
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Add label failed: {e}",
                 extra={"message_id": message_id, "labels": label_ids},
@@ -547,27 +838,23 @@ class GoogleWorkspaceBridge:
             Result indicating success or failure
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_remove_label() -> str:
-            try:
-                self._gmail_service.users().messages().modify(
-                    userId="me",
-                    id=message_id,
-                    body={"removeLabelIds": label_ids},
-                ).execute()
-                return message_id
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"Remove label failed: {e}") from e
+            self._gmail_service.users().messages().modify(
+                userId="me",
+                id=message_id,
+                body={"removeLabelIds": label_ids},
+            ).execute()
+            return message_id
 
         try:
-            result_id = await loop.run_in_executor(None, do_remove_label)
+            result_id = await self._rate_limited_call("gmail", do_remove_label)
             logger.info(
                 f"[BEACON] Labels removed from email: {result_id[:8]}...",
                 extra={"message_id": message_id, "labels": label_ids},
             )
             return EmailOperationResult(success=True, message_id=result_id, operation="unlabel")
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Remove label failed: {e}",
                 extra={"message_id": message_id, "labels": label_ids},
@@ -590,18 +877,14 @@ class GoogleWorkspaceBridge:
             List of Gmail labels with their IDs and names
         """
         await self.start()
-        loop = asyncio.get_event_loop()
 
         def do_list_labels() -> list[dict[str, Any]]:
-            try:
-                results = self._gmail_service.users().labels().list(userId="me").execute()
-                labels: list[dict[str, Any]] = results.get("labels", [])
-                return labels
-            except HttpError as e:
-                raise ExternalServiceError("gmail", f"List labels failed: {e}") from e
+            results = self._gmail_service.users().labels().list(userId="me").execute()
+            labels: list[dict[str, Any]] = results.get("labels", [])
+            return labels
 
         try:
-            raw_labels = await loop.run_in_executor(None, do_list_labels)
+            raw_labels = await self._rate_limited_call("gmail", do_list_labels)
             labels = []
             for label in raw_labels:
                 labels.append(
@@ -617,6 +900,9 @@ class GoogleWorkspaceBridge:
                 f"[BEACON] Listed {len(labels)} Gmail labels",
             )
             return labels
+        except HttpError as e:
+            logger.error(f"[STORM] List labels failed: {e}")
+            raise ExternalServiceError("gmail", f"List labels failed: {e}") from e
         except Exception as e:
             logger.error(f"[STORM] List labels failed: {e}")
             raise
@@ -727,34 +1013,39 @@ class GoogleWorkspaceBridge:
         if end is None:
             end = start + timedelta(days=7)
 
-        loop = asyncio.get_event_loop()
+        # Capture for closure
+        start_time = start
+        end_time = end
 
         def do_list() -> list[dict[str, Any]]:
-            try:
-                # Format as RFC3339 for Google Calendar API
-                # Strip timezone info and use Z suffix for UTC
-                time_min = start.replace(tzinfo=None).isoformat() + "Z"
-                time_max = end.replace(tzinfo=None).isoformat() + "Z"
-                results = (
-                    self._calendar_service.events()
-                    .list(
-                        calendarId=calendar_id,
-                        timeMin=time_min,
-                        timeMax=time_max,
-                        maxResults=max_results,
-                        singleEvents=True,
-                        orderBy="startTime",
-                    )
-                    .execute()
+            # Format as RFC3339 for Google Calendar API
+            # Strip timezone info and use Z suffix for UTC
+            time_min = start_time.replace(tzinfo=None).isoformat() + "Z"
+            time_max = end_time.replace(tzinfo=None).isoformat() + "Z"
+            results = (
+                self._calendar_service.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    maxResults=max_results,
+                    singleEvents=True,
+                    orderBy="startTime",
                 )
-                items: list[dict[str, Any]] = results.get("items", [])
-                return items
-            except HttpError as e:
-                raise ExternalServiceError("calendar", f"List failed: {e}") from e
+                .execute()
+            )
+            items: list[dict[str, Any]] = results.get("items", [])
+            return items
 
         try:
-            raw_events = await loop.run_in_executor(None, do_list)
+            raw_events = await self._rate_limited_call("calendar", do_list)
             return self._parse_calendar_events(raw_events, calendar_id, calendar_name)
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Calendar list failed: {e}",
+                extra={"start": start.isoformat(), "end": end.isoformat()},
+            )
+            raise ExternalServiceError("calendar", f"List failed: {e}") from e
         except Exception as e:
             logger.error(
                 f"[STORM] Calendar list failed: {e}",
@@ -831,41 +1122,35 @@ class GoogleWorkspaceBridge:
         """
         await self.start()
 
-        loop = asyncio.get_event_loop()
-
         def do_create() -> dict[str, Any]:
-            try:
-                event_body: dict[str, Any] = {
-                    "summary": title,
-                    "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
-                    "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
-                }
+            event_body: dict[str, Any] = {
+                "summary": title,
+                "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+                "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+            }
 
-                if description:
-                    event_body["description"] = description
-                if location:
-                    event_body["location"] = location
-                if attendees:
-                    event_body["attendees"] = [{"email": email} for email in attendees]
+            if description:
+                event_body["description"] = description
+            if location:
+                event_body["location"] = location
+            if attendees:
+                event_body["attendees"] = [{"email": email} for email in attendees]
 
-                event: dict[str, Any] = (
-                    self._calendar_service.events()
-                    .insert(calendarId="primary", body=event_body)
-                    .execute()
-                )
-                return event
-
-            except HttpError as e:
-                raise ExternalServiceError("calendar", f"Create failed: {e}") from e
+            event: dict[str, Any] = (
+                self._calendar_service.events()
+                .insert(calendarId="primary", body=event_body)
+                .execute()
+            )
+            return event
 
         try:
-            result = await loop.run_in_executor(None, do_create)
+            result = await self._rate_limited_call("calendar", do_create)
             return CreateEventResult(
                 success=True,
                 event_id=result.get("id"),
                 event_link=result.get("htmlLink"),
             )
-        except Exception as e:
+        except (HttpError, ExternalServiceError) as e:
             logger.error(
                 f"[STORM] Calendar event creation failed: {e}",
                 extra={"title": title, "start": start.isoformat()},

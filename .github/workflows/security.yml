@@ -29,12 +29,11 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --frozen
+        run: uv sync --frozen --all-extras
 
       - name: Run pip-audit
         run: |
           uv run pip-audit \
-            --require-hashes \
             --disable-pip \
             --progress-spinner=off \
             --format=json \

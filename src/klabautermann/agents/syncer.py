@@ -94,7 +94,7 @@ class Syncer(BaseAgent):
         self.email_enabled = email_config.get("enabled", True)
         self.email_lookback_hours = email_config.get("lookback_hours", 24)
         self.email_max_per_sync = email_config.get("max_per_sync", 50)
-        self.email_query = email_config.get("query", "is:inbox")
+        self.email_query = email_config.get("query", "-in:inbox -in:trash -in:spam")
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """

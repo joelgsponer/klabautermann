@@ -979,6 +979,7 @@ __all__ = [
     # Base models
     "BaseNode",
     "BaseRelation",
+    "CalendarEventNode",
     "ChannelConfig",
     "ChannelType",
     # Orchestrator v2
@@ -990,18 +991,20 @@ __all__ = [
     "DayNode",
     # Deduplication
     "DuplicateCandidate",
+    # Email/Calendar/Sync nodes
+    "EmailNode",
+    "EnrichedContext",
     "EntityExtraction",
     "EntityLabel",
     "EntityReference",
-    "EnrichedContext",
     "EventNode",
     # Extraction models
     "ExtractedFact",
     "ExtractionResult",
+    "FactConflict",
     # Relations
     "FamilyOfRelation",
     "FriendOfRelation",
-    "FactConflict",
     "GoalNode",
     "GoalStatus",
     "IntentClassification",
@@ -1025,9 +1028,6 @@ __all__ = [
     "RelationshipExtraction",
     "ResourceNode",
     "SearchResult",
-    # Email/Calendar/Sync nodes
-    "EmailNode",
-    "CalendarEventNode",
     "SyncStateNode",
     "TaskNode",
     "TaskPlan",

@@ -88,7 +88,7 @@ class TestSyncerInit:
         assert syncer.email_enabled is True
         assert syncer.email_lookback_hours == 24
         assert syncer.email_max_per_sync == 50
-        assert syncer.email_query == "is:inbox"
+        assert syncer.email_query == "-in:inbox -in:trash -in:spam"
 
     def test_custom_config(self) -> None:
         """Should use custom config values when specified."""

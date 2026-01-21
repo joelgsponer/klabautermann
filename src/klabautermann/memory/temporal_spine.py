@@ -599,9 +599,6 @@ __all__ = [
     "DayNode",
     "DaySummary",
     "WeeklySummary",
-    # Day Management
-    "get_or_create_day",
-    "link_to_day",
     # Day Queries
     "find_entities_by_date",
     "find_entities_in_range",
@@ -609,5 +606,8 @@ __all__ = [
     "get_date_range_activities",
     "get_day_activities",
     "get_day_statistics",
+    # Day Management
+    "get_or_create_day",
     "get_weekly_summary",
+    "link_to_day",
 ]

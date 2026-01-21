@@ -29,8 +29,19 @@ calendar:
       - "^WFH$"
 
 # Email sync settings
+# Only archived emails are ingested into the knowledge graph.
+# Archive = "worth remembering", Delete = "discard"
+# This uses user intent as the filter - no need for blocklists.
 email:
   enabled: true
-  lookback_hours: 24      # How far back to sync emails
+  lookback_hours: 168     # 7 days - archived emails may be older
   max_per_sync: 50        # Max emails per sync cycle
-  query: "is:inbox"       # Gmail query filter (can use "is:unread", etc.)
+  query: "-in:inbox -in:trash -in:spam"  # Archived emails only
+
+# Rate limiting for Google API calls
+rate_limiting:
+  enabled: true
+  gmail_requests_per_minute: 60
+  calendar_requests_per_minute: 60
+  max_concurrent_requests: 10   # Semaphore limit
+  batch_delay_seconds: 0.1      # Delay between batch items

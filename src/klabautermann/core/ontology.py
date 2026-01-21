@@ -528,35 +528,35 @@ VECTOR_INDEXES: list[str] = [
 # ===========================================================================
 
 __all__ = [
-    # Entity type models for Graphiti - Core
-    "ENTITY_TYPES",
-    "PersonType",
-    "OrganizationType",
-    "ProjectType",
-    "LocationType",
-    "EventType",
-    "TaskType",
-    "EmailType",
-    # Entity type models for Graphiti - Personal Life
-    "HobbyType",
-    "HealthMetricType",
-    "PetType",
-    "MilestoneType",
-    "RoutineType",
-    "PreferenceType",
-    "CommunityType",
-    "LoreEpisodeType",
-    # Enums
-    "NodeLabel",
-    "RelationType",
-    "ProjectStatus",
-    "TaskStatus",
-    "GoalStatus",
-    "ThreadStatus",
-    "ChannelType",
     # Schema definitions
     "CONSTRAINTS",
     "ENTERPRISE_CONSTRAINTS",
+    # Entity type models for Graphiti - Core
+    "ENTITY_TYPES",
     "INDEXES",
     "VECTOR_INDEXES",
+    "ChannelType",
+    "CommunityType",
+    "EmailType",
+    "EventType",
+    "GoalStatus",
+    "HealthMetricType",
+    # Entity type models for Graphiti - Personal Life
+    "HobbyType",
+    "LocationType",
+    "LoreEpisodeType",
+    "MilestoneType",
+    # Enums
+    "NodeLabel",
+    "OrganizationType",
+    "PersonType",
+    "PetType",
+    "PreferenceType",
+    "ProjectStatus",
+    "ProjectType",
+    "RelationType",
+    "RoutineType",
+    "TaskStatus",
+    "TaskType",
+    "ThreadStatus",
 ]

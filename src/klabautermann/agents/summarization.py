@@ -959,8 +959,8 @@ async def _update_node_property(
 # ===========================================================================
 
 __all__ = [
+    "apply_conflict_resolutions",
+    "detect_conflicts",
     "format_messages",
     "summarize_thread",
-    "detect_conflicts",
-    "apply_conflict_resolutions",
 ]

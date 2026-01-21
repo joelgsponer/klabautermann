@@ -581,10 +581,20 @@ class TestSkillDiscovery:
                 description="Test skill",
                 **{
                     "parameters": [
-                        {"name": "recipient", "type": "string", "required": True, "description": "Email recipient"},
-                        {"name": "subject", "type": "string", "required": False, "description": "Email subject"},
+                        {
+                            "name": "recipient",
+                            "type": "string",
+                            "required": True,
+                            "description": "Email recipient",
+                        },
+                        {
+                            "name": "subject",
+                            "type": "string",
+                            "required": False,
+                            "description": "Email subject",
+                        },
                     ]
-                }
+                },
             ),
             klabautermann=KlabautermannSkillConfig(),
             body="# Test",
@@ -684,9 +694,24 @@ class TestSkillChaining:
     def multi_skill_planner(self, tmp_path: Path) -> SkillAwarePlanner:
         """Create planner with multiple skills that can be chained."""
         skills_data = [
-            ("lookup-person", "Find person info. Use when asked \"who is X\" or \"find contact\".", "research", "researcher"),
-            ("send-email", "Send email. Use when asked \"send email to X\" or \"email X about Y\".", "execute", "executor"),
-            ("schedule-meeting", "Schedule meetings. Use when asked to \"schedule\" or \"set up call\".", "execute", "executor"),
+            (
+                "lookup-person",
+                'Find person info. Use when asked "who is X" or "find contact".',
+                "research",
+                "researcher",
+            ),
+            (
+                "send-email",
+                'Send email. Use when asked "send email to X" or "email X about Y".',
+                "execute",
+                "executor",
+            ),
+            (
+                "schedule-meeting",
+                'Schedule meetings. Use when asked to "schedule" or "set up call".',
+                "execute",
+                "executor",
+            ),
         ]
 
         for name, desc, task_type, agent in skills_data:
@@ -722,7 +747,9 @@ class TestSkillChaining:
         assert skill2 is not None
         assert skill2.name == "send-email"
 
-    def test_match_returns_most_specific_skill(self, multi_skill_planner: SkillAwarePlanner) -> None:
+    def test_match_returns_most_specific_skill(
+        self, multi_skill_planner: SkillAwarePlanner
+    ) -> None:
         """Test that pattern matching returns appropriate skill."""
         # Should match lookup-person via "who is" pattern
         skill = multi_skill_planner.match_skill("who is Sarah from Acme?")
