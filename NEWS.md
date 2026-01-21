@@ -29,6 +29,8 @@ User-visible changes to Klabautermann.
 
 - **Entity Search**: Fixed parameter conflict in Graphiti entity search queries
 - **Action Classification**: "any unread emails?" now correctly routes to Gmail instead of knowledge graph
+- **Entity Memory**: "I met John, PM at Acme" now correctly links John and Acme to your message, enabling queries like "What did I talk about with John?"
+- **Schedule Queries**: "What's my schedule this week?" now returns all events instead of truncating to first 10
 
 ### Developer Notes
 

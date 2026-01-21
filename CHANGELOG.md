@@ -14,9 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coverage threshold (50%) and `show_missing` for test reports (#314)
 - Email management operations: delete, archive, labels (#313)
 - Configurable `max_results` and `max_display` for email searches (#312)
+- `GraphitiClient.get_entities_from_episode()` to query entities after ingestion (#350)
+- Entity-to-message linking after Graphiti ingestion via MENTIONED_IN relationships (#350)
+- `neo4j_client` parameter to Ingestor agent for v2 workflow entity linking (#350)
 
 ### Fixed
 - CLI output readability and ANSI rendering issues (#311)
+- Graphiti-extracted entities now linked to source messages via MENTIONED_IN (#350)
+- Schedule queries return all events (limit 100) instead of truncating to 10 (#349)
 
 ## [0.1.0] - 2026-01-20
 
