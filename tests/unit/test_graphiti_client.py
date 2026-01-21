@@ -21,13 +21,17 @@ class TestGraphitiClientConnection:
 
     def test_init_with_defaults(self) -> None:
         """Test initialization with default values from env vars."""
-        with patch.dict("os.environ", {
-            "NEO4J_URI": "bolt://test:7687",
-            "NEO4J_USERNAME": "testuser",
-            "NEO4J_PASSWORD": "testpass",
-            "OPENAI_API_KEY": "test-key",
-        }):
+        with patch.dict(
+            "os.environ",
+            {
+                "NEO4J_URI": "bolt://test:7687",
+                "NEO4J_USERNAME": "testuser",
+                "NEO4J_PASSWORD": "testpass",
+                "OPENAI_API_KEY": "test-key",
+            },
+        ):
             from klabautermann.memory.graphiti_client import GraphitiClient
+
             client = GraphitiClient()
 
             assert client.neo4j_uri == "bolt://test:7687"
@@ -62,9 +66,12 @@ class TestGraphitiClientConnection:
         mock_graphiti_class = MagicMock(return_value=mock_graphiti_instance)
 
         # Patch at the point of import inside connect()
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(Graphiti=mock_graphiti_class),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "graphiti_core": MagicMock(Graphiti=mock_graphiti_class),
+            },
+        ):
             client = GraphitiClient(
                 neo4j_uri="bolt://localhost:7687",
                 neo4j_user="neo4j",
@@ -82,9 +89,12 @@ class TestGraphitiClientConnection:
 
         mock_graphiti_class = MagicMock(side_effect=Exception("Connection refused"))
 
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(Graphiti=mock_graphiti_class),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "graphiti_core": MagicMock(Graphiti=mock_graphiti_class),
+            },
+        ):
             client = GraphitiClient(
                 neo4j_uri="bolt://invalid:7687",
                 neo4j_user="neo4j",
@@ -175,12 +185,8 @@ class TestGraphitiClientSearch:
     @pytest.mark.asyncio
     async def test_search_returns_results(self, connected_client: Any) -> None:
         """Search returns list of SearchResult objects."""
-        mock_result_1 = self._create_mock_result(
-            "John works at Acme Corp", 0.95, "uuid-1", "Fact"
-        )
-        mock_result_2 = self._create_mock_result(
-            "Sarah is a developer", 0.85, "uuid-2", "Fact"
-        )
+        mock_result_1 = self._create_mock_result("John works at Acme Corp", 0.95, "uuid-1", "Fact")
+        mock_result_2 = self._create_mock_result("Sarah is a developer", 0.85, "uuid-2", "Fact")
 
         connected_client._client.search = AsyncMock(return_value=[mock_result_1, mock_result_2])
 
@@ -246,10 +252,24 @@ class TestGraphitiClientEntitySearch:
         """Entity search returns SearchResult list."""
         # Mock Neo4j session and results
         mock_result = MagicMock()
-        mock_result.data = AsyncMock(return_value=[
-            {"uuid": "uuid-1", "name": "John Doe", "summary": "Software engineer", "labels": ["Person"], "score": 0.9},
-            {"uuid": "uuid-2", "name": "Acme Corp", "summary": "Tech company", "labels": ["Organization"], "score": 0.8},
-        ])
+        mock_result.data = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "uuid-1",
+                    "name": "John Doe",
+                    "summary": "Software engineer",
+                    "labels": ["Person"],
+                    "score": 0.9,
+                },
+                {
+                    "uuid": "uuid-2",
+                    "name": "Acme Corp",
+                    "summary": "Tech company",
+                    "labels": ["Organization"],
+                    "score": 0.8,
+                },
+            ]
+        )
 
         mock_session = MagicMock()
         mock_session.run = AsyncMock(return_value=mock_result)
@@ -307,10 +327,13 @@ class TestGraphitiClientIngestion:
         mock_episode_type.message = "message"
         mock_episode_type.text = "text"
 
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(),
-            "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "graphiti_core": MagicMock(),
+                "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
+            },
+        ):
             await connected_client.add_episode(
                 content="John met Sarah at the conference",
                 source="conversation",
@@ -329,10 +352,13 @@ class TestGraphitiClientIngestion:
         mock_episode_type = MagicMock()
         mock_episode_type.message = "message"
 
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(),
-            "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "graphiti_core": MagicMock(),
+                "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
+            },
+        ):
             await connected_client.add_episode(
                 content="Test content",
                 source="conversation",
@@ -353,10 +379,13 @@ class TestGraphitiClientIngestion:
         mock_episode_type = MagicMock()
         mock_episode_type.message = "message"
 
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(),
-            "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
-        }):
+        with patch.dict(
+            "sys.modules",
+            {
+                "graphiti_core": MagicMock(),
+                "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
+            },
+        ):
             await connected_client.add_episode(
                 content="Historical event",
                 reference_time=ref_time,
@@ -379,22 +408,25 @@ class TestGraphitiClientIngestion:
     @pytest.mark.asyncio
     async def test_add_episode_handles_graphiti_error(self, connected_client: Any) -> None:
         """Raises ExternalServiceError on failure."""
-        connected_client._client.add_episode = AsyncMock(
-            side_effect=Exception("Ingestion failed")
-        )
+        connected_client._client.add_episode = AsyncMock(side_effect=Exception("Ingestion failed"))
 
         mock_episode_type = MagicMock()
         mock_episode_type.message = "message"
 
-        with patch.dict("sys.modules", {
-            "graphiti_core": MagicMock(),
-            "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
-        }):
-            with pytest.raises(ExternalServiceError):
-                await connected_client.add_episode(
-                    content="test",
-                    trace_id="test-123",
-                )
+        with (
+            patch.dict(
+                "sys.modules",
+                {
+                    "graphiti_core": MagicMock(),
+                    "graphiti_core.nodes": MagicMock(EpisodeType=mock_episode_type),
+                },
+            ),
+            pytest.raises(ExternalServiceError),
+        ):
+            await connected_client.add_episode(
+                content="test",
+                trace_id="test-123",
+            )
 
 
 class TestGraphitiClientEntityRetrieval:

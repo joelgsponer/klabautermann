@@ -378,8 +378,8 @@ def metrics_to_dict(metrics: ContextWindowMetrics | GlobalContextMetrics) -> dic
 
 __all__ = [
     "CHARS_PER_TOKEN_ESTIMATE",
-    "ContextWindowMetrics",
     "DEFAULT_MAX_MESSAGES",
+    "ContextWindowMetrics",
     "GlobalContextMetrics",
     "OverflowEvent",
     "estimate_message_tokens",

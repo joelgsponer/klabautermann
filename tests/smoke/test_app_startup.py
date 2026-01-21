@@ -87,7 +87,9 @@ class TestAppStartup:
 
             # Verify ThreadManager is wired to Orchestrator
             orchestrator = app.agents["orchestrator"]
-            assert orchestrator.thread_manager is not None, "ThreadManager not wired to Orchestrator"
+            assert orchestrator.thread_manager is not None, (
+                "ThreadManager not wired to Orchestrator"
+            )
             assert app.thread_manager is not None, "ThreadManager not created"
 
             # Verify ThreadManager is wired to Archivist
@@ -247,9 +249,9 @@ class TestAppStartup:
             orchestrator = app.agents["orchestrator"]
 
             # This is the critical check - orchestrator must be able to find researcher
-            assert orchestrator._has_agent(
-                "researcher"
-            ), "Orchestrator cannot find researcher - agent_registry not wired correctly"
+            assert orchestrator._has_agent("researcher"), (
+                "Orchestrator cannot find researcher - agent_registry not wired correctly"
+            )
             assert orchestrator._has_agent("executor"), "Orchestrator cannot find executor"
             assert orchestrator._has_agent("ingestor"), "Orchestrator cannot find ingestor"
 

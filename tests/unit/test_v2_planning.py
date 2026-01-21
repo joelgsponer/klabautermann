@@ -489,18 +489,20 @@ class TestTaskPlanning:
     async def test_handles_markdown_code_block(self, mock_orchestrator, empty_context):
         """Should handle LLM response wrapped in markdown code block."""
         mock_response = f"""```json
-{mock_task_plan_response(
-    reasoning="Test reasoning",
-    tasks=[
-        {
-            "task_type": "research",
-            "description": "Test task",
-            "agent": "researcher",
-            "payload": {"query": "test"},
-            "blocking": True,
+{
+            mock_task_plan_response(
+                reasoning="Test reasoning",
+                tasks=[
+                    {
+                        "task_type": "research",
+                        "description": "Test task",
+                        "agent": "researcher",
+                        "payload": {"query": "test"},
+                        "blocking": True,
+                    }
+                ],
+            )
         }
-    ],
-)}
 ```"""
 
         mock_orchestrator._call_opus_for_planning.return_value = mock_response
@@ -520,11 +522,13 @@ class TestTaskPlanning:
         mock_response = f"""
 Here's my analysis:
 
-{mock_task_plan_response(
-    reasoning="Test reasoning",
-    tasks=[],
-    direct_response="Simple greeting response",
-)}
+{
+            mock_task_plan_response(
+                reasoning="Test reasoning",
+                tasks=[],
+                direct_response="Simple greeting response",
+            )
+        }
 
 That's my recommendation.
 """

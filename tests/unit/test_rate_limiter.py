@@ -154,7 +154,7 @@ class TestRateLimiterBasic:
         """Test that burst zone requests are allowed."""
         # max_requests=5, burst_allowance=2 -> total 7 allowed
         for i in range(7):
-            assert limiter.is_allowed("user1") is True, f"Request {i+1} should be allowed"
+            assert limiter.is_allowed("user1") is True, f"Request {i + 1} should be allowed"
 
     def test_requests_exceed_total_limit(self, limiter: RateLimiter) -> None:
         """Test that requests exceeding total limit are denied."""

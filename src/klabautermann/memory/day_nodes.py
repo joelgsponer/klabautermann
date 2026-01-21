@@ -375,10 +375,10 @@ async def get_daily_summary(
 # ===========================================================================
 
 __all__ = [
-    "get_or_create_day",
-    "link_to_day",
-    "link_note_to_day",
+    "get_daily_summary",
     "get_day_contents",
     "get_days_in_range",
-    "get_daily_summary",
+    "get_or_create_day",
+    "link_note_to_day",
+    "link_to_day",
 ]

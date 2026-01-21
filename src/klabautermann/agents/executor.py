@@ -90,12 +90,8 @@ ERROR HANDLING:
 
             # Load email configuration
             email_config = self.config.get("email", {})
-            self.email_max_results = email_config.get(
-                "max_results", self.DEFAULT_EMAIL_MAX_RESULTS
-            )
-            self.email_max_display = email_config.get(
-                "max_display", self.DEFAULT_EMAIL_MAX_DISPLAY
-            )
+            self.email_max_results = email_config.get("max_results", self.DEFAULT_EMAIL_MAX_RESULTS)
+            self.email_max_display = email_config.get("max_display", self.DEFAULT_EMAIL_MAX_DISPLAY)
         else:
             self.model = "claude-3-5-sonnet-20241022"
             self.email_max_results = self.DEFAULT_EMAIL_MAX_RESULTS
@@ -879,9 +875,7 @@ ERROR HANDLING:
 
         try:
             # Find label by name
-            label = await self.google.get_label_by_name(
-                request.query, context=invocation_ctx
-            )
+            label = await self.google.get_label_by_name(request.query, context=invocation_ctx)
 
             if not label:
                 return ActionResult(
@@ -953,9 +947,7 @@ ERROR HANDLING:
 
         try:
             # Find label by name
-            label = await self.google.get_label_by_name(
-                request.query, context=invocation_ctx
-            )
+            label = await self.google.get_label_by_name(request.query, context=invocation_ctx)
 
             if not label:
                 return ActionResult(

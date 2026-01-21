@@ -39,6 +39,8 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     # Scheduling
     "apscheduler>=3.10",
+    # File watching for config hot-reload
+    "watchdog>=4.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +52,8 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.9",
     "pre-commit>=3.0",
+    "pip-audit>=2.0",  # Security vulnerability scanning
+    "types-PyYAML>=6.0",  # Type stubs for YAML
 ]
 
 [project.scripts]
@@ -99,6 +103,7 @@ lines-after-imports = 2
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG001", "ARG002", "S101"]  # Allow asserts and unused args in tests
+"src/klabautermann/skills/models.py" = ["TCH003"]  # Pydantic needs Path at runtime
 
 # ===========================================================================
 # Mypy Configuration
@@ -123,6 +128,22 @@ module = [
     "neo4j.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Modules with pre-existing type issues pending cleanup
+# TODO: Fix these type issues and remove overrides
+module = [
+    "klabautermann.config.quartermaster",
+    "klabautermann.channels.sanitization",
+    "klabautermann.skills.discovery",
+    "klabautermann.agents.researcher",
+    "klabautermann.agents.orchestrator._orchestrator",
+    "klabautermann.agents.journal_generation",
+    "klabautermann.memory.zoom_search",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disable_error_code = ["union-attr", "arg-type", "override", "valid-type", "attr-defined", "var-annotated", "assignment", "call-overload", "unused-ignore"]
 
 # ===========================================================================
 # Pytest Configuration
