@@ -7,6 +7,9 @@ only preprocesses input to remove role prefixes, roleplay, and system mentions.
 
 Runs asynchronously (fire-and-forget) to avoid blocking user responses.
 
+After ingestion, links extracted entities to the source Message node via
+MENTIONED_IN relationships (Bug #350 fix).
+
 Reference: specs/architecture/AGENTS.md Section 1.2
 Task: T023 - Ingestor Agent
 """
@@ -23,6 +26,7 @@ from klabautermann.core.logger import logger
 if TYPE_CHECKING:
     from klabautermann.core.models import AgentMessage
     from klabautermann.memory.graphiti_client import GraphitiClient
+    from klabautermann.memory.neo4j_client import Neo4jClient
 
 
 class Ingestor(BaseAgent):
@@ -57,6 +61,7 @@ class Ingestor(BaseAgent):
         name: str = "ingestor",
         config: dict[str, Any] | None = None,
         graphiti_client: GraphitiClient | None = None,
+        neo4j_client: Neo4jClient | None = None,
     ) -> None:
         """
         Initialize the Ingestor agent.
@@ -65,9 +70,11 @@ class Ingestor(BaseAgent):
             name: Agent name (default "ingestor").
             config: Agent configuration dict.
             graphiti_client: GraphitiClient instance for graph storage.
+            neo4j_client: Neo4jClient for entity linking (Bug #350).
         """
         super().__init__(name, config)
         self.graphiti = graphiti_client
+        self.neo4j = neo4j_client
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -76,16 +83,21 @@ class Ingestor(BaseAgent):
         This is a fire-and-forget agent - it never returns a response.
         Ingestion failures are logged but don't crash the agent.
 
+        After ingestion, links extracted entities to the source message
+        via MENTIONED_IN relationships (Bug #350 fix).
+
         Args:
             msg: AgentMessage with payload containing:
                 - text: Text to ingest
                 - captain_uuid: User UUID (optional, used for group_id)
+                - message_uuid: UUID of source Message for entity linking (Bug #350)
 
         Returns:
             None (fire-and-forget pattern)
         """
         text = msg.payload.get("text", "")
         captain_uuid = msg.payload.get("captain_uuid")
+        message_uuid = msg.payload.get("message_uuid")
 
         if not text:
             logger.warning(
@@ -118,11 +130,19 @@ class Ingestor(BaseAgent):
         try:
             # Pass cleaned text directly to Graphiti
             # Graphiti's internal LLM handles entity/relationship extraction
-            await self._ingest_to_graphiti(
+            episode_name = await self._ingest_to_graphiti(
                 content=cleaned,
                 captain_uuid=captain_uuid,
                 trace_id=msg.trace_id,
             )
+
+            # Link extracted entities to source message (Bug #350 fix)
+            if episode_name and message_uuid and self.neo4j and self.graphiti:
+                await self._link_entities_to_message(
+                    episode_name=episode_name,
+                    message_uuid=message_uuid,
+                    trace_id=msg.trace_id,
+                )
 
         except Exception as e:
             # Log but don't crash - ingestion is best-effort
@@ -183,7 +203,7 @@ class Ingestor(BaseAgent):
         content: str,
         captain_uuid: str | None,
         trace_id: str,
-    ) -> None:
+    ) -> str | None:
         """
         Send cleaned content to Graphiti for extraction.
 
@@ -198,6 +218,9 @@ class Ingestor(BaseAgent):
             captain_uuid: User UUID for grouping related episodes.
             trace_id: Trace ID for logging.
 
+        Returns:
+            Episode name for entity linking, or None if ingestion skipped.
+
         Raises:
             Exception: If Graphiti ingestion fails.
         """
@@ -206,27 +229,117 @@ class Ingestor(BaseAgent):
                 "[SWELL] No Graphiti client configured - skipping ingestion",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
-            return
+            return None
 
         if not self.graphiti.is_connected:
             logger.warning(
                 "[SWELL] Graphiti not connected - skipping ingestion",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
-            return
+            return None
 
         logger.debug(
             f"[WHISPER] Sending to Graphiti: {len(content)} chars",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
-        await self.graphiti.add_episode(
+        episode_name = await self.graphiti.add_episode(
             content=content,
             source="conversation",
             reference_time=None,  # Use current time
             group_id=captain_uuid or "default",
             trace_id=trace_id,
         )
+
+        return episode_name
+
+    async def _link_entities_to_message(
+        self,
+        episode_name: str,
+        message_uuid: str,
+        trace_id: str,
+    ) -> None:
+        """
+        Link entities extracted by Graphiti to the source message.
+
+        After Graphiti ingestion, queries for entities created by that episode
+        and creates MENTIONED_IN relationships to the Message node.
+
+        Bug #350 fix: Enables queries like "What did I talk about with John?"
+        to find the specific message where John was mentioned.
+
+        Args:
+            episode_name: Name of the Graphiti episode (from add_episode).
+            message_uuid: UUID of the Message node to link entities to.
+            trace_id: Trace ID for logging.
+        """
+        if not self.graphiti or not self.neo4j:
+            return
+
+        try:
+            # Import here to avoid circular imports
+            from klabautermann.agents.researcher_models import EntityReference
+            from klabautermann.memory.message_linking import link_entities_to_message
+
+            # Get entities extracted by this episode
+            entities = await self.graphiti.get_entities_from_episode(
+                episode_name=episode_name,
+                trace_id=trace_id,
+            )
+
+            if not entities:
+                logger.debug(
+                    "[WHISPER] No entities found from episode to link",
+                    extra={
+                        "trace_id": trace_id,
+                        "agent_name": self.name,
+                        "episode_name": episode_name,
+                    },
+                )
+                return
+
+            # Convert to EntityReference objects
+            entity_refs = [
+                EntityReference(
+                    uuid=e["uuid"],
+                    name=e.get("name", "Unknown"),
+                    entity_type=e.get("labels", ["Entity"])[0] if e.get("labels") else "Entity",
+                    confidence=1.0,  # High confidence since Graphiti extracted them
+                    source_technique="graphiti_ingestion",
+                )
+                for e in entities
+            ]
+
+            # Create MENTIONED_IN relationships
+            link_count = await link_entities_to_message(
+                neo4j=self.neo4j,
+                message_uuid=message_uuid,
+                entity_refs=entity_refs,
+                trace_id=trace_id,
+            )
+
+            logger.info(
+                f"[BEACON] Linked {link_count} ingested entities to message",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": self.name,
+                    "episode_name": episode_name,
+                    "message_uuid": message_uuid[:8],
+                    "entity_count": len(entities),
+                    "link_count": link_count,
+                },
+            )
+
+        except Exception as e:
+            # Non-blocking: log but don't fail
+            logger.warning(
+                f"[SWELL] Entity linking failed (non-blocking): {e}",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": self.name,
+                    "episode_name": episode_name,
+                },
+            )
 
 
 # ===========================================================================

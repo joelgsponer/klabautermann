@@ -712,6 +712,12 @@ class Researcher(BaseAgent):
 
             if is_schedule_query:
                 # Query CalendarEvent nodes by event start_time from all calendars
+                # Use higher limit (100) for schedule queries to avoid cutting off
+                # multi-calendar events. Users expect to see ALL events in their
+                # requested time range, not just the first few.
+                # Reference: Bug #349
+                schedule_limit = 100
+
                 calendar_cypher = """
                 MATCH (c:CalendarEvent)
                 WHERE c.start_time >= $start AND c.start_time <= $end
@@ -723,7 +729,7 @@ class Researcher(BaseAgent):
                 params = {
                     "start": time_range.start or 0,
                     "end": time_range.end or datetime.now(UTC).timestamp(),
-                    "limit": limit,
+                    "limit": schedule_limit,
                 }
 
                 records = await self.neo4j.execute_query(calendar_cypher, params, trace_id=trace_id)
