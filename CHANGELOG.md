@@ -51,6 +51,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `klabautermann_channel_active_count`: Active channel count gauge
   - Helper functions: `record_channel_message()`, `record_channel_latency()`, etc.
   - 13 new unit tests for channel metrics
+- Message queue for channel resilience (#160)
+  - `MessageQueue` class with FIFO processing
+  - Configurable max size (default 100)
+  - Overflow policies: drop_oldest, drop_newest, reject
+  - Processing timeout (default 5 minutes)
+  - Async enqueue with `wait_for_result()` for response retrieval
+  - Statistics: total_enqueued, total_processed, total_failed, total_dropped, average_wait_ms
+  - `clear()` to drop all pending messages
+  - Environment variables: `MESSAGE_QUEUE_MAX_SIZE`, `MESSAGE_QUEUE_OVERFLOW`, `MESSAGE_QUEUE_TIMEOUT`
+  - 18 new unit tests
 - Container resource limits for monitoring stack (#269)
   - Prometheus: 1 CPU / 1G memory
   - Alertmanager: 0.5 CPU / 256M memory
