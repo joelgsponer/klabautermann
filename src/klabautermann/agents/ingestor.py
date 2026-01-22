@@ -1,9 +1,14 @@
 """
 Ingestor Agent for Klabautermann.
 
-Cleans user input and passes it to Graphiti for entity/relationship extraction.
-Graphiti handles the actual extraction using its internal LLM - this agent
-only preprocesses input to remove role prefixes, roleplay, and system mentions.
+Cleans user input, performs LLM-based pre-extraction to validate entities
+against the ontology, then passes to Graphiti for final extraction.
+
+Pre-extraction (#11, #13):
+- Uses Haiku for fast entity/relationship extraction BEFORE Graphiti
+- Validates entities against ontology schema (NodeLabel, RelationType)
+- Logs validation issues for audit trail
+- Falls back gracefully if pre-extraction fails
 
 Runs asynchronously (fire-and-forget) to avoid blocking user responses.
 
@@ -12,6 +17,7 @@ MENTIONED_IN relationships (Bug #350 fix).
 
 Reference: specs/architecture/AGENTS.md Section 1.2
 Task: T023 - Ingestor Agent
+Issues: #11 LLM-based pre-extraction, #13 Ontology validation
 """
 
 from __future__ import annotations
@@ -20,11 +26,17 @@ import re
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.agents.pre_extraction import (
+    PreExtractionConfig,
+    PreExtractionEngine,
+)
 from klabautermann.core.logger import logger
 from klabautermann.core.workflow_inspector import log_thinking
 
 
 if TYPE_CHECKING:
+    from anthropic import AsyncAnthropic
+
     from klabautermann.core.models import AgentMessage
     from klabautermann.memory.graphiti_client import GraphitiClient
     from klabautermann.memory.neo4j_client import Neo4jClient
@@ -32,18 +44,25 @@ if TYPE_CHECKING:
 
 class Ingestor(BaseAgent):
     """
-    The Ingestor Agent: cleans input and passes to Graphiti for extraction.
+    The Ingestor Agent: cleans input, pre-extracts entities, and passes to Graphiti.
 
     Responsibilities:
     - Clean input text (remove role prefixes, roleplay markers, system mentions)
+    - Pre-extract entities using Haiku for ontology validation (#11, #13)
     - Log original vs cleaned text for audit trail
     - Pass cleaned text to Graphiti for entity/relationship extraction
     - Never block user responses (fire-and-forget)
 
+    Pre-extraction validates:
+    - Entity types match NodeLabel enum
+    - Relationship types match RelationType enum
+    - Relationship source/target types are compatible
+    - Property types and enum values are valid
+
     Graphiti handles:
-    - Entity extraction (Person, Organization, Project, etc.)
-    - Relationship extraction with semantic naming
-    - Entity resolution and deduplication
+    - Final entity extraction and resolution
+    - Semantic relationship naming
+    - Entity deduplication
     - Temporal handling (valid_at, invalid_at, expired_at)
     """
 
@@ -63,6 +82,8 @@ class Ingestor(BaseAgent):
         config: dict[str, Any] | None = None,
         graphiti_client: GraphitiClient | None = None,
         neo4j_client: Neo4jClient | None = None,
+        anthropic_client: AsyncAnthropic | None = None,
+        pre_extraction_config: PreExtractionConfig | None = None,
     ) -> None:
         """
         Initialize the Ingestor agent.
@@ -72,10 +93,21 @@ class Ingestor(BaseAgent):
             config: Agent configuration dict.
             graphiti_client: GraphitiClient instance for graph storage.
             neo4j_client: Neo4jClient for entity linking (Bug #350).
+            anthropic_client: Anthropic client for pre-extraction (#11).
+            pre_extraction_config: Configuration for pre-extraction (#13).
         """
         super().__init__(name, config)
         self.graphiti = graphiti_client
         self.neo4j = neo4j_client
+        self.anthropic = anthropic_client
+
+        # Initialize pre-extraction engine if client provided
+        self.pre_extraction: PreExtractionEngine | None = None
+        if anthropic_client:
+            self.pre_extraction = PreExtractionEngine(
+                anthropic_client=anthropic_client,
+                config=pre_extraction_config or PreExtractionConfig(),
+            )
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -143,6 +175,54 @@ class Ingestor(BaseAgent):
         )
 
         try:
+            # Pre-extract entities for validation (#11, #13)
+            pre_extraction_result = None
+            validation_result = None
+            if self.pre_extraction:
+                log_thinking(
+                    trace_id=msg.trace_id,
+                    agent_name=self.name,
+                    data={
+                        "step": "pre_extraction",
+                        "decision": "running LLM pre-extraction for ontology validation",
+                        "content_length": len(cleaned),
+                    },
+                )
+
+                pre_extraction_result, validation_result = await self.pre_extraction.extract(
+                    text=cleaned,
+                    trace_id=msg.trace_id,
+                )
+
+                # Log pre-extraction results
+                if pre_extraction_result:
+                    log_thinking(
+                        trace_id=msg.trace_id,
+                        agent_name=self.name,
+                        data={
+                            "step": "pre_extraction_complete",
+                            "entities_found": len(pre_extraction_result.entities),
+                            "relationships_found": len(pre_extraction_result.relationships),
+                            "validation_valid": validation_result.is_valid
+                            if validation_result
+                            else None,
+                            "validation_errors": validation_result.error_count
+                            if validation_result
+                            else 0,
+                            "validation_warnings": validation_result.warning_count
+                            if validation_result
+                            else 0,
+                        },
+                    )
+
+                    # Log entity details at debug level
+                    for entity in pre_extraction_result.entities:
+                        logger.debug(
+                            f"[WHISPER] Pre-extracted: {entity.entity_type} '{entity.name}' "
+                            f"(confidence: {entity.confidence:.0%})",
+                            extra={"trace_id": msg.trace_id, "agent_name": self.name},
+                        )
+
             # Log THINKING phase: Graphiti ingestion decision
             log_thinking(
                 trace_id=msg.trace_id,
@@ -153,6 +233,9 @@ class Ingestor(BaseAgent):
                     "content_length": len(cleaned),
                     "captain_uuid": captain_uuid,
                     "will_link_entities": bool(message_uuid and self.neo4j and self.graphiti),
+                    "pre_extracted_entities": len(pre_extraction_result.entities)
+                    if pre_extraction_result
+                    else 0,
                 },
             )
 
