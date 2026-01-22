@@ -69,6 +69,92 @@ class CalendarEvent(BaseModel):
     calendar_name: str | None = None  # Human-readable calendar name
     event_type: str | None = None  # "default", "outOfOffice", "focusTime", "workingLocation"
     transparency: str | None = None  # "opaque" (busy) or "transparent" (free)
+    recurrence_rule: str | None = None  # RFC 5545 RRULE string (e.g., "RRULE:FREQ=DAILY")
+    recurring_event_id: str | None = None  # ID of parent recurring event (for instances)
+
+
+class RecurrenceBuilder:
+    """
+    Build RFC 5545 RRULE strings for common recurrence patterns.
+
+    Examples:
+        RecurrenceBuilder.daily()  # "RRULE:FREQ=DAILY"
+        RecurrenceBuilder.weekly(["MO", "WE", "FR"])  # "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"
+        RecurrenceBuilder.monthly(15)  # "RRULE:FREQ=MONTHLY;BYMONTHDAY=15"
+        RecurrenceBuilder.yearly()  # "RRULE:FREQ=YEARLY"
+    """
+
+    @staticmethod
+    def daily(count: int | None = None, until: datetime | None = None) -> str:
+        """Create a daily recurrence rule."""
+        rule = "RRULE:FREQ=DAILY"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule
+
+    @staticmethod
+    def weekly(
+        days: list[str] | None = None,
+        count: int | None = None,
+        until: datetime | None = None,
+    ) -> str:
+        """
+        Create a weekly recurrence rule.
+
+        Args:
+            days: List of day abbreviations (MO, TU, WE, TH, FR, SA, SU).
+                  If None, recurs on the same day as the event.
+            count: Number of occurrences (mutually exclusive with until)
+            until: End date for recurrence (mutually exclusive with count)
+        """
+        rule = "RRULE:FREQ=WEEKLY"
+        if days:
+            rule += f";BYDAY={','.join(days)}"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule
+
+    @staticmethod
+    def monthly(
+        day_of_month: int | None = None,
+        count: int | None = None,
+        until: datetime | None = None,
+    ) -> str:
+        """
+        Create a monthly recurrence rule.
+
+        Args:
+            day_of_month: Day of month (1-31). If None, uses event's day.
+            count: Number of occurrences
+            until: End date for recurrence
+        """
+        rule = "RRULE:FREQ=MONTHLY"
+        if day_of_month:
+            rule += f";BYMONTHDAY={day_of_month}"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule
+
+    @staticmethod
+    def yearly(count: int | None = None, until: datetime | None = None) -> str:
+        """Create a yearly recurrence rule."""
+        rule = "RRULE:FREQ=YEARLY"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule
+
+    @staticmethod
+    def weekdays(count: int | None = None, until: datetime | None = None) -> str:
+        """Create a weekday (Mon-Fri) recurrence rule."""
+        return RecurrenceBuilder.weekly(["MO", "TU", "WE", "TH", "FR"], count, until)
 
 
 class SendEmailResult(BaseModel):
@@ -1272,6 +1358,7 @@ class GoogleWorkspaceBridge:
         description: str | None = None,
         location: str | None = None,
         attendees: list[str] | None = None,
+        recurrence_rule: str | None = None,
         context: Any = None,  # noqa: ARG002
     ) -> CreateEventResult:
         """
@@ -1284,6 +1371,12 @@ class GoogleWorkspaceBridge:
             description: Optional event description
             location: Optional event location
             attendees: Optional list of attendee email addresses
+            recurrence_rule: Optional RFC 5545 RRULE string for recurring events.
+                Use RecurrenceBuilder for common patterns:
+                - RecurrenceBuilder.daily() -> "RRULE:FREQ=DAILY"
+                - RecurrenceBuilder.weekly(["MO", "WE", "FR"])
+                - RecurrenceBuilder.monthly(15)
+                - RecurrenceBuilder.yearly()
             context: Ignored (kept for interface compatibility)
 
         Returns:
@@ -1304,6 +1397,8 @@ class GoogleWorkspaceBridge:
                 event_body["location"] = location
             if attendees:
                 event_body["attendees"] = [{"email": email} for email in attendees]
+            if recurrence_rule:
+                event_body["recurrence"] = [recurrence_rule]
 
             event: dict[str, Any] = (
                 self._calendar_service.events()
@@ -1335,6 +1430,7 @@ class GoogleWorkspaceBridge:
         description: str | None = None,
         location: str | None = None,
         attendees: list[str] | None = None,
+        recurrence_rule: str | None = None,
         context: Any = None,  # noqa: ARG002
     ) -> UpdateEventResult:
         """
@@ -1350,6 +1446,8 @@ class GoogleWorkspaceBridge:
             description: New event description (optional)
             location: New event location (optional)
             attendees: New list of attendee email addresses (optional)
+            recurrence_rule: New RFC 5545 RRULE string (optional).
+                Use RecurrenceBuilder for common patterns.
             context: Ignored (kept for interface compatibility)
 
         Returns:
@@ -1372,6 +1470,8 @@ class GoogleWorkspaceBridge:
                 event_body["location"] = location
             if attendees is not None:
                 event_body["attendees"] = [{"email": email} for email in attendees]
+            if recurrence_rule is not None:
+                event_body["recurrence"] = [recurrence_rule]
 
             event: dict[str, Any] = (
                 self._calendar_service.events()
@@ -1542,6 +1642,10 @@ class GoogleWorkspaceBridge:
                 start = datetime.fromisoformat(start_str.replace("Z", "+00:00"))
                 end = datetime.fromisoformat(end_str.replace("Z", "+00:00"))
 
+                # Extract recurrence info
+                recurrence = evt.get("recurrence", [])
+                recurrence_rule = recurrence[0] if recurrence else None
+
                 event = CalendarEvent(
                     id=evt.get("id", ""),
                     title=evt.get("summary", "(no title)"),
@@ -1554,6 +1658,8 @@ class GoogleWorkspaceBridge:
                     calendar_name=calendar_name,
                     event_type=evt.get("eventType"),  # "default", "outOfOffice", "focusTime", etc.
                     transparency=evt.get("transparency"),  # "opaque" (busy) or "transparent" (free)
+                    recurrence_rule=recurrence_rule,
+                    recurring_event_id=evt.get("recurringEventId"),
                 )
                 parsed.append(event)
 
@@ -1576,5 +1682,6 @@ __all__ = [
     "CreateEventResult",
     "EmailMessage",
     "GoogleWorkspaceBridge",
+    "RecurrenceBuilder",
     "SendEmailResult",
 ]
