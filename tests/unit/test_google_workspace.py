@@ -1224,3 +1224,195 @@ class TestRateLimiting:
 
         # Bridge was started, semaphore should be created
         assert bridge._semaphore._value == 2
+
+
+# ===========================================================================
+# Recurring Events Tests
+# ===========================================================================
+
+
+class TestRecurrenceBuilder:
+    """Test RecurrenceBuilder for generating RFC 5545 RRULE strings."""
+
+    def test_daily_basic(self):
+        """Test daily recurrence rule."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.daily()
+        assert rule == "RRULE:FREQ=DAILY"
+
+    def test_daily_with_count(self):
+        """Test daily recurrence with occurrence count."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.daily(count=10)
+        assert rule == "RRULE:FREQ=DAILY;COUNT=10"
+
+    def test_daily_with_until(self):
+        """Test daily recurrence with end date."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        until = datetime(2026, 12, 31, 23, 59, 59)
+        rule = RecurrenceBuilder.daily(until=until)
+        assert rule == "RRULE:FREQ=DAILY;UNTIL=20261231T235959Z"
+
+    def test_weekly_basic(self):
+        """Test weekly recurrence rule."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.weekly()
+        assert rule == "RRULE:FREQ=WEEKLY"
+
+    def test_weekly_with_days(self):
+        """Test weekly recurrence on specific days."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.weekly(days=["MO", "WE", "FR"])
+        assert rule == "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"
+
+    def test_weekly_with_days_and_count(self):
+        """Test weekly recurrence on specific days with count."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.weekly(days=["TU", "TH"], count=8)
+        assert rule == "RRULE:FREQ=WEEKLY;BYDAY=TU,TH;COUNT=8"
+
+    def test_monthly_basic(self):
+        """Test monthly recurrence rule."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.monthly()
+        assert rule == "RRULE:FREQ=MONTHLY"
+
+    def test_monthly_with_day(self):
+        """Test monthly recurrence on specific day of month."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.monthly(day_of_month=15)
+        assert rule == "RRULE:FREQ=MONTHLY;BYMONTHDAY=15"
+
+    def test_yearly_basic(self):
+        """Test yearly recurrence rule."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.yearly()
+        assert rule == "RRULE:FREQ=YEARLY"
+
+    def test_yearly_with_count(self):
+        """Test yearly recurrence with count."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.yearly(count=5)
+        assert rule == "RRULE:FREQ=YEARLY;COUNT=5"
+
+    def test_weekdays(self):
+        """Test weekdays (Mon-Fri) recurrence."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        rule = RecurrenceBuilder.weekdays()
+        assert rule == "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+
+
+class TestRecurringCalendarEvents:
+    """Test calendar operations with recurrence."""
+
+    @pytest.mark.asyncio
+    async def test_create_recurring_event(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test creating a recurring event."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        mock_calendar_service.events.return_value.insert.return_value.execute.return_value = {
+            "id": "recurring-event-123",
+            "htmlLink": "https://calendar.google.com/event/123",
+            "recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"],
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        result = await bridge.create_event(
+            title="Weekly Standup",
+            start=datetime(2026, 1, 20, 9, 0),
+            end=datetime(2026, 1, 20, 9, 30),
+            recurrence_rule=RecurrenceBuilder.weekly(["MO", "WE", "FR"]),
+        )
+
+        assert result.success is True
+        assert result.event_id == "recurring-event-123"
+
+        # Verify the API was called with recurrence
+        call_args = mock_calendar_service.events.return_value.insert.call_args
+        body = call_args[1]["body"]
+        assert "recurrence" in body
+        assert body["recurrence"] == ["RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"]
+
+    @pytest.mark.asyncio
+    async def test_parse_recurring_event(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test parsing a recurring event from API response."""
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {
+                    "id": "recurring-event-456",
+                    "summary": "Daily Standup",
+                    "start": {"dateTime": "2026-01-20T09:00:00Z"},
+                    "end": {"dateTime": "2026-01-20T09:30:00Z"},
+                    "recurrence": ["RRULE:FREQ=DAILY"],
+                },
+                {
+                    "id": "instance-789",
+                    "summary": "Daily Standup",
+                    "start": {"dateTime": "2026-01-21T09:00:00Z"},
+                    "end": {"dateTime": "2026-01-21T09:30:00Z"},
+                    "recurringEventId": "recurring-event-456",
+                },
+            ]
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        events = await bridge.list_events(
+            start=datetime(2026, 1, 20),
+            end=datetime(2026, 1, 22),
+        )
+
+        assert len(events) == 2
+        # First event is the recurring event definition
+        assert events[0].recurrence_rule == "RRULE:FREQ=DAILY"
+        assert events[0].recurring_event_id is None
+        # Second event is an instance of the recurring event
+        assert events[1].recurrence_rule is None
+        assert events[1].recurring_event_id == "recurring-event-456"
+
+    @pytest.mark.asyncio
+    async def test_update_recurring_event(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test updating a recurring event's recurrence pattern."""
+        from klabautermann.mcp.google_workspace import RecurrenceBuilder
+
+        mock_calendar_service.events.return_value.patch.return_value.execute.return_value = {
+            "id": "recurring-event-123",
+            "htmlLink": "https://calendar.google.com/event/123",
+            "recurrence": ["RRULE:FREQ=DAILY"],
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        result = await bridge.update_event(
+            event_id="recurring-event-123",
+            recurrence_rule=RecurrenceBuilder.daily(),
+        )
+
+        assert result.success is True
+
+        # Verify the API was called with recurrence
+        call_args = mock_calendar_service.events.return_value.patch.call_args
+        body = call_args[1]["body"]
+        assert "recurrence" in body
+        assert body["recurrence"] == ["RRULE:FREQ=DAILY"]
