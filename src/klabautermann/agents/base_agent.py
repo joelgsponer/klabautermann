@@ -16,6 +16,7 @@ from typing import Any
 
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
+from klabautermann.core.workflow_inspector import get_inspector
 
 
 class BaseAgent(ABC):
@@ -131,6 +132,7 @@ class BaseAgent(ABC):
         """
         start_time = time.time()
         self._request_count += 1
+        inspector = get_inspector()
 
         try:
             logger.debug(
@@ -142,10 +144,44 @@ class BaseAgent(ABC):
                 },
             )
 
+            # Log REQUEST phase for workflow inspection
+            inspector.log_request(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "intent": msg.intent,
+                    "source": msg.source_agent,
+                    "payload": msg.payload,
+                    "priority": msg.priority,
+                },
+            )
+
             response = await self.process_message(msg)
+
+            elapsed_ms = (time.time() - start_time) * 1000
 
             if response:
                 await self._route_response(response, original_msg=msg)
+                # Log OUTPUT phase with response
+                inspector.log_output(
+                    trace_id=msg.trace_id,
+                    agent_name=self.name,
+                    data={
+                        "status": "success",
+                        "response_intent": response.intent,
+                        "response_target": response.target_agent,
+                        "response_payload": response.payload,
+                    },
+                    duration_ms=elapsed_ms,
+                )
+            else:
+                # Log OUTPUT phase without response (fire-and-forget)
+                inspector.log_output(
+                    trace_id=msg.trace_id,
+                    agent_name=self.name,
+                    data={"status": "success", "response": None},
+                    duration_ms=elapsed_ms,
+                )
 
             self._success_count += 1
             logger.debug(
@@ -155,6 +191,16 @@ class BaseAgent(ABC):
 
         except Exception as e:
             self._error_count += 1
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            # Log OUTPUT phase with error
+            inspector.log_output(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={"status": "error", "error": str(e), "error_type": type(e).__name__},
+                duration_ms=elapsed_ms,
+            )
+
             logger.error(
                 f"[STORM] {self.name} failed: {e}",
                 extra={"trace_id": msg.trace_id, "agent_name": self.name},

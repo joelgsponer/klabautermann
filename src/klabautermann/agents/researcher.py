@@ -39,6 +39,7 @@ from klabautermann.agents.researcher_models import (
 from klabautermann.agents.researcher_prompts import PLANNING_PROMPT, SYNTHESIS_PROMPT
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
+from klabautermann.core.workflow_inspector import log_thinking
 
 
 if TYPE_CHECKING:
@@ -259,9 +260,43 @@ class Researcher(BaseAgent):
             start_time = time.time()
 
             # Step 1: Plan search strategies using Opus
+            # Log THINKING phase: planning decision
+            log_thinking(
+                trace_id=trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "planning",
+                    "decision": "using Opus to plan search strategies",
+                    "query": query,
+                    "context_keys": list(context.keys()) if context else [],
+                },
+            )
+
             plan = await self._plan_search(query, context, trace_id)
 
             planning_time = (time.time() - start_time) * 1000
+
+            # Log THINKING phase: plan result
+            log_thinking(
+                trace_id=trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "plan_ready",
+                    "reasoning": plan.reasoning,
+                    "strategies": [
+                        {
+                            "technique": s.technique.value,
+                            "query": s.query,
+                            "rationale": s.rationale,
+                        }
+                        for s in plan.strategies
+                    ],
+                    "expected_result_type": plan.expected_result_type,
+                    "zoom_level": plan.zoom_level,
+                    "planning_ms": planning_time,
+                },
+            )
+
             logger.info(
                 "[BEACON] Search plan ready",
                 extra={
@@ -279,6 +314,24 @@ class Researcher(BaseAgent):
             # Step 3: Aggregate and score results
             aggregated = self._aggregate_results(results_by_technique, max_results)
 
+            # Log THINKING phase: search results summary
+            log_thinking(
+                trace_id=trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "search_complete",
+                    "raw_results_by_technique": {
+                        k: len(v) for k, v in results_by_technique.items()
+                    },
+                    "aggregated_count": len(aggregated),
+                    "top_results": [
+                        {"content": r.content[:100], "technique": r.source_technique.value}
+                        for r in aggregated[:5]
+                    ],
+                    "execution_ms": execution_time,
+                },
+            )
+
             logger.info(
                 "[BEACON] Search execution complete",
                 extra={
@@ -290,6 +343,17 @@ class Researcher(BaseAgent):
             )
 
             # Step 4: Synthesize report using Opus
+            # Log THINKING phase: synthesis decision
+            log_thinking(
+                trace_id=trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "synthesis",
+                    "decision": "using Opus to synthesize report from results",
+                    "result_count": len(aggregated),
+                },
+            )
+
             synth_start = time.time()
             report = await self._synthesize_report(query, aggregated, plan, trace_id)
             synthesis_time = (time.time() - synth_start) * 1000
