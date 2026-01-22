@@ -1302,3 +1302,281 @@ class TestSkillValidation:
 
         # CustomTool should be OK, but Grep should warn (not in custom list)
         assert any("Grep" in w.message for w in result.warnings)
+
+
+class TestSkillDocsGenerator:
+    """Tests for skill documentation generator."""
+
+    @pytest.fixture
+    def sample_skill(self) -> LoadedSkill:
+        """Create a sample skill for testing docs generation."""
+        return LoadedSkill(
+            metadata=SkillMetadata(
+                name="sample-skill",
+                description='A sample skill for testing. Use when user says "test docs" or "generate documentation".',
+                **{
+                    "allowed-tools": "Read, Grep",
+                    "model": "claude-3-5-haiku-20241022",
+                },
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{
+                    "klabautermann-task-type": "research",
+                    "klabautermann-agent": "researcher",
+                    "klabautermann-blocking": True,
+                    "klabautermann-payload-schema": {
+                        "query": {
+                            "type": "string",
+                            "required": True,
+                            "description": "Search query",
+                        },
+                        "limit": {
+                            "type": "number",
+                            "required": False,
+                            "default": 10,
+                            "description": "Max results",
+                        },
+                    },
+                }
+            ),
+            body="# Sample Skill\n\n## Instructions\n\nDo something useful.\n\n## Examples\n\n**User**: test\n- Result: success",
+            path=Path("/tmp/sample-skill/SKILL.md"),
+        )
+
+    def test_generate_skill_doc(self, sample_skill: LoadedSkill) -> None:
+        """Test generating documentation for a single skill."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+
+        assert doc.name == "sample-skill"
+        assert "sample skill for testing" in doc.description.lower()
+        assert doc.model == "claude-3-5-haiku-20241022"
+        assert "Read" in doc.allowed_tools
+        assert "Grep" in doc.allowed_tools
+        assert doc.task_type == "research"
+        assert doc.agent == "researcher"
+        assert doc.blocking is True
+
+    def test_generate_skill_doc_parameters(self, sample_skill: LoadedSkill) -> None:
+        """Test that parameters are extracted correctly."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+
+        assert len(doc.parameters) == 2
+
+        # Find query parameter
+        query_param = next((p for p in doc.parameters if p.name == "query"), None)
+        assert query_param is not None
+        assert query_param.type == "string"
+        assert query_param.required is True
+        assert query_param.description == "Search query"
+
+        # Find limit parameter
+        limit_param = next((p for p in doc.parameters if p.name == "limit"), None)
+        assert limit_param is not None
+        assert limit_param.type == "number"
+        assert limit_param.required is False
+        assert limit_param.default == "10"
+
+    def test_generate_skill_doc_trigger_phrases(self, sample_skill: LoadedSkill) -> None:
+        """Test that trigger phrases are extracted from description."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+
+        assert len(doc.trigger_phrases) >= 2
+        phrases_lower = [p.lower() for p in doc.trigger_phrases]
+        assert "test docs" in phrases_lower
+        assert "generate documentation" in phrases_lower
+
+    def test_generate_skill_doc_body_sections(self, sample_skill: LoadedSkill) -> None:
+        """Test that body sections are parsed correctly."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+
+        assert "Instructions" in doc.body_sections
+        assert "something useful" in doc.body_sections["Instructions"]
+        assert "Examples" in doc.body_sections
+        assert "success" in doc.body_sections["Examples"]
+
+    def test_skill_doc_to_markdown(self, sample_skill: LoadedSkill) -> None:
+        """Test converting skill doc to markdown."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+        markdown = doc.to_markdown()
+
+        # Check header
+        assert "# sample-skill" in markdown
+
+        # Check quick reference table
+        assert "Quick Reference" in markdown
+        assert "claude-3-5-haiku-20241022" in markdown
+        assert "research" in markdown
+        assert "researcher" in markdown
+
+        # Check parameters table
+        assert "Parameters" in markdown
+        assert "query" in markdown
+        assert "limit" in markdown
+
+        # Check trigger phrases
+        assert "How to Use" in markdown
+        assert "test docs" in markdown
+
+    def test_skill_doc_to_html(self, sample_skill: LoadedSkill) -> None:
+        """Test converting skill doc to HTML."""
+        from klabautermann.skills.docs import generate_skill_doc
+
+        doc = generate_skill_doc(sample_skill)
+        html = doc.to_html()
+
+        # Check basic structure
+        assert "<!DOCTYPE html>" in html
+        assert "<title>sample-skill" in html
+        assert "</html>" in html
+
+        # Check content
+        assert "sample-skill" in html
+        assert "claude-3-5-haiku-20241022" in html
+        assert "Parameters" in html
+
+    def test_skill_parameter_to_markdown(self) -> None:
+        """Test SkillParameter.to_markdown() formatting."""
+        from klabautermann.skills.docs import SkillParameter
+
+        param = SkillParameter(
+            name="test_param",
+            type="string",
+            required=True,
+            default=None,
+            description="A test parameter",
+        )
+
+        row = param.to_markdown()
+
+        assert "`test_param`" in row
+        assert "`string`" in row
+        assert "Yes" in row
+        assert "A test parameter" in row
+
+    def test_generate_all_skills(self, tmp_path: Path) -> None:
+        """Test generating docs for all skills."""
+        from klabautermann.skills.docs import SkillDocsGenerator
+
+        # Create test skills
+        for name in ["skill-one", "skill-two"]:
+            skill_dir = tmp_path / name
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                dedent(f"""
+                ---
+                name: {name}
+                description: Description of {name}. Use when needed.
+                ---
+
+                # {name}
+
+                ## Instructions
+
+                Do something.
+            """).strip()
+            )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        generator = SkillDocsGenerator(loader)
+        docs = generator.generate_all()
+
+        assert "skill-one" in docs
+        assert "skill-two" in docs
+        assert docs["skill-one"].name == "skill-one"
+        assert docs["skill-two"].name == "skill-two"
+
+    def test_generate_index(self, tmp_path: Path) -> None:
+        """Test generating an index page for all skills."""
+        from klabautermann.skills.docs import SkillDocsGenerator
+
+        # Create test skills
+        for name in ["alpha-skill", "beta-skill"]:
+            skill_dir = tmp_path / name
+            skill_dir.mkdir()
+            (skill_dir / "SKILL.md").write_text(
+                dedent(f"""
+                ---
+                name: {name}
+                description: Description of {name}. Use when needed.
+                klabautermann-task-type: research
+                klabautermann-agent: researcher
+                ---
+
+                # {name}
+            """).strip()
+            )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        generator = SkillDocsGenerator(loader)
+        index = generator.generate_index()
+
+        # Check index structure
+        assert "# Skill Reference" in index
+        assert "alpha-skill" in index
+        assert "beta-skill" in index
+        assert "researcher" in index
+
+    def test_generate_skill_docs_writes_files(self, tmp_path: Path) -> None:
+        """Test generate_skill_docs writes files to output directory."""
+        from klabautermann.skills.docs import generate_skill_docs
+
+        # Create a skill
+        skill_dir = tmp_path / "skills" / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: test-skill
+            description: A test skill. Use when needed.
+            ---
+
+            # Test Skill
+        """).strip()
+        )
+
+        output_dir = tmp_path / "docs"
+        loader = SkillLoader(
+            project_skills_dir=tmp_path / "skills", personal_skills_dir=tmp_path / "none"
+        )
+
+        # Generate markdown docs
+        docs = generate_skill_docs(loader, output_dir=output_dir, format="markdown")
+
+        assert "test-skill" in docs
+        assert (output_dir / "test-skill.md").exists()
+        assert (output_dir / "index.md").exists()
+
+        # Check content
+        content = (output_dir / "test-skill.md").read_text()
+        assert "# test-skill" in content
+
+    def test_summarize_thread_skill_docs(self) -> None:
+        """Test generating docs for the real summarize-thread skill."""
+        from klabautermann.skills.docs import SkillDocsGenerator
+
+        project_root = Path(__file__).parent.parent.parent
+        skills_dir = project_root / ".claude" / "skills"
+
+        loader = SkillLoader(
+            project_skills_dir=skills_dir, personal_skills_dir=Path("/nonexistent")
+        )
+        generator = SkillDocsGenerator(loader)
+        docs = generator.generate_all()
+
+        if "summarize-thread" in docs:
+            doc = docs["summarize-thread"]
+            assert doc.name == "summarize-thread"
+            assert doc.task_type == "research"
+            assert doc.agent == "researcher"
+            assert len(doc.parameters) >= 3  # thread_id, thread_type, query
+            assert "Instructions" in doc.body_sections
