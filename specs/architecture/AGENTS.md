@@ -607,26 +607,23 @@ Each agent has a YAML configuration file:
 
 ```yaml
 # config/agents/orchestrator.yaml
-model: claude-3-5-sonnet-20241022
-fallback_model: claude-3-haiku-20240307
-max_context_tokens: 8000
-personality: klabautermann
-temperature: 0.7
+use_v2_workflow: true  # Think-Dispatch-Synthesize pattern
 
+model:
+  primary: claude-sonnet-4-20250514
+  fallback: claude-3-haiku-20240307
+  temperature: 0.7
+  max_context_tokens: 8000
+
+personality:
+  name: klabautermann
+  wit_level: 0.3
+
+# Intent classification uses LLM for semantic understanding
+# No keyword lists - pure AI-first approach (Issue #2 / AGT-P-001)
 intent_classification:
-  search_keywords:
-    - "who"
-    - "what"
-    - "when"
-    - "where"
-    - "find"
-    - "tell me about"
-  action_keywords:
-    - "send"
-    - "email"
-    - "schedule"
-    - "create"
-    - "draft"
+  model: claude-3-5-haiku-20241022  # Fast model for classification
+  timeout: 5.0  # Seconds before graceful degradation
 
 delegation:
   search: researcher

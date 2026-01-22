@@ -264,6 +264,25 @@ class TestIntentClassification:
             assert intent.type == IntentType.CONVERSATION
             assert intent.confidence == 0.7
 
+    @pytest.mark.asyncio
+    async def test_llm_failure_returns_conversation(self, orchestrator: Orchestrator) -> None:
+        """When LLM classification fails, return CONVERSATION with low confidence.
+
+        AI-First principle: No keyword fallback. Graceful degradation to
+        CONVERSATION intent preserves semantic purity (Issue #2 / AGT-P-001).
+        """
+        with patch.object(
+            orchestrator, "_call_classification_model", new_callable=AsyncMock
+        ) as mock_llm:
+            # Simulate LLM failure
+            mock_llm.side_effect = Exception("API timeout")
+            intent = await orchestrator._classify_intent(
+                "Send an email to John", None, "test-trace"
+            )
+            # Should fall back to CONVERSATION, NOT use keyword matching
+            assert intent.type == IntentType.CONVERSATION
+            assert intent.confidence == 0.3  # Low confidence signals uncertainty
+
 
 # ====================
 # AGENT DELEGATION TESTS

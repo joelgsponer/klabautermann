@@ -990,67 +990,17 @@ class Orchestrator(BaseAgent):
             )
 
         except Exception as e:
-            # Fallback to simple heuristics if LLM fails
+            # AI-First: No keyword fallback - return CONVERSATION with low confidence
+            # This ensures the system degrades gracefully while maintaining semantic purity
+            # Issue #2 (AGT-P-001): Remove keyword-based intent classification
             logger.warning(
-                f"[SWELL] LLM classification failed, using fallback: {e}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return self._classify_intent_fallback(text, trace_id)
-
-    def _classify_intent_fallback(self, text: str, trace_id: str) -> IntentClassification:
-        """
-        Simple fallback classification when LLM is unavailable.
-
-        Uses basic heuristics - much less accurate than LLM but works offline.
-        """
-        text_lower = text.lower().strip()
-
-        # Question mark -> SEARCH
-        if "?" in text:
-            logger.debug(
-                "[WHISPER] Fallback: question mark -> SEARCH",
+                f"[SWELL] LLM classification failed, defaulting to CONVERSATION: {e}",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
             return IntentClassification(
-                type=IntentType.SEARCH,
-                confidence=0.6,
-                query=text,
+                type=IntentType.CONVERSATION,
+                confidence=0.3,  # Low confidence signals classification uncertainty
             )
-
-        # Action keywords
-        action_starts = ("send", "email", "schedule", "create", "draft", "book")
-        if any(text_lower.startswith(kw) for kw in action_starts):
-            logger.debug(
-                "[WHISPER] Fallback: action keyword -> ACTION",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return IntentClassification(
-                type=IntentType.ACTION,
-                confidence=0.6,
-                action=text,
-            )
-
-        # Ingestion keywords
-        ingest_starts = ("i met", "i talked", "i spoke", "i learned", "i just")
-        if any(text_lower.startswith(kw) for kw in ingest_starts):
-            logger.debug(
-                "[WHISPER] Fallback: ingestion keyword -> INGESTION",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return IntentClassification(
-                type=IntentType.INGESTION,
-                confidence=0.6,
-            )
-
-        # Default to conversation
-        logger.debug(
-            "[WHISPER] Fallback: default -> CONVERSATION",
-            extra={"trace_id": trace_id, "agent_name": self.name},
-        )
-        return IntentClassification(
-            type=IntentType.CONVERSATION,
-            confidence=0.5,
-        )
 
     # =========================================================================
     # Intent Handlers (T021 - Full Delegation)
