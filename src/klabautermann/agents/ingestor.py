@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.core.logger import logger
+from klabautermann.core.workflow_inspector import log_thinking
 
 
 if TYPE_CHECKING:
@@ -109,6 +110,20 @@ class Ingestor(BaseAgent):
         # Clean input before sending to Graphiti
         cleaned = self.clean_input(text)
 
+        # Log THINKING phase: text cleaning decision
+        log_thinking(
+            trace_id=msg.trace_id,
+            agent_name=self.name,
+            data={
+                "step": "text_cleaning",
+                "original_length": len(text),
+                "cleaned_length": len(cleaned),
+                "removed_chars": len(text) - len(cleaned),
+                "text_preview": text[:100] + "..." if len(text) > 100 else text,
+                "cleaned_preview": cleaned[:100] + "..." if len(cleaned) > 100 else cleaned,
+            },
+        )
+
         if not cleaned:
             logger.debug(
                 "[WHISPER] Text cleaned to empty - skipping ingestion",
@@ -128,6 +143,19 @@ class Ingestor(BaseAgent):
         )
 
         try:
+            # Log THINKING phase: Graphiti ingestion decision
+            log_thinking(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "graphiti_ingestion",
+                    "decision": "sending to Graphiti for entity extraction",
+                    "content_length": len(cleaned),
+                    "captain_uuid": captain_uuid,
+                    "will_link_entities": bool(message_uuid and self.neo4j and self.graphiti),
+                },
+            )
+
             # Pass cleaned text directly to Graphiti
             # Graphiti's internal LLM handles entity/relationship extraction
             episode_name = await self._ingest_to_graphiti(
@@ -138,6 +166,17 @@ class Ingestor(BaseAgent):
 
             # Link extracted entities to source message (Bug #350 fix)
             if episode_name and message_uuid and self.neo4j and self.graphiti:
+                # Log THINKING phase: entity linking
+                log_thinking(
+                    trace_id=msg.trace_id,
+                    agent_name=self.name,
+                    data={
+                        "step": "entity_linking",
+                        "decision": "linking entities to source message",
+                        "episode_name": episode_name,
+                        "message_uuid": message_uuid[:8] if message_uuid else None,
+                    },
+                )
                 await self._link_entities_to_message(
                     episode_name=episode_name,
                     message_uuid=message_uuid,

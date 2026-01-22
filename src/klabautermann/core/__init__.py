@@ -6,6 +6,7 @@ Contains:
 - ontology: Graph schema constants
 - logger: Nautical logging system
 - exceptions: Custom exception types
+- workflow_inspector: Agent workflow inspection for debugging
 """
 
 from klabautermann.core.exceptions import (
@@ -15,6 +16,15 @@ from klabautermann.core.exceptions import (
     KlabautermannError,
     ValidationError,
 )
+from klabautermann.core.workflow_inspector import (
+    WorkflowEntry,
+    WorkflowInspector,
+    WorkflowPhase,
+    get_inspector,
+    log_output,
+    log_request,
+    log_thinking,
+)
 
 
 __all__ = [
@@ -23,4 +33,11 @@ __all__ = [
     "GraphConnectionError",
     "KlabautermannError",
     "ValidationError",
+    "WorkflowEntry",
+    "WorkflowInspector",
+    "WorkflowPhase",
+    "get_inspector",
+    "log_output",
+    "log_request",
+    "log_thinking",
 ]

@@ -23,6 +23,7 @@ from klabautermann.agents.calendar_handlers import (
 from klabautermann.agents.gmail_handlers import EmailComposer, EmailFormatter, GmailQueryBuilder
 from klabautermann.core.logger import logger
 from klabautermann.core.models import ActionRequest, ActionResult, ActionType, AgentMessage
+from klabautermann.core.workflow_inspector import log_thinking
 from klabautermann.mcp.client import ToolInvocationContext
 from klabautermann.mcp.google_workspace import GoogleWorkspaceBridge
 
@@ -123,8 +124,33 @@ ERROR HANDLING:
             )
 
         try:
+            # Log THINKING phase: parsing decision
+            log_thinking(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "parsing",
+                    "decision": "parsing action request",
+                    "action": action[:100] if action else None,
+                    "action_type": action_type,
+                    "has_gmail_query": bool(gmail_query),
+                },
+            )
+
             # Parse the action request
             request = await self._parse_action(action, context, msg.trace_id)
+
+            # Log THINKING phase: parsed result
+            log_thinking(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "parsed",
+                    "action_type": request.type.value if request.type else "unknown",
+                    "target": request.target,
+                    "subject": request.subject[:50] if request.subject else None,
+                },
+            )
 
             logger.debug(
                 f"[WHISPER] Parsed action: {request.type}",
@@ -133,8 +159,31 @@ ERROR HANDLING:
 
             # Validate the request
             validation = await self._validate_request(request, context, msg.trace_id)
+
+            # Log THINKING phase: validation result
+            log_thinking(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "validation",
+                    "passed": validation.success,
+                    "message": validation.message[:100] if validation.message else None,
+                },
+            )
+
             if not validation.success:
                 return self._create_response(msg, validation)
+
+            # Log THINKING phase: execution decision
+            log_thinking(
+                trace_id=msg.trace_id,
+                agent_name=self.name,
+                data={
+                    "step": "execution",
+                    "decision": f"executing {request.type.value if request.type else 'action'}",
+                    "target": request.target,
+                },
+            )
 
             # Execute the action
             result = await self._execute_action(request, context, msg.trace_id)
