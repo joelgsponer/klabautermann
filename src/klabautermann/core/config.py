@@ -25,7 +25,15 @@ class Settings(BaseModel):
     anthropic_api_key: str = ""
     openai_api_key: str = ""
 
-    # Model selection
+    # Model selection (multi-model orchestration)
+    # Haiku: Fast, cheap - classification, extraction, simple queries
+    haiku_model: str = "claude-3-5-haiku-20241022"
+    # Sonnet: Balanced - reasoning, synthesis, actions
+    sonnet_model: str = "claude-sonnet-4-20250514"
+    # Opus: Most capable - complex planning, critical decisions
+    opus_model: str = "claude-opus-4-5-20251101"
+
+    # Legacy aliases (for backward compatibility)
     primary_model: str = "claude-sonnet-4-20250514"
     fast_model: str = "claude-3-5-haiku-20241022"
 
@@ -38,19 +46,30 @@ class Settings(BaseModel):
     debug: bool = False
     disable_ingestion: bool = False
 
+    # Model selection feature flag
+    enable_multi_model: bool = True
+
     @classmethod
     def from_env(cls) -> Settings:
         """Load settings from environment variables."""
         return cls(
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
+            # Multi-model orchestration settings
+            haiku_model=os.getenv("HAIKU_MODEL", "claude-3-5-haiku-20241022"),
+            sonnet_model=os.getenv("SONNET_MODEL", "claude-sonnet-4-20250514"),
+            opus_model=os.getenv("OPUS_MODEL", "claude-opus-4-5-20251101"),
+            # Legacy aliases
             primary_model=os.getenv("ORCHESTRATOR_MODEL", "claude-sonnet-4-20250514"),
             fast_model=os.getenv("HAIKU_MODEL", "claude-3-5-haiku-20241022"),
+            # Neo4j
             neo4j_uri=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
             neo4j_username=os.getenv("NEO4J_USERNAME", "neo4j"),
             neo4j_password=os.getenv("NEO4J_PASSWORD", ""),
+            # Feature flags
             debug=os.getenv("DEBUG", "false").lower() == "true",
             disable_ingestion=os.getenv("DISABLE_INGESTION", "false").lower() == "true",
+            enable_multi_model=os.getenv("ENABLE_MULTI_MODEL", "true").lower() == "true",
         )
 
 
