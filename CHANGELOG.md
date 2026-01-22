@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Structural and temporal query support for Researcher agent (#19, #21)
+  - `traverse_reporting_chain()` for REPORTS_TO hierarchy traversal
+    - Traverse upward to find managers (OUTGOING) or downward for reports (INCOMING)
+    - Configurable max_depth and temporal filtering (include_expired)
+    - Search by person UUID or name with fuzzy matching
+  - New `temporal.py` module for time-filtered queries
+    - `parse_time_expression()` parses natural language time expressions
+    - Supports: "yesterday", "last week", "3 days ago", "in 2025", "as of last year"
+    - `TimeRange` dataclass with start/end/as_of timestamps (ms for Neo4j)
+    - `TimeExpressionType` enum: RELATIVE_PAST, RELATIVE_FUTURE, ABSOLUTE, AS_OF, NONE
+    - `execute_temporal_query()` filters nodes by created_at/expired_at
+    - `get_historical_relationships()` for point-in-time queries like "Who did Sarah work for last year?"
+  - All new symbols exported from `klabautermann.memory` module
+  - 63 new unit tests for comprehensive coverage
 - HullCleaner duplicate entity detection and merge (#84, #85)
   - `DuplicateCandidate` dataclass with confidence levels (HIGH/MEDIUM/LOW)
   - `MergeResult` dataclass for tracking merge operation statistics
