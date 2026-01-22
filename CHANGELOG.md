@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Grafana dashboard for metrics visualization (#274)
+- Dashboard panels: Agent Performance, API Performance, LLM Performance, Graph Operations
+- `docker-compose.monitoring.yml` for Prometheus + Grafana monitoring stack
+- Auto-provisioned Grafana dashboards and datasources
 - Prometheus metrics export with `/metrics` endpoint (#271)
 - Agent metrics: `klabautermann_agent_requests_total`, `klabautermann_agent_successes_total`, `klabautermann_agent_errors_total`, `klabautermann_agent_request_latency_ms`, `klabautermann_agent_running`, `klabautermann_agent_inbox_size`
 - API metrics: `klabautermann_api_requests_total`, `klabautermann_api_request_latency_seconds`, `klabautermann_api_websocket_connections`
