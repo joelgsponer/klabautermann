@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Complete lore graph schema implementation (#97, #98, #99, #100)
+  - LoreEpisode node type in ontology with uuid constraint and saga_id index (#97)
+  - TOLD_TO relationship linking episodes to Captain (#98)
+  - EXPANDS_UPON relationship chaining consecutive chapters (#99)
+  - SAGA_STARTED_BY relationship marking first chapter as saga initiator (#100)
+  - `get_saga_origins()` method to query saga initiators via SAGA_STARTED_BY
+  - Process message handler for `get_saga_origins` operation
+  - 4 new tests for SAGA_STARTED_BY and saga origins
 - Standalone tidbits and weighted selection algorithm (#107, #108)
   - 12 standalone tidbits: one-liner tales from LORE_SYSTEM.md Section 4.1
   - 5 saga tidbits: continuation context excerpts for saga threads
