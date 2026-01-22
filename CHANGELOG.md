@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- BardOfTheBilge lore storytelling agent (#37, #38, #39, #40)
+  - `BardOfTheBilge` agent skeleton extending `BaseAgent`
+  - `BardConfig` for configurable tidbit behavior (probability, saga settings)
+  - `LoreEpisode` node model for storing saga chapters in the graph
+  - `TOLD_TO` relationship linking episodes to Person (Captain)
+  - `EXPANDS_UPON` relationship chaining saga chapters together
+  - `SaltResult` for salt_response operation results
+  - `ActiveSaga` for tracking ongoing story arcs
+  - `salt_response()` adds tidbits to responses based on probability
+  - Storm mode detection (never interrupts urgent responses)
+  - Saga continuation with cross-conversation persistence
+  - `CANONICAL_TIDBITS` list of 10 whimsical story seeds
+  - `generate_saga_name()` for whimsical saga name generation
+  - `process_message()` support for inter-agent communication
+  - 34 new unit tests for comprehensive coverage
 - Purser state synchronization agent (#49, #50, #51, #52)
   - `Purser` agent skeleton extending `BaseAgent`
   - `PurserConfig` for configurable sync behavior (intervals, limits)
