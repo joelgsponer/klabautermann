@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents,config">
+    <meta name="post-slug" content="bard-integration">
+    <meta name="post-excerpt" content="The Bard joins the crew. Wiring up response salting with YAML config and graceful degradation.">
+    <title>Wiring Up the Bard | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                        <span class="category-tag">config</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Wiring Up the Bard</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard of the Bilge has been telling tales for a while now. Saga lifecycle management keeps the stories from sprawling forever. But there was one problem: the Bard existed in isolation. It could salt responses, but nothing ever asked it to.</p>
+                <p>Time to plug it in.</p>
+
+                <h2>Three Issues, One Integration</h2>
+                <p>The work split naturally into three pieces:</p>
+                <ul>
+                    <li><strong>#116</strong>: Create the bard.yaml config file</li>
+                    <li><strong>#117</strong>: Add Pydantic models for Bard configuration</li>
+                    <li><strong>#109</strong>: Wire salt_response into the Orchestrator</li>
+                </ul>
+                <p>Config first, types second, integration last. The classic bottom-up approach.</p>
+
+                <h2>The Configuration File (#116)</h2>
+                <p>Agents in Klabautermann are configured via YAML files in <code>config/agents/</code>. The Bard needed its own:</p>
+
+                <pre><code># config/agents/bard.yaml
+name: bard
+
+model:
+  primary: claude-3-5-haiku-20241022
+  temperature: 0.8
+  max_output_tokens: 200
+
+# 7% chance to add a tidbit
+tidbit_probability: 0.07
+
+# 30% chance to continue an existing saga
+saga_continuation_probability: 0.3
+
+saga_rules:
+  max_chapters: 5
+  max_active: 3
+  timeout_days: 30
+  min_interval_hours: 1.0
+
+storm_mode:
+  enabled: true
+  keywords:
+    - urgent
+    - emergency
+    - critical
+    - asap
+
+display:
+  format: italic
+  separator: "\n\n"</code></pre>
+
+                <p>The Bard uses Haiku for generation - fast, cheap, and whimsical enough for tidbits. Temperature 0.8 keeps things creative. Storm mode keywords disable tidbits when things get serious.</p>
+
+                <h2>The Pydantic Models (#117)</h2>
+                <p>YAML is nice for humans. Pydantic is nice for Python. The config manager needed types:</p>
+
+                <pre><code>class SagaRulesConfig(BaseModel):
+    """Saga lifecycle rules configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_chapters: int = Field(default=5, ge=1, le=20)
+    max_active: int = Field(default=3, ge=1, le=10)
+    timeout_days: int = Field(default=30, ge=1, le=365)
+    min_interval_hours: float = Field(default=1.0, ge=0.0, le=24.0)
+
+
+class StormModeConfig(BaseModel):
+    """Storm mode configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    keywords: list[str] = Field(
+        default_factory=lambda: ["urgent", "emergency", "critical", "asap"]
+    )
+
+
+class BardConfig(BaseModel):
+    """Bard of the Bilge configuration."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = "bard"
+    model: ModelConfig = Field(default_factory=ModelConfig)
+    tidbit_probability: float = Field(default=0.07, ge=0.0, le=1.0)
+    saga_continuation_probability: float = Field(default=0.3, ge=0.0, le=1.0)
+    saga_rules: SagaRulesConfig = Field(default_factory=SagaRulesConfig)
+    storm_mode: StormModeConfig = Field(default_factory=StormModeConfig)
+    display: LoreDisplayConfig = Field(default_factory=LoreDisplayConfig)</code></pre>
+
+                <p>Field constraints catch invalid configs at load time: probabilities between 0 and 1, chapter limits between 1 and 20, timeouts between 1 and 365 days. The config manager now knows how to parse bard.yaml.</p>
+
+                <h2>The Integration (#109)</h2>
+                <p>The Orchestrator needed three things: initialization, storm mode detection, and the actual salting.</p>
+
+                <h3>Initialization</h3>
+                <p>A new <code>captain_uuid</code> parameter tells the Orchestrator who's at the helm:</p>
+
+                <pre><code>def __init__(
+    self,
+    graphiti: GraphitiClient | None = None,
+    thread_manager: ThreadManager | None = None,
+    neo4j_client: Any | None = None,
+    config: dict[str, Any] | None = None,
+    captain_uuid: str | None = None,  # NEW
+) -> None:
+    ...
+    self.captain_uuid = captain_uuid
+
+    # Initialize Bard for response salting
+    self._bard: BardOfTheBilge | None = None
+    self._bard_config = self._load_bard_config()
+
+    if neo4j_client and captain_uuid and self._bard_config.get("enabled", True):
+        self._bard = BardOfTheBilge(
+            neo4j_client=neo4j_client,
+            captain_uuid=captain_uuid,
+            config=BardAgentConfig(**self._bard_config),
+        )
+        self._agent_registry["bard"] = self._bard</code></pre>
+
+                <p>No captain UUID? No Bard. No Neo4j client? No Bard. Bard disabled in config? No Bard. The Orchestrator works fine without the storyteller.</p>
+
+                <h3>Storm Mode Detection</h3>
+                <p>When things are urgent, the Bard stays quiet:</p>
+
+                <pre><code>def _detect_storm_mode(self, response: str) -> bool:
+    """Check if response contains storm mode keywords."""
+    storm_config = self._bard_config.get("storm_mode", {})
+    if not storm_config.get("enabled", True):
+        return False
+
+    keywords = storm_config.get("keywords", ["urgent", "emergency", "critical", "asap"])
+    response_lower = response.lower()
+    return any(keyword.lower() in response_lower for keyword in keywords)</code></pre>
+
+                <p>Case-insensitive matching. "URGENT" and "urgent" both trigger storm mode.</p>
+
+                <h3>The Salting</h3>
+                <p>The <code>_apply_personality</code> method now calls the Bard:</p>
+
+                <pre><code>async def _apply_personality(self, response: str, trace_id: str) -> str:
+    """Apply personality transformations to response."""
+    if self._bard is None:
+        return response
+
+    storm_mode = self._detect_storm_mode(response)
+
+    try:
+        salt_result = await self._bard.salt_response(
+            clean_response=response,
+            storm_mode=storm_mode,
+            trace_id=trace_id,
+        )
+
+        if salt_result.tidbit_added:
+            logger.debug(
+                f"[CHART] Bard added tidbit",
+                extra={
+                    "saga_id": salt_result.saga_id,
+                    "chapter": salt_result.chapter,
+                    "is_continuation": salt_result.is_continuation,
+                },
+            )
+            return salt_result.salted_response
+
+        return response
+
+    except Exception as e:
+        logger.warning(f"[SWELL] Bard error, returning original: {e}")
+        return response</code></pre>
+
+                <p>The key insight: graceful degradation. If the Bard errors - database issues, LLM timeouts, whatever - we log a warning and return the original response. The user never sees an error. They just don't get a tidbit.</p>
+
+                <h2>The Test Suite</h2>
+                <p>27 new tests cover the integration:</p>
+
+                <h3>Config Tests</h3>
+                <ul>
+                    <li>BardConfig has sensible defaults</li>
+                    <li>SagaRulesConfig validates bounds</li>
+                    <li>StormModeConfig defaults to enabled</li>
+                    <li>Probability fields reject values outside [0, 1]</li>
+                </ul>
+
+                <h3>Integration Tests</h3>
+                <ul>
+                    <li>Bard initialized when captain_uuid provided</li>
+                    <li>Bard not initialized without captain_uuid</li>
+                    <li>_apply_personality adds tidbit when probability hits</li>
+                    <li>_apply_personality passes through when no tidbit</li>
+                    <li>_apply_personality returns original on Bard error</li>
+                    <li>Storm mode detected with "urgent" keyword</li>
+                    <li>Storm mode detected with "emergency" keyword</li>
+                    <li>Storm mode is case-insensitive</li>
+                    <li>Storm mode flag passed to Bard salt_response</li>
+                    <li>Saga continuation logged with chapter info</li>
+                </ul>
+
+                <p>All 2282 tests pass.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#109: [ORK-016] Integrate salt_response with Orchestrator</li>
+                    <li>#116: [LORE-020] Create bard.yaml config file</li>
+                    <li>#117: [LORE-021] Add personality.lore config section</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>Pass a <code>captain_uuid</code> to the Orchestrator, and about 7% of responses will now include a tale from the digital seas. The Bard knows when to stay quiet (storm mode), knows when to continue a saga (30% chance), and fails gracefully when something goes wrong.</p>
+
+                <p>Your assistant has personality now. Configurable. Optional. Graceful.</p>
+
+                <p><em>The sea teaches patience. So does waiting for API responses, I've found.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
