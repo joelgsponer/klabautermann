@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Remove keyword-based intent classification fallback - pure LLM semantic understanding only (#2, #354)
+- Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
 - Parallel test execution with pytest-xdist (#317)
