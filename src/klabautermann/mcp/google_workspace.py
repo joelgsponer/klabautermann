@@ -266,6 +266,29 @@ class GmailLabel(BaseModel):
     unread_count: int | None = None
 
 
+class EmailDraft(BaseModel):
+    """Email draft from Gmail."""
+
+    id: str  # Draft ID (different from message ID)
+    message_id: str  # Associated message ID
+    thread_id: str | None = None
+    subject: str
+    to: str | None = None
+    cc: str | None = None
+    body: str | None = None
+    snippet: str = ""
+
+
+class DraftOperationResult(BaseModel):
+    """Result of draft operations (update, send, delete)."""
+
+    success: bool
+    draft_id: str | None = None
+    message_id: str | None = None
+    operation: str = ""  # "update", "send", "delete"
+    error: str | None = None
+
+
 class EmailSearchResult(BaseModel):
     """Email search results with pagination metadata."""
 
@@ -958,6 +981,338 @@ class GoogleWorkspaceBridge:
             )
             return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
 
+    # ===========================================================================
+    # Draft Management Operations
+    # ===========================================================================
+
+    async def list_drafts(
+        self,
+        max_results: int = 20,
+        context: Any = None,  # noqa: ARG002
+    ) -> list[EmailDraft]:
+        """
+        List email drafts.
+
+        Args:
+            max_results: Maximum number of drafts to return (default: 20)
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            List of EmailDraft objects
+
+        Reference: Issue #219 (MCP-013)
+        """
+        await self.start()
+
+        def do_list_drafts() -> list[dict[str, Any]]:
+            results = (
+                self._gmail_service.users()
+                .drafts()
+                .list(userId="me", maxResults=max_results)
+                .execute()
+            )
+            drafts_list: list[dict[str, Any]] = results.get("drafts", [])
+            return drafts_list
+
+        def get_draft_details(draft_id: str) -> dict[str, Any]:
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .drafts()
+                .get(userId="me", id=draft_id, format="full")
+                .execute()
+            )
+            return result
+
+        try:
+            raw_drafts = await self._rate_limited_call("gmail", do_list_drafts)
+            drafts: list[EmailDraft] = []
+
+            for raw_draft in raw_drafts:
+                draft_id = raw_draft.get("id", "")
+                # Get full draft details
+                full_draft = await self._rate_limited_call(
+                    "gmail",
+                    lambda d=draft_id: get_draft_details(d),  # type: ignore[misc]
+                )
+                message = full_draft.get("message", {})
+                headers = {
+                    h["name"]: h["value"] for h in message.get("payload", {}).get("headers", [])
+                }
+
+                # Extract body
+                body = None
+                payload = message.get("payload", {})
+                if "body" in payload and payload["body"].get("data"):
+                    body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+                elif "parts" in payload:
+                    for part in payload["parts"]:
+                        if part.get("mimeType") == "text/plain" and part.get("body", {}).get(
+                            "data"
+                        ):
+                            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+                            break
+
+                drafts.append(
+                    EmailDraft(
+                        id=draft_id,
+                        message_id=message.get("id", ""),
+                        thread_id=message.get("threadId"),
+                        subject=headers.get("Subject", "(no subject)"),
+                        to=headers.get("To"),
+                        cc=headers.get("Cc"),
+                        body=body,
+                        snippet=message.get("snippet", ""),
+                    )
+                )
+
+            logger.info(
+                f"[BEACON] Listed {len(drafts)} drafts",
+                extra={"count": len(drafts)},
+            )
+            return drafts
+        except HttpError as e:
+            logger.error(f"[STORM] List drafts failed: {e}")
+            raise ExternalServiceError("gmail", f"List drafts failed: {e}") from e
+
+    async def get_draft(
+        self,
+        draft_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailDraft | None:
+        """
+        Get a specific draft by ID.
+
+        Args:
+            draft_id: Gmail draft ID
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            EmailDraft if found, None otherwise
+
+        Reference: Issue #219 (MCP-013)
+        """
+        await self.start()
+
+        def do_get_draft() -> dict[str, Any]:
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .drafts()
+                .get(userId="me", id=draft_id, format="full")
+                .execute()
+            )
+            return result
+
+        try:
+            full_draft = await self._rate_limited_call("gmail", do_get_draft)
+            message = full_draft.get("message", {})
+            headers = {h["name"]: h["value"] for h in message.get("payload", {}).get("headers", [])}
+
+            # Extract body
+            body = None
+            payload = message.get("payload", {})
+            if "body" in payload and payload["body"].get("data"):
+                body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
+            elif "parts" in payload:
+                for part in payload["parts"]:
+                    if part.get("mimeType") == "text/plain" and part.get("body", {}).get("data"):
+                        body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
+                        break
+
+            return EmailDraft(
+                id=draft_id,
+                message_id=message.get("id", ""),
+                thread_id=message.get("threadId"),
+                subject=headers.get("Subject", "(no subject)"),
+                to=headers.get("To"),
+                cc=headers.get("Cc"),
+                body=body,
+                snippet=message.get("snippet", ""),
+            )
+        except HttpError as e:
+            if e.resp.status == 404:
+                return None
+            logger.error(f"[STORM] Get draft failed: {e}")
+            raise ExternalServiceError("gmail", f"Get draft failed: {e}") from e
+
+    async def update_draft(
+        self,
+        draft_id: str,
+        to: str | None = None,
+        subject: str | None = None,
+        body: str | None = None,
+        cc: str | None = None,
+        context: Any = None,  # noqa: ARG002
+    ) -> DraftOperationResult:
+        """
+        Update an existing draft.
+
+        Args:
+            draft_id: Gmail draft ID to update
+            to: New recipient (optional, keeps existing if None)
+            subject: New subject (optional, keeps existing if None)
+            body: New body (optional, keeps existing if None)
+            cc: New CC recipients (optional, keeps existing if None)
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            DraftOperationResult with success status
+
+        Reference: Issue #219 (MCP-013)
+        """
+        await self.start()
+
+        # First get the existing draft to preserve fields
+        existing = await self.get_draft(draft_id)
+        if not existing:
+            return DraftOperationResult(
+                success=False,
+                draft_id=draft_id,
+                operation="update",
+                error="Draft not found",
+            )
+
+        # Use existing values if not provided
+        final_to = to if to is not None else existing.to
+        final_subject = subject if subject is not None else existing.subject
+        final_body = body if body is not None else existing.body or ""
+        final_cc = cc if cc is not None else existing.cc
+
+        def do_update() -> dict[str, Any]:
+            # Create the updated message
+            message = MIMEText(final_body)
+            if final_to:
+                message["to"] = final_to
+            message["subject"] = final_subject
+            if final_cc:
+                message["cc"] = final_cc
+
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+            draft_body: dict[str, Any] = {"message": {"raw": raw}}
+            # Preserve thread if it exists
+            if existing.thread_id:
+                draft_body["message"]["threadId"] = existing.thread_id
+
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .drafts()
+                .update(userId="me", id=draft_id, body=draft_body)
+                .execute()
+            )
+            return result
+
+        try:
+            result = await self._rate_limited_call("gmail", do_update)
+            logger.info(
+                f"[BEACON] Draft updated: {draft_id[:8]}...",
+                extra={"draft_id": draft_id},
+            )
+            return DraftOperationResult(
+                success=True,
+                draft_id=result.get("id", draft_id),
+                message_id=result.get("message", {}).get("id"),
+                operation="update",
+            )
+        except HttpError as e:
+            logger.error(f"[STORM] Update draft failed: {e}")
+            return DraftOperationResult(
+                success=False,
+                draft_id=draft_id,
+                operation="update",
+                error=str(e),
+            )
+
+    async def send_draft(
+        self,
+        draft_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> DraftOperationResult:
+        """
+        Send an existing draft.
+
+        Args:
+            draft_id: Gmail draft ID to send
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            DraftOperationResult with sent message ID
+
+        Reference: Issue #219 (MCP-013)
+        """
+        await self.start()
+
+        def do_send() -> dict[str, Any]:
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .drafts()
+                .send(userId="me", body={"id": draft_id})
+                .execute()
+            )
+            return result
+
+        try:
+            result = await self._rate_limited_call("gmail", do_send)
+            logger.info(
+                f"[BEACON] Draft sent: {draft_id[:8]}... -> message {result.get('id', '')[:8]}...",
+                extra={"draft_id": draft_id, "message_id": result.get("id")},
+            )
+            return DraftOperationResult(
+                success=True,
+                draft_id=draft_id,
+                message_id=result.get("id"),
+                operation="send",
+            )
+        except HttpError as e:
+            logger.error(f"[STORM] Send draft failed: {e}")
+            return DraftOperationResult(
+                success=False,
+                draft_id=draft_id,
+                operation="send",
+                error=str(e),
+            )
+
+    async def delete_draft(
+        self,
+        draft_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> DraftOperationResult:
+        """
+        Delete a draft.
+
+        Args:
+            draft_id: Gmail draft ID to delete
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            DraftOperationResult with success status
+
+        Reference: Issue #219 (MCP-013)
+        """
+        await self.start()
+
+        def do_delete() -> None:
+            self._gmail_service.users().drafts().delete(userId="me", id=draft_id).execute()
+
+        try:
+            await self._rate_limited_call("gmail", do_delete)
+            logger.info(
+                f"[BEACON] Draft deleted: {draft_id[:8]}...",
+                extra={"draft_id": draft_id},
+            )
+            return DraftOperationResult(
+                success=True,
+                draft_id=draft_id,
+                operation="delete",
+            )
+        except HttpError as e:
+            logger.error(f"[STORM] Delete draft failed: {e}")
+            return DraftOperationResult(
+                success=False,
+                draft_id=draft_id,
+                operation="delete",
+                error=str(e),
+            )
+
     async def get_recent_emails(
         self,
         hours: int = 24,
@@ -1343,6 +1698,161 @@ class GoogleWorkspaceBridge:
             if label.name.lower() == name_lower:
                 return label
         return None
+
+    async def create_label(
+        self,
+        name: str,
+        label_list_visibility: str = "labelShow",
+        message_list_visibility: str = "show",
+        context: Any = None,  # noqa: ARG002
+    ) -> GmailLabel:
+        """
+        Create a custom Gmail label.
+
+        Args:
+            name: Label name (can include "/" for nested labels, e.g., "Projects/Work")
+            label_list_visibility: Visibility in label list
+                - "labelShow": Show in label list
+                - "labelShowIfUnread": Show only if there are unread messages
+                - "labelHide": Hide from label list
+            message_list_visibility: Visibility when viewing message list
+                - "show": Show label in message list
+                - "hide": Hide label from message list
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Created GmailLabel object
+
+        Raises:
+            ExternalServiceError: If label creation fails (e.g., label already exists)
+
+        Reference: Issue #217 (MCP-011)
+        """
+        await self.start()
+
+        def do_create_label() -> dict[str, Any]:
+            label_body = {
+                "name": name,
+                "labelListVisibility": label_list_visibility,
+                "messageListVisibility": message_list_visibility,
+            }
+            result: dict[str, Any] = (
+                self._gmail_service.users().labels().create(userId="me", body=label_body).execute()
+            )
+            return result
+
+        try:
+            result = await self._rate_limited_call("gmail", do_create_label)
+            logger.info(
+                f"[BEACON] Label created: {name}",
+                extra={"label_id": result.get("id"), "label_name": name},
+            )
+            return GmailLabel(
+                id=result.get("id", ""),
+                name=result.get("name", name),
+                type="user",
+            )
+        except HttpError as e:
+            logger.error(f"[STORM] Create label failed: {e}")
+            raise ExternalServiceError("gmail", f"Create label failed: {e}") from e
+
+    async def delete_label(
+        self,
+        label_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> bool:
+        """
+        Delete a custom Gmail label.
+
+        Note: System labels (INBOX, SENT, etc.) cannot be deleted.
+
+        Args:
+            label_id: Gmail label ID to delete
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            True if deletion succeeded, False otherwise
+
+        Raises:
+            ExternalServiceError: If deletion fails
+
+        Reference: Issue #217 (MCP-011)
+        """
+        await self.start()
+
+        def do_delete_label() -> None:
+            self._gmail_service.users().labels().delete(userId="me", id=label_id).execute()
+
+        try:
+            await self._rate_limited_call("gmail", do_delete_label)
+            logger.info(
+                f"[BEACON] Label deleted: {label_id}",
+                extra={"label_id": label_id},
+            )
+            return True
+        except HttpError as e:
+            logger.error(f"[STORM] Delete label failed: {e}")
+            raise ExternalServiceError("gmail", f"Delete label failed: {e}") from e
+
+    async def update_label(
+        self,
+        label_id: str,
+        name: str | None = None,
+        label_list_visibility: str | None = None,
+        message_list_visibility: str | None = None,
+        context: Any = None,  # noqa: ARG002
+    ) -> GmailLabel:
+        """
+        Update a custom Gmail label.
+
+        Args:
+            label_id: Gmail label ID to update
+            name: New label name (optional)
+            label_list_visibility: New visibility in label list (optional)
+            message_list_visibility: New visibility in message list (optional)
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Updated GmailLabel object
+
+        Raises:
+            ExternalServiceError: If update fails
+
+        Reference: Issue #217 (MCP-011)
+        """
+        await self.start()
+
+        def do_update_label() -> dict[str, Any]:
+            label_body: dict[str, Any] = {}
+            if name is not None:
+                label_body["name"] = name
+            if label_list_visibility is not None:
+                label_body["labelListVisibility"] = label_list_visibility
+            if message_list_visibility is not None:
+                label_body["messageListVisibility"] = message_list_visibility
+
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .labels()
+                .patch(userId="me", id=label_id, body=label_body)
+                .execute()
+            )
+            return result
+
+        try:
+            result = await self._rate_limited_call("gmail", do_update_label)
+            logger.info(
+                f"[BEACON] Label updated: {label_id}",
+                extra={"label_id": label_id, "label_name": result.get("name")},
+            )
+            return GmailLabel(
+                id=result.get("id", label_id),
+                name=result.get("name", ""),
+                type=result.get("type", "user").lower(),
+            )
+        except HttpError as e:
+            logger.error(f"[STORM] Update label failed: {e}")
+            raise ExternalServiceError("gmail", f"Update label failed: {e}") from e
 
     # ===========================================================================
     # Calendar Operations
