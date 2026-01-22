@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,infra">
+    <meta name="post-slug" content="grafana-dashboard">
+    <meta name="post-excerpt" content="A pre-built Grafana dashboard to visualize agent performance, API latency, LLM usage, and more. One command to see everything.">
+    <title>Eyes on the Dashboard | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">infra</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Eyes on the Dashboard</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Yesterday we added Prometheus metrics. Today we give them a face.</p>
+
+                <h2>One Command</h2>
+                <pre><code>docker-compose -f docker-compose.monitoring.yml up -d</code></pre>
+
+                <p>That's it. Prometheus starts scraping. Grafana comes up with dashboards pre-loaded. Visit <code>http://localhost:3000</code> and you're watching your ship.</p>
+
+                <h2>What You See</h2>
+                <p>Four sections. Each tells a different story.</p>
+
+                <h3>Agent Performance</h3>
+                <p>The crew at work:</p>
+                <ul>
+                    <li><strong>Request Rate</strong>: Messages per second flowing to each agent</li>
+                    <li><strong>Latency (p50/p95)</strong>: How long agents take to respond</li>
+                    <li><strong>Error Rate</strong>: Gauge that turns yellow at 1%, red at 5%</li>
+                    <li><strong>Status</strong>: Green for running, red for stopped</li>
+                    <li><strong>Inbox Size</strong>: Messages waiting in each queue</li>
+                </ul>
+
+                <h3>API Performance</h3>
+                <p>The bridge communications:</p>
+                <ul>
+                    <li><strong>Request Rate</strong>: HTTP requests by endpoint and method</li>
+                    <li><strong>Latency (p50/p95)</strong>: Response times for each route</li>
+                    <li><strong>Status Codes</strong>: Stacked bars - green (2xx), orange (4xx), red (5xx)</li>
+                    <li><strong>WebSocket Connections</strong>: Active TUI clients</li>
+                </ul>
+
+                <h3>LLM Performance</h3>
+                <p>The oracle's workload:</p>
+                <ul>
+                    <li><strong>Call Rate</strong>: LLM calls by model and purpose</li>
+                    <li><strong>Latency</strong>: Response times by model (Haiku vs Sonnet vs Opus)</li>
+                    <li><strong>Token Usage</strong>: Input and output token rates</li>
+                </ul>
+
+                <h3>Graph Operations</h3>
+                <p>The memory systems:</p>
+                <ul>
+                    <li><strong>Operation Rate</strong>: Searches, episode additions, entity lookups</li>
+                    <li><strong>Latency</strong>: Graph query response times</li>
+                </ul>
+
+                <h2>Template Variables</h2>
+                <p>Filter what you see:</p>
+                <ul>
+                    <li><strong>$agent</strong>: Select specific agents or all</li>
+                    <li><strong>$endpoint</strong>: Focus on specific API routes</li>
+                    <li><strong>$datasource</strong>: Switch between Prometheus instances</li>
+                </ul>
+
+                <h2>The Stack</h2>
+                <pre><code>infrastructure/
+├── grafana/
+│   ├── dashboards/
+│   │   └── klabautermann.json    # The dashboard
+│   └── provisioning/
+│       ├── dashboards/
+│       │   └── default.yaml      # Auto-load dashboards
+│       └── datasources/
+│           └── prometheus.yaml   # Connect to Prometheus
+└── prometheus/
+    └── prometheus.yml            # Scrape config</code></pre>
+
+                <h2>Zero Configuration</h2>
+                <p>Grafana provisions everything on startup:</p>
+
+                <pre><code># Dashboard provisioning
+providers:
+  - name: 'Klabautermann'
+    folder: 'Klabautermann'
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
+
+# Datasource provisioning
+datasources:
+  - name: Prometheus
+    type: prometheus
+    url: http://prometheus:9090
+    isDefault: true</code></pre>
+
+                <p>No clicking through UIs. No manual imports. Start the containers, open the browser, see the data.</p>
+
+                <h2>The Panels</h2>
+                <p>18 panels across 4 rows:</p>
+
+                <table>
+                    <tr>
+                        <th>Section</th>
+                        <th>Panels</th>
+                    </tr>
+                    <tr>
+                        <td>Agent Performance</td>
+                        <td>Request Rate, Latency, Error Rate, Status, Inbox Size</td>
+                    </tr>
+                    <tr>
+                        <td>API Performance</td>
+                        <td>Request Rate, Latency, Status Codes, WebSocket Connections</td>
+                    </tr>
+                    <tr>
+                        <td>LLM Performance</td>
+                        <td>Call Rate, Latency, Token Usage</td>
+                    </tr>
+                    <tr>
+                        <td>Graph Operations</td>
+                        <td>Operation Rate, Latency</td>
+                    </tr>
+                </table>
+
+                <h2>Query Examples</h2>
+                <p>The PromQL behind the panels:</p>
+
+                <pre><code># Agent request rate
+rate(klabautermann_agent_requests_total{agent_name=~"$agent"}[$__rate_interval])
+
+# Agent latency p95
+histogram_quantile(0.95,
+  sum(rate(klabautermann_agent_request_latency_ms_bucket{agent_name=~"$agent"}[$__rate_interval]))
+  by (le, agent_name)
+)
+
+# Agent error rate
+sum(rate(klabautermann_agent_errors_total[$__rate_interval])) by (agent_name)
+/
+sum(rate(klabautermann_agent_requests_total[$__rate_interval])) by (agent_name)
+
+# API requests by status
+sum(rate(klabautermann_api_requests_total[$__rate_interval])) by (status_code)</code></pre>
+
+                <h2>The Observability Triad</h2>
+                <p>Three pieces now in place:</p>
+
+                <ol>
+                    <li><strong>#272 Structured Logging</strong>: JSON logs with context</li>
+                    <li><strong>#271 Prometheus Metrics</strong>: Numbers for everything</li>
+                    <li><strong>#274 Grafana Dashboard</strong>: Eyes on the numbers</li>
+                </ol>
+
+                <p>Next logical step: alerting rules (#275). When the numbers go wrong, the pager should ring.</p>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>1,479 lines of dashboard JSON</li>
+                    <li>18 panels</li>
+                    <li>4 collapsible rows</li>
+                    <li>3 template variables</li>
+                    <li>30-second auto-refresh</li>
+                </ul>
+
+                <p>Issue #274, closed. The ship now has instruments and a bridge to watch them from.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
