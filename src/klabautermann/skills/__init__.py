@@ -20,6 +20,13 @@ Usage:
 """
 
 from klabautermann.skills.discovery import SkillDiscovery
+from klabautermann.skills.docs import (
+    SkillDoc,
+    SkillDocsGenerator,
+    SkillParameter,
+    generate_skill_doc,
+    generate_skill_docs,
+)
 from klabautermann.skills.loader import SkillLoader
 from klabautermann.skills.models import (
     KlabautermannSkillConfig,
@@ -44,11 +51,16 @@ __all__ = [
     "PayloadField",
     "SkillAwarePlanner",
     "SkillDiscovery",
+    "SkillDoc",
+    "SkillDocsGenerator",
     "SkillLoader",
     "SkillMetadata",
+    "SkillParameter",
     "SkillValidator",
     "ValidationError",
     "ValidationResult",
+    "generate_skill_doc",
+    "generate_skill_docs",
     "validate_all_skills",
     "validate_skill",
     "validate_skill_file",
