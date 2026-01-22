@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Email draft management: list, get, update, send, delete drafts (#219)
+- `EmailDraft` model with id, message_id, thread_id, subject, to, cc, body, snippet
+- `DraftOperationResult` model for draft operation responses
+- Custom label management: create, update, delete labels (#217)
+- Nested label support (e.g., "Projects/Work") with visibility settings
+- 21 new unit tests for draft and label management
 - Calendar event search with `search_events()` method (#220)
 - Calendar free slot finder with `find_free_slots()` method using FreeBusy API (#218)
 - `FreeSlot` model with duration helpers and display formatting

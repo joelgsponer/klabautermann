@@ -6,6 +6,8 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Email Draft Management**: Save emails as drafts for later, edit them, and send when ready ("save this as a draft", "update my draft to Sarah", "send my draft")
+- **Custom Gmail Labels**: Create, update, and organize emails with custom labels including nested folders ("create a Projects/Work label", "add the urgent label")
 - **Calendar Search**: Find events by searching titles and descriptions ("find my meetings with Sarah", "show standup meetings next week")
 - **Meeting Time Finder**: Find available meeting slots across your calendars ("when am I free for a 30-minute call?", "find open slots this week")
 - **Email Attachments**: View, download, and save email attachments ("download that PDF from Sarah's email", "save the spreadsheet to my downloads folder")
