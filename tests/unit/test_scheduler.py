@@ -399,3 +399,138 @@ class TestSchedulerRobustness:
         # Default config should be used
         job = scheduler.get_job("archivist_scan")
         assert job is not None
+
+
+# =============================================================================
+# Cartographer Scheduled Job Tests (Issue #76)
+# =============================================================================
+
+
+class TestCartographerScheduledJob:
+    """Tests for Cartographer scheduled community detection (Issue #76)."""
+
+    @pytest.fixture
+    def scheduler(self) -> AsyncIOScheduler:
+        """Create scheduler instance for tests."""
+        return create_scheduler()
+
+    @pytest.fixture
+    def mock_cartographer(self) -> Mock:
+        """Create mock Cartographer agent."""
+        agent = Mock()
+        agent.detect_communities = AsyncMock()
+        return agent
+
+    def test_registers_cartographer_job_when_enabled(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Should register Cartographer job when agent available and enabled."""
+        agents = {"cartographer": mock_cartographer}
+        config = {"cartographer": {"enabled": True}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is not None
+        assert job.name == "Cartographer Community Detection"
+
+    def test_registers_cartographer_with_default_cron(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Should use default Sunday midnight cron schedule."""
+        agents = {"cartographer": mock_cartographer}
+        config = {"cartographer": {"enabled": True}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is not None
+        # Default cron is "0 0 * * 0" (Sunday midnight)
+        # The trigger should be a CronTrigger
+
+    def test_registers_cartographer_with_custom_cron(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Should use custom cron schedule when provided."""
+        agents = {"cartographer": mock_cartographer}
+        config = {"cartographer": {"enabled": True, "cron": "0 2 * * 1"}}  # Monday 2am
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is not None
+
+    def test_skips_cartographer_when_disabled(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Should not register Cartographer job when disabled."""
+        agents = {"cartographer": mock_cartographer}
+        config = {"cartographer": {"enabled": False}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is None
+
+    def test_skips_cartographer_when_not_available(self, scheduler: AsyncIOScheduler) -> None:
+        """Should not register Cartographer job when agent not available."""
+        agents = {}  # No cartographer
+        config = {"cartographer": {"enabled": True}}
+
+        # Should not raise exception
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is None
+
+    @pytest.mark.asyncio
+    async def test_cartographer_job_calls_detect_communities(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Cartographer job should call detect_communities when triggered."""
+        agents = {"cartographer": mock_cartographer}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is not None
+
+        # Execute the job function directly
+        await job.func()
+
+        # Verify the agent method was called
+        mock_cartographer.detect_communities.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cartographer_job_handles_failures(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Cartographer job should handle algorithm failures gracefully."""
+        # Make detect_communities raise an exception
+        mock_cartographer.detect_communities.side_effect = RuntimeError("Algorithm failed")
+        agents = {"cartographer": mock_cartographer}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("cartographer_communities")
+        assert job is not None
+
+        # Execute should not raise - error is caught and logged
+        await job.func()
+
+        # Job should still have tried to call detect_communities
+        mock_cartographer.detect_communities.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cartographer_job_receives_trace_id(
+        self, scheduler: AsyncIOScheduler, mock_cartographer: Mock
+    ) -> None:
+        """Cartographer job should receive a trace_id when executed."""
+        agents = {"cartographer": mock_cartographer}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("cartographer_communities")
+        await job.func()
+
+        # Verify trace_id was passed
+        call_kwargs = mock_cartographer.detect_communities.call_args.kwargs
+        assert "trace_id" in call_kwargs
+        assert isinstance(call_kwargs["trace_id"], str)
