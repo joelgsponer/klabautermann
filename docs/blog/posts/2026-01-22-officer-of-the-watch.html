@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="officer-of-the-watch">
+    <meta name="post-excerpt" content="Deadlines approach. Meetings loom. Someone needs to keep watch.">
+    <title>Standing Watch | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Standing Watch</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>On any ship, someone has to keep watch. Someone has to scan the horizon for danger, check the schedule, and wake the Captain before the storm hits.</p>
+                <p>Meet the Officer of the Watch.</p>
+
+                <h2>The Problem</h2>
+                <p>Knowledge graphs are great at answering questions. But they're reactive. They wait for you to ask.</p>
+                <p>Sometimes you need to be reminded. That task is due tomorrow. That meeting starts in 15 minutes. That deadline you set last week? It passed yesterday.</p>
+
+                <h2>Deadline Warnings</h2>
+                <p>The Officer watches your tasks. When one gets close to its due date, you'll know:</p>
+
+                <pre><code>from klabautermann.agents import OfficerOfTheWatch, OfficerConfig
+
+config = OfficerConfig(
+    deadline_warning_hours=24,  # Warn 24 hours before due
+    alert_debounce_minutes=60,  # Don't repeat within 1 hour
+)
+
+officer = OfficerOfTheWatch(neo4j_client=neo4j, config=config)
+
+# Find tasks due soon
+alerts = await officer.check_upcoming_deadlines()
+
+for alert in alerts:
+    print(f"{alert.priority}: {alert.message}")
+    # WARNING: Task due in 12.5h: Review PR (Backend)</code></pre>
+
+                <p>High-priority tasks get WARNING alerts. The rest get INFO. Overdue tasks? Those are ERROR level.</p>
+
+                <h2>Meeting Reminders</h2>
+                <p>Fifteen minutes before a meeting, the Officer speaks up:</p>
+
+                <pre><code># Find meetings starting soon
+alerts = await officer.check_upcoming_meetings()
+
+for alert in alerts:
+    print(alert.message)
+    # Meeting in 10min: Team Standup at Zoom</code></pre>
+
+                <p>Location included, if your calendar has it. Time until the meeting, so you know exactly how long you have.</p>
+
+                <h2>Quiet Mode</h2>
+                <p>Focus time is sacred. When the Officer sees a "Deep Work" block on your calendar, it stays quiet:</p>
+
+                <pre><code>is_deep_work = await officer.is_deep_work_time()
+# True if you're in a "Deep Work", "Focus", or "Do Not Disturb" event
+
+# Only CRITICAL alerts break the silence
+if officer._quiet_mode and alert.priority != AlertPriority.CRITICAL:
+    return  # Stay quiet</code></pre>
+
+                <p>The Officer looks for calendar events with keywords like "Deep Work", "Focus", or "Do Not Disturb". While you're in one, only critical alerts get through.</p>
+
+                <h2>Alert Debouncing</h2>
+                <p>Nobody wants the same reminder every minute. The Officer remembers what it already told you:</p>
+
+                <pre><code>config = OfficerConfig(
+    alert_debounce_minutes=60,  # Wait 1 hour before repeating
+)
+
+# Same alert for same entity won't fire again for an hour</code></pre>
+
+                <h2>Full Monitoring</h2>
+                <p>Run all checks at once:</p>
+
+                <pre><code>result = await officer.check_conditions()
+
+print(f"Found {result.alerts_found} alerts")
+print(f"Sending {result.alerts_sent} (after filtering)")
+print(f"Quiet mode: {result.quiet_mode}")
+
+for alert in result.alerts:
+    print(f"  [{alert.priority}] {alert.message}")</code></pre>
+
+                <h2>Inter-Agent Communication</h2>
+                <p>Like all Klabautermann agents, the Officer responds to messages:</p>
+
+                <pre><code>message = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="officer_of_the_watch",
+    intent="maintenance",
+    payload={"operation": "check_conditions"}
+)
+
+response = await officer.process_message(message)
+# response.payload contains AlertCheckResult data</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#59: [AGT-S-023] Create OfficerOfTheWatch agent skeleton</li>
+                    <li>#60: [AGT-S-024] Implement deadline warning alerts</li>
+                    <li>#61: [AGT-S-025] Implement meeting reminder alerts</li>
+                </ul>
+
+                <p>A ship without a watch is a ship headed for rocks. A PKM without proactive alerts is just a fancy notebook.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
