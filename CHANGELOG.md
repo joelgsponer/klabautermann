@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Proactive morning briefing generation for OfficerOfTheWatch agent (#4)
+  - `generate_morning_briefing()` method produces structured daily summaries
+  - `MorningBriefing` dataclass with events, tasks, alerts, and summary text
+  - `CalendarEventSummary` and `TaskSummary` helper dataclasses
+  - Configurable briefing time via `briefing_hour`/`briefing_minute` (default 7:00 AM)
+  - `is_briefing_time()` helper for scheduler integration
+  - Support for `morning_briefing` operation in `process_message()`
+  - Briefing contents: today's calendar events, high-priority tasks, overdue tasks, overnight alerts
+  - Nautical-themed greeting based on workload: "Clear skies", "Calm seas", "Moderate winds", "Choppy waters"
+  - Human-readable markdown summary text
+  - 18 new unit tests for morning briefing functionality
 - Multi-model orchestration for task-appropriate model selection (#3)
   - New `model_selector.py` module with `ModelSelector` class
   - `ModelTier` enum: HAIKU, SONNET, OPUS for cost/capability tiers
