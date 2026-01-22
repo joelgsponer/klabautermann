@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="cartographer">
+    <meta name="post-excerpt" content="Clusters emerge from chaos. The Cartographer maps your knowledge into navigable territories.">
+    <title>Mapping the Islands | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Mapping the Islands</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>As your knowledge graph grows, patterns emerge. Work contacts cluster with projects. Family members connect to home events. Hobbies link to related activities.</p>
+                <p>The Cartographer sees these patterns and gives them names.</p>
+
+                <h2>The Problem with Flat Search</h2>
+                <p>Search at the entity level works for specific queries. "What's Sarah's email?" "When's my meeting?" But some questions are broader:</p>
+                <ul>
+                    <li>"What's going on at work?"</li>
+                    <li>"Who are my closest friends?"</li>
+                    <li>"What hobbies have I been neglecting?"</li>
+                </ul>
+                <p>These need a higher-level view. Not individual nodes, but clusters of meaning.</p>
+
+                <h2>Knowledge Islands</h2>
+                <p>The Cartographer uses Neo4j's Graph Data Science library to run community detection:</p>
+
+                <pre><code>from klabautermann.agents import Cartographer, CartographerConfig
+
+config = CartographerConfig(
+    projection_name="klabautermann-community",
+    min_community_size=3,
+)
+
+cartographer = Cartographer(neo4j_client=neo4j, config=config)
+
+# Run detection
+result = await cartographer.detect_communities()
+
+print(f"Created: {result.communities_created}")
+print(f"Updated: {result.communities_updated}")
+print(f"Members assigned: {result.total_members_assigned}")</code></pre>
+
+                <h2>The Louvain Algorithm</h2>
+                <p>At its heart, the Cartographer uses Louvain community detection. The algorithm:</p>
+                <ol>
+                    <li>Projects the graph into memory (nodes and undirected relationships)</li>
+                    <li>Optimizes modularity by grouping densely connected nodes</li>
+                    <li>Returns community assignments for each node</li>
+                </ol>
+
+                <pre><code>// GDS projection
+CALL gds.graph.project(
+    'klabautermann-community',
+    ['Person', 'Organization', 'Project', 'Hobby', 'Note'],
+    {
+        WORKS_AT: {orientation: 'UNDIRECTED'},
+        KNOWS: {orientation: 'UNDIRECTED'},
+        FRIEND_OF: {orientation: 'UNDIRECTED'},
+        FAMILY_OF: {orientation: 'UNDIRECTED'},
+        CONTRIBUTES_TO: {orientation: 'UNDIRECTED'}
+    }
+)
+
+// Louvain detection
+CALL gds.louvain.stream('klabautermann-community')
+YIELD nodeId, communityId</code></pre>
+
+                <h2>Theme Classification</h2>
+                <p>Raw community IDs aren't helpful. The Cartographer classifies each cluster by its dominant theme:</p>
+
+                <pre><code>from klabautermann.agents import CommunityTheme, classify_theme
+
+labels = ["Organization", "Project", "Task", "Person"]
+theme = classify_theme(labels)
+
+# CommunityTheme.PROFESSIONAL</code></pre>
+
+                <p>Themes are weighted by node label:</p>
+                <ul>
+                    <li><strong>Professional</strong>: Organization (1.0), Project (0.8), Task (0.7)</li>
+                    <li><strong>Hobbies</strong>: Hobby (1.0)</li>
+                    <li><strong>Health</strong>: HealthMetric (1.0), Routine (0.5)</li>
+                    <li><strong>Family/Social</strong>: Person (0.3 each)</li>
+                </ul>
+
+                <h2>Community Nodes</h2>
+                <p>Detected communities become first-class graph citizens:</p>
+
+                <pre><code>(c:Community {
+    uuid: "comm-123",
+    name: "Professional Island",
+    theme: "professional",
+    node_count: 15,
+    detected_at: timestamp(),
+    created_at: timestamp()
+})
+
+// Members link via PART_OF_ISLAND
+(person:Person)-[:PART_OF_ISLAND {weight: 1.0}]->(c)
+(org:Organization)-[:PART_OF_ISLAND {weight: 1.0}]->(c)</code></pre>
+
+                <h2>Updating Existing Islands</h2>
+                <p>Communities evolve. New nodes join, old connections fade. The Cartographer handles this with overlap detection:</p>
+
+                <pre><code># Find existing community with 50% member overlap
+existing = await cartographer._find_existing_community(
+    theme=CommunityTheme.PROFESSIONAL,
+    member_uuids=new_members
+)
+
+if existing:
+    # Update existing community
+    await cartographer._update_community(existing, new_members)
+else:
+    # Create new community
+    await cartographer._create_community(theme, new_members)</code></pre>
+
+                <h2>Querying Islands</h2>
+                <p>Once mapped, islands are queryable:</p>
+
+                <pre><code># Get all communities
+communities = await cartographer.get_communities()
+
+# Filter by theme
+professional = await cartographer.get_communities(
+    theme=CommunityTheme.PROFESSIONAL
+)
+
+# Get island members
+members = await cartographer.get_community_members("comm-123")
+
+# Statistics
+stats = await cartographer.get_community_statistics()
+# {
+#     "total_communities": 5,
+#     "avg_members": 12.4,
+#     "by_theme": {"professional": 2, "social": 2, "hobbies": 1}
+# }</code></pre>
+
+                <h2>Multi-Level Search</h2>
+                <p>With Knowledge Islands in place, the Researcher can adapt its zoom level:</p>
+                <ul>
+                    <li><strong>Macro</strong>: "What's happening in my professional life?" - Search Community nodes</li>
+                    <li><strong>Meso</strong>: "What's the status of Project X?" - Search Project/Note nodes</li>
+                    <li><strong>Micro</strong>: "What's John's email?" - Search entity facts</li>
+                </ul>
+                <p>The query intent determines the zoom. Islands enable the macro view that was previously impossible.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#69: [AGT-S-033] Create Cartographer agent skeleton</li>
+                    <li>#70: [AGT-S-034] Implement graph projection for GDS</li>
+                    <li>#71: [AGT-S-035] Implement Louvain community detection</li>
+                    <li>#72: [AGT-S-036] Create Community node model</li>
+                    <li>#73: [AGT-S-037] Implement PART_OF_ISLAND relationship</li>
+                </ul>
+
+                <p>Your knowledge graph now has a map. Not just scattered nodes, but named territories. Professional Island. Social Island. Hobbies Island.</p>
+
+                <p>The Cartographer keeps the map current.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
