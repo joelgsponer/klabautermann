@@ -24,8 +24,11 @@ from typing import TYPE_CHECKING, Any
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.agents.summarization import summarize_thread
 from klabautermann.core.logger import logger
-from klabautermann.core.models import AgentMessage, ThreadSummary
-from klabautermann.memory.entity_merge import find_duplicate_persons, merge_entities
+from klabautermann.core.models import AgentMessage, DuplicateCandidate, ThreadSummary
+from klabautermann.memory.deduplication import (
+    merge_entities,
+    process_duplicates,
+)
 from klabautermann.memory.note_queries import create_note_with_links
 
 
@@ -284,10 +287,12 @@ class Archivist(BaseAgent):
 
         # Run deduplication after archival
         if archived_count > 0:
-            merged_count = await self.detect_and_merge_duplicates(trace_id)
-            if merged_count > 0:
+            dedup_stats = await self.detect_and_merge_duplicates(trace_id)
+            if dedup_stats["auto_merged"] > 0 or dedup_stats["flagged_for_review"] > 0:
                 logger.debug(
-                    f"[WHISPER] Post-archival deduplication merged {merged_count} entities",
+                    f"[WHISPER] Post-archival deduplication: "
+                    f"{dedup_stats['auto_merged']} merged, "
+                    f"{dedup_stats['flagged_for_review']} flagged for review",
                     extra={"trace_id": trace_id, "agent_name": self.name},
                 )
 
@@ -355,78 +360,211 @@ class Archivist(BaseAgent):
     async def detect_and_merge_duplicates(
         self,
         trace_id: str | None = None,
-    ) -> int:
+        auto_merge_threshold: float = 0.9,
+        review_threshold: float = 0.7,
+    ) -> dict[str, int]:
         """
-        Detect and merge duplicate entities in the graph.
+        Detect and process duplicate entities in the graph.
 
-        Scans for duplicate Person entities and merges high-confidence
-        duplicates (similarity >= 0.9).
+        Uses fuzzy matching to find duplicates. High-confidence duplicates
+        (score >= auto_merge_threshold) are merged automatically. Medium-confidence
+        duplicates (review_threshold <= score < auto_merge_threshold) are flagged
+        for user review via POTENTIAL_DUPLICATE relationships.
 
         Args:
             trace_id: Trace ID for logging
+            auto_merge_threshold: Score threshold for automatic merging (default: 0.9)
+            review_threshold: Minimum score to flag for review (default: 0.7)
 
         Returns:
-            Number of entities merged
+            Dictionary with processing statistics:
+            {
+                "auto_merged": int,
+                "flagged_for_review": int,
+                "ignored": int
+            }
         """
         if not self.neo4j:
             logger.warning(
                 "[SWELL] Cannot detect duplicates: Neo4j client not configured",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
-            return 0
+            return {"auto_merged": 0, "flagged_for_review": 0, "ignored": 0}
 
         trace_id = trace_id or str(uuid.uuid4())
 
         logger.info(
-            "[CHART] Scanning for duplicate entities",
+            f"[CHART] Scanning for duplicate entities "
+            f"(auto_merge_threshold={auto_merge_threshold}, review_threshold={review_threshold})",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
-        # Find high-confidence person duplicates
-        duplicates = await find_duplicate_persons(
+        # Use the comprehensive process_duplicates pipeline
+        stats = await process_duplicates(
             self.neo4j,
-            limit=50,
+            auto_merge_threshold=auto_merge_threshold,
+            review_threshold=review_threshold,
             trace_id=trace_id,
         )
 
-        # Filter to high-confidence matches (>= 0.9 similarity)
-        high_confidence = [d for d in duplicates if d.similarity_score >= 0.9]
-
-        if not high_confidence:
-            logger.debug(
-                "[WHISPER] No high-confidence duplicates found",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return 0
-
-        merged_count = 0
-        for dup in high_confidence:
-            # Merge source (uuid2) into target (uuid1)
-            result = await merge_entities(
-                self.neo4j,
-                source_uuid=dup.uuid2,
-                target_uuid=dup.uuid1,
-                trace_id=trace_id,
-            )
-            if result.source_deleted:
-                merged_count += 1
-                logger.info(
-                    f"[BEACON] Merged duplicate: {dup.name2} -> {dup.name1} "
-                    f"(reason: {dup.match_reason}, score: {dup.similarity_score})",
-                    extra={"trace_id": trace_id, "agent_name": self.name},
-                )
-
         logger.info(
-            f"[BEACON] Deduplication complete: {merged_count} entities merged",
+            f"[BEACON] Deduplication complete: {stats['auto_merged']} merged, "
+            f"{stats['flagged_for_review']} flagged for review, {stats['ignored']} ignored",
             extra={
                 "trace_id": trace_id,
                 "agent_name": self.name,
-                "merged_count": merged_count,
-                "candidates_found": len(duplicates),
+                **stats,
             },
         )
 
-        return merged_count
+        return stats
+
+    async def get_flagged_duplicates(
+        self,
+        trace_id: str | None = None,
+    ) -> list[DuplicateCandidate]:
+        """
+        Retrieve entities flagged for user review.
+
+        Returns duplicate candidates that were flagged with POTENTIAL_DUPLICATE
+        relationships and haven't been reviewed yet.
+
+        Args:
+            trace_id: Trace ID for logging
+
+        Returns:
+            List of DuplicateCandidate objects pending review
+        """
+        if not self.neo4j:
+            logger.warning(
+                "[SWELL] Cannot get flagged duplicates: Neo4j client not configured",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return []
+
+        trace_id = trace_id or str(uuid.uuid4())
+
+        query = """
+        MATCH (e1)-[r:POTENTIAL_DUPLICATE]->(e2)
+        WHERE r.reviewed = false
+        RETURN e1.uuid as uuid1, e1.name as name1,
+               e2.uuid as uuid2, e2.name as name2,
+               labels(e1)[0] as entity_type,
+               r.similarity_score as similarity_score,
+               r.match_reasons as match_reasons
+        ORDER BY r.similarity_score DESC
+        """
+
+        result = await self.neo4j.execute_query(query, {}, trace_id=trace_id)
+
+        candidates = [
+            DuplicateCandidate(
+                uuid1=row["uuid1"],
+                uuid2=row["uuid2"],
+                name1=row["name1"],
+                name2=row["name2"],
+                entity_type=row["entity_type"],
+                similarity_score=row["similarity_score"],
+                match_reasons=row.get("match_reasons", []),
+            )
+            for row in result
+        ]
+
+        logger.debug(
+            f"[WHISPER] Found {len(candidates)} flagged duplicates pending review",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return candidates
+
+    async def resolve_flagged_duplicate(
+        self,
+        uuid1: str,
+        uuid2: str,
+        merge: bool = True,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Resolve a flagged duplicate by merging or dismissing.
+
+        If merge=True, merges the entities (keeps uuid1, removes uuid2).
+        If merge=False, marks the relationship as reviewed (not a duplicate).
+
+        Args:
+            uuid1: UUID of first entity (kept if merging)
+            uuid2: UUID of second entity (removed if merging)
+            merge: Whether to merge the entities
+            trace_id: Trace ID for logging
+
+        Returns:
+            True if resolution was successful
+        """
+        if not self.neo4j:
+            logger.warning(
+                "[SWELL] Cannot resolve duplicate: Neo4j client not configured",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return False
+
+        trace_id = trace_id or str(uuid.uuid4())
+
+        if merge:
+            # Get entity type from the flag relationship
+            type_query = """
+            MATCH (e1 {uuid: $uuid1})-[r:POTENTIAL_DUPLICATE]-(e2 {uuid: $uuid2})
+            RETURN labels(e1)[0] as entity_type
+            """
+            result = await self.neo4j.execute_query(
+                type_query, {"uuid1": uuid1, "uuid2": uuid2}, trace_id=trace_id
+            )
+
+            if not result:
+                logger.warning(
+                    f"[SWELL] No POTENTIAL_DUPLICATE relationship found between {uuid1} and {uuid2}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                return False
+
+            entity_type = result[0]["entity_type"]
+
+            # Merge entities
+            success = await merge_entities(
+                self.neo4j,
+                keep_uuid=uuid1,
+                remove_uuid=uuid2,
+                entity_type=entity_type,
+                trace_id=trace_id,
+            )
+
+            if success:
+                logger.info(
+                    f"[BEACON] Merged flagged duplicate: {uuid2} -> {uuid1}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+            return success
+        else:
+            # Mark as reviewed (not a duplicate)
+            dismiss_query = """
+            MATCH (e1 {uuid: $uuid1})-[r:POTENTIAL_DUPLICATE]-(e2 {uuid: $uuid2})
+            SET r.reviewed = true,
+                r.reviewed_at = timestamp(),
+                r.review_decision = 'not_duplicate'
+            RETURN count(r) as updated
+            """
+            result = await self.neo4j.execute_query(
+                dismiss_query, {"uuid1": uuid1, "uuid2": uuid2}, trace_id=trace_id
+            )
+
+            updated: int = int(result[0]["updated"]) if result else 0
+
+            if updated > 0:
+                logger.info(
+                    f"[BEACON] Dismissed flagged duplicate: {uuid1} <-> {uuid2}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+            return updated > 0
 
     # ========================================================================
     # Stub Methods (to be implemented in future tasks)
