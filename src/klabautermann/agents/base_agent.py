@@ -15,6 +15,14 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from klabautermann.core.logger import logger
+from klabautermann.core.metrics import (
+    record_agent_error,
+    record_agent_latency,
+    record_agent_request,
+    record_agent_success,
+    set_agent_inbox_size,
+    set_agent_running,
+)
 from klabautermann.core.models import AgentMessage
 from klabautermann.core.workflow_inspector import get_inspector
 
@@ -92,6 +100,7 @@ class BaseAgent(ABC):
         with timing, error handling, and metrics collection.
         """
         self._running = True
+        set_agent_running(self.name, running=True)
         logger.info(
             f"[CHART] Agent '{self.name}' started",
             extra={"agent_name": self.name},
@@ -118,6 +127,7 @@ class BaseAgent(ABC):
                     exc_info=True,
                 )
 
+        set_agent_running(self.name, running=False)
         logger.info(
             f"[CHART] Agent '{self.name}' stopped",
             extra={"agent_name": self.name},
@@ -132,6 +142,8 @@ class BaseAgent(ABC):
         """
         start_time = time.time()
         self._request_count += 1
+        record_agent_request(self.name)
+        set_agent_inbox_size(self.name, self.inbox.qsize())
         inspector = get_inspector()
 
         try:
@@ -184,6 +196,7 @@ class BaseAgent(ABC):
                 )
 
             self._success_count += 1
+            record_agent_success(self.name)
             logger.debug(
                 f"[WHISPER] {self.name} completed",
                 extra={"trace_id": msg.trace_id, "agent_name": self.name},
@@ -191,6 +204,7 @@ class BaseAgent(ABC):
 
         except Exception as e:
             self._error_count += 1
+            record_agent_error(self.name)
             elapsed_ms = (time.time() - start_time) * 1000
 
             # Log OUTPUT phase with error
@@ -211,6 +225,8 @@ class BaseAgent(ABC):
         finally:
             elapsed_ms = (time.time() - start_time) * 1000
             self._total_latency_ms += elapsed_ms
+            record_agent_latency(self.name, elapsed_ms)
+            set_agent_inbox_size(self.name, self.inbox.qsize())
             self.inbox.task_done()
 
     async def _route_response(

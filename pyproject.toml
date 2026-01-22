@@ -41,6 +41,8 @@ dependencies = [
     "apscheduler>=3.10",
     # File watching for config hot-reload
     "watchdog>=4.0",
+    # Prometheus metrics
+    "prometheus-client>=0.20",
 ]
 
 [project.optional-dependencies]

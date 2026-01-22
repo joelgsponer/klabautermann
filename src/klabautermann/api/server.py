@@ -2,12 +2,22 @@
 FastAPI WebSocket server for Klabautermann.
 
 Provides WebSocket endpoint for TUI clients to communicate with the orchestrator.
+Exposes Prometheus metrics at /metrics endpoint.
 """
 
 import json
+import time
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+
+from klabautermann.core.metrics import (
+    decrement_websocket_connections,
+    get_metrics,
+    increment_websocket_connections,
+    record_api_latency,
+    record_api_request,
+)
 
 
 app = FastAPI(title="Klabautermann API", version="0.1.0")
@@ -22,16 +32,53 @@ def set_orchestrator(orchestrator: Any) -> None:
     _orchestrator = orchestrator
 
 
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Middleware to record API request metrics."""
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start_time
+
+    # Skip metrics endpoint to avoid recursion
+    if request.url.path != "/metrics":
+        record_api_request(
+            method=request.method,
+            endpoint=request.url.path,
+            status_code=response.status_code,
+        )
+        record_api_latency(
+            method=request.method,
+            endpoint=request.url.path,
+            latency_seconds=elapsed,
+        )
+
+    return response
+
+
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
 
 
+@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """
+    Prometheus metrics endpoint.
+
+    Returns metrics in Prometheus text exposition format.
+    """
+    return Response(
+        content=get_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket) -> None:
     """WebSocket endpoint for chat communication."""
     await websocket.accept()
+    increment_websocket_connections()
 
     try:
         while True:
@@ -58,6 +105,8 @@ async def websocket_chat(websocket: WebSocket) -> None:
 
     except WebSocketDisconnect:
         pass
+    finally:
+        decrement_websocket_connections()
 
 
 async def handle_chat_message(websocket: WebSocket, message: dict[str, Any]) -> None:
