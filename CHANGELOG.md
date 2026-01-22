@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- `SkillValidator` class for comprehensive skill definition validation (#297)
+- `ValidationResult` and `ValidationError` types for structured validation reporting
+- `validate_skill()`, `validate_skill_file()`, `validate_all_skills()` functions
+- Validation rules: name format, description quality, tool/model references, orchestrator config
+- Strict mode that treats warnings as errors
+- 13 new unit tests for skill validation
 - `summarize-thread` skill for AI-powered thread summarization (#295)
 - Skill supports both email threads and conversation threads
 - Orchestrator integration with research task type and researcher agent

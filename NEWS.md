@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Skill Validation**: New validation system catches skill definition errors before runtime - malformed names, missing fields, and configuration issues are now reported with clear error messages.
 - **Thread Summarization Skill**: Summarize any conversation or email thread with a simple command ("summarize this thread", "TLDR", "what was discussed?"). Works with both email threads and conversation history.
 - **Email Thread Summaries**: Get AI-powered summaries of long email threads with key points, action items, and sentiment analysis ("summarize this email thread", "what's the gist of that conversation with Sarah?")
 - **Email Draft Management**: Save emails as drafts for later, edit them, and send when ready ("save this as a draft", "update my draft to Sarah", "send my draft")
