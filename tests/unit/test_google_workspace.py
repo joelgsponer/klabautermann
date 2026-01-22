@@ -298,6 +298,150 @@ class TestEmailOperations:
 
 
 # ===========================================================================
+# Email Reply Tests
+# ===========================================================================
+
+
+class TestEmailReply:
+    """Test Gmail email reply-to-thread (#207)."""
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_success(self, bridge, mock_gmail_service):
+        """Test successful email reply."""
+        # Mock getting original message
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "orig_msg123",
+            "threadId": "thread123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Original Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "To", "value": "me@example.com"},
+                    {"name": "Message-ID", "value": "<original123@mail.com>"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+            },
+        }
+        # Mock sending reply
+        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
+            "id": "reply_msg456",
+            "threadId": "thread123",
+        }
+
+        result = await bridge.reply_to_email(
+            message_id="orig_msg123",
+            body="This is my reply",
+        )
+
+        assert result.success is True
+        assert result.message_id == "reply_msg456"
+        assert result.is_draft is False
+        assert result.error is None
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_draft_mode(self, bridge, mock_gmail_service):
+        """Test email reply as draft."""
+        # Mock getting original message
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "orig_msg123",
+            "threadId": "thread123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Original Subject"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Message-ID", "value": "<original123@mail.com>"},
+                ],
+            },
+        }
+        # Mock creating draft
+        mock_gmail_service.users.return_value.drafts.return_value.create.return_value.execute.return_value = {
+            "id": "draft789",
+        }
+
+        result = await bridge.reply_to_email(
+            message_id="orig_msg123",
+            body="Draft reply",
+            draft_only=True,
+        )
+
+        assert result.success is True
+        assert result.is_draft is True
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_adds_re_prefix(self, bridge, mock_gmail_service):
+        """Test that reply adds Re: prefix to subject."""
+        # Mock getting original message (subject without Re:)
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "orig_msg123",
+            "threadId": "thread123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Meeting Tomorrow"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Message-ID", "value": "<original123@mail.com>"},
+                ],
+            },
+        }
+        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
+            "id": "reply_msg456",
+            "threadId": "thread123",
+        }
+
+        result = await bridge.reply_to_email(
+            message_id="orig_msg123",
+            body="Sure!",
+        )
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_preserves_re_prefix(self, bridge, mock_gmail_service):
+        """Test that reply doesn't double Re: prefix."""
+        # Mock getting original message (subject already has Re:)
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "orig_msg123",
+            "threadId": "thread123",
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Re: Meeting Tomorrow"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Message-ID", "value": "<original123@mail.com>"},
+                ],
+            },
+        }
+        mock_gmail_service.users.return_value.messages.return_value.send.return_value.execute.return_value = {
+            "id": "reply_msg456",
+            "threadId": "thread123",
+        }
+
+        result = await bridge.reply_to_email(
+            message_id="orig_msg123",
+            body="Looking forward to it",
+        )
+
+        assert result.success is True
+
+    @pytest.mark.asyncio
+    async def test_reply_to_email_error(self, bridge, mock_gmail_service):
+        """Test email reply handles errors gracefully."""
+        from googleapiclient.errors import HttpError
+
+        mock_response = MagicMock()
+        mock_response.status = 404
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.side_effect = HttpError(
+            mock_response, b"Message not found"
+        )
+
+        result = await bridge.reply_to_email(
+            message_id="nonexistent123",
+            body="Reply to missing message",
+        )
+
+        assert result.success is False
+        assert result.error is not None
+
+
+# ===========================================================================
 # Email Pagination Tests
 # ===========================================================================
 
