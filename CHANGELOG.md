@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- `WorkflowInspector` class for agent workflow debugging (#357)
+- `WorkflowEntry` dataclass for structured workflow log entries
+- `WorkflowPhase` enum with REQUEST, THINKING, OUTPUT phases
+- `log_request()`, `log_thinking()`, `log_output()` convenience functions
+- Automatic REQUEST/OUTPUT logging in `BaseAgent._handle_message()`
+- THINKING phase logging in Ingestor, Researcher, and Executor agents
+- File output (JSONL), console output, and in-memory buffer for testing
+- Environment configuration: WORKFLOW_INSPECT, WORKFLOW_FILTER_AGENTS, WORKFLOW_CONSOLE
+- 26 new unit tests for workflow inspection
 - `SkillDocsGenerator` class for automatic skill documentation generation (#298)
 - `SkillDoc` and `SkillParameter` dataclasses for structured documentation
 - `generate_skill_docs()` and `generate_skill_doc()` convenience functions
