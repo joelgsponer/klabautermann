@@ -648,6 +648,158 @@ class GoogleWorkspaceBridge:
             )
             return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
 
+    async def reply_to_email(
+        self,
+        message_id: str,
+        body: str,
+        reply_all: bool = False,
+        draft_only: bool = False,
+        context: Any = None,  # noqa: ARG002
+    ) -> SendEmailResult:
+        """
+        Reply to an existing email thread.
+
+        Automatically sets In-Reply-To and References headers to maintain
+        thread context in Gmail. Extracts the original sender (and CC recipients
+        if reply_all) from the original message.
+
+        Args:
+            message_id: Gmail message ID to reply to
+            body: Reply body (plain text)
+            reply_all: If True, include all original recipients in reply
+            draft_only: If True, save as draft instead of sending
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result containing message ID or error details
+
+        Reference: Issue #207 (MCP-001)
+        """
+        await self.start()
+
+        def get_original_message() -> dict[str, Any]:
+            """Fetch the original message to extract headers."""
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .messages()
+                .get(userId="me", id=message_id, format="full")
+                .execute()
+            )
+            return result
+
+        def do_reply(original: dict[str, Any]) -> dict[str, Any]:
+            """Build and send/draft the reply message."""
+            # Extract headers from original message
+            headers = {
+                h["name"]: h["value"] for h in original.get("payload", {}).get("headers", [])
+            }
+
+            thread_id = original.get("threadId")
+            original_message_id = headers.get("Message-ID", headers.get("Message-Id", ""))
+            original_references = headers.get("References", "")
+            original_subject = headers.get("Subject", "")
+            original_sender = headers.get("From", "")
+            original_to = headers.get("To", "")
+            original_cc = headers.get("Cc", "")
+
+            # Build References header: existing references + original message ID
+            references = original_references
+            if original_message_id:
+                if references:
+                    references = f"{references} {original_message_id}"
+                else:
+                    references = original_message_id
+
+            # Determine recipients
+            # For reply: reply to the original sender
+            # For reply-all: include original sender + all original recipients
+            reply_to = original_sender
+
+            cc_recipients = None
+            if reply_all and (original_to or original_cc):
+                # Combine original To and Cc, excluding our own address
+                all_recipients = []
+                if original_to:
+                    all_recipients.extend([r.strip() for r in original_to.split(",") if r.strip()])
+                if original_cc:
+                    all_recipients.extend([r.strip() for r in original_cc.split(",") if r.strip()])
+                # Filter out the original sender (they're in To:)
+                cc_recipients = ", ".join(r for r in all_recipients if r != original_sender)
+
+            # Build subject with Re: prefix if not already present
+            subject = original_subject
+            if not subject.lower().startswith("re:"):
+                subject = f"Re: {subject}"
+
+            # Create MIME message with threading headers
+            message = MIMEText(body)
+            message["to"] = reply_to
+            message["subject"] = subject
+            if cc_recipients:
+                message["cc"] = cc_recipients
+            if original_message_id:
+                message["In-Reply-To"] = original_message_id
+            if references:
+                message["References"] = references
+
+            raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
+
+            if draft_only:
+                # Create draft in the same thread
+                draft = (
+                    self._gmail_service.users()
+                    .drafts()
+                    .create(
+                        userId="me",
+                        body={"message": {"raw": raw, "threadId": thread_id}},
+                    )
+                    .execute()
+                )
+                return {"id": draft["id"], "is_draft": True, "thread_id": thread_id}
+            else:
+                # Send message in the same thread
+                sent = (
+                    self._gmail_service.users()
+                    .messages()
+                    .send(userId="me", body={"raw": raw, "threadId": thread_id})
+                    .execute()
+                )
+                return {"id": sent["id"], "is_draft": False, "thread_id": thread_id}
+
+        try:
+            # First fetch the original message
+            original = await self._rate_limited_call("gmail", get_original_message)
+            # Then send the reply
+            result = await self._rate_limited_call("gmail", lambda: do_reply(original))
+
+            logger.info(
+                f"[BEACON] Email reply {'drafted' if draft_only else 'sent'} in thread",
+                extra={
+                    "original_id": message_id,
+                    "reply_id": result["id"],
+                    "thread_id": result.get("thread_id"),
+                    "reply_all": reply_all,
+                },
+            )
+
+            return SendEmailResult(
+                success=True,
+                message_id=result["id"],
+                is_draft=result.get("is_draft", False),
+            )
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Email reply failed: {e}",
+                extra={"message_id": message_id, "reply_all": reply_all},
+            )
+            return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
+        except Exception as e:
+            logger.error(
+                f"[STORM] Email reply failed: {e}",
+                extra={"message_id": message_id, "reply_all": reply_all},
+            )
+            return SendEmailResult(success=False, error=str(e), is_draft=draft_only)
+
     async def get_recent_emails(
         self,
         hours: int = 24,
