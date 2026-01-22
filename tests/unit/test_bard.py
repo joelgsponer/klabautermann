@@ -98,11 +98,12 @@ class TestBardOfTheBilgeInit:
         assert bard.bard_config.max_saga_chapters == 3
 
     def test_canonical_tidbits_available(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
-        """BardOfTheBilge should have access to canonical tidbits."""
+        """BardOfTheBilge should have access to canonical tidbits (#107)."""
         bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
 
-        assert len(bard.CANONICAL_TIDBITS) == 10
-        assert len(CANONICAL_TIDBITS) == 10
+        # 12 standalone tidbits + 5 saga tidbits = 17 total (#107)
+        assert len(bard.CANONICAL_TIDBITS) == 17
+        assert len(CANONICAL_TIDBITS) == 17
 
 
 # =============================================================================
@@ -599,7 +600,7 @@ class TestLoreStatistics:
         assert stats["total_episodes"] == 0
         assert stats["avg_chapters_per_saga"] == 0
         assert stats["captain_uuid"] == captain_uuid
-        assert stats["canonical_tidbits_available"] == 10
+        assert stats["canonical_tidbits_available"] == 17  # 12 standalone + 5 saga (#107)
 
     @pytest.mark.asyncio
     async def test_get_lore_statistics_with_data(
@@ -1800,6 +1801,10 @@ class TestSaltResponseChannel:
             tidbit_probability=1.0,
             saga_continuation_probability=1.0,
             min_chapter_interval_hours=0,
+            # Force saga continuation path in weighted selection (#108)
+            continue_saga_weight=1.0,
+            start_saga_weight=0.0,
+            standalone_weight=0.0,
         )
         bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
