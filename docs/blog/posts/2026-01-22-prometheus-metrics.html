@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,infra">
+    <meta name="post-slug" content="prometheus-metrics">
+    <meta name="post-excerpt" content="Prometheus metrics for agents, API, graph, and LLM calls. Scrape, graph, alert - the full observability stack.">
+    <title>Numbers That Matter | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">infra</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Numbers That Matter</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Today we added Prometheus metrics to Klabautermann. Because knowing your ship is running smoothly is different from being able to prove it.</p>
+
+                <h2>The Observability Triad</h2>
+                <p>With structured logging (#272) and workflow inspection (#357) already aboard, we now complete the observability triad:</p>
+
+                <ul>
+                    <li><strong>Logs</strong> - What happened and when (JSON-structured)</li>
+                    <li><strong>Traces</strong> - How requests flow through agents (workflow inspector)</li>
+                    <li><strong>Metrics</strong> - How the system is performing (Prometheus)</li>
+                </ul>
+
+                <p>Each serves a different purpose. Logs for debugging specific events. Traces for understanding agent interactions. Metrics for dashboards, alerts, and trends.</p>
+
+                <h2>The Metrics</h2>
+                <p>Every agent now reports:</p>
+
+                <pre><code># Request counter
+klabautermann_agent_requests_total{agent_name="researcher"} 142
+
+# Success/error counters
+klabautermann_agent_successes_total{agent_name="researcher"} 139
+klabautermann_agent_errors_total{agent_name="researcher"} 3
+
+# Latency histogram (in milliseconds)
+klabautermann_agent_request_latency_ms_bucket{agent_name="researcher",le="100"} 45
+klabautermann_agent_request_latency_ms_bucket{agent_name="researcher",le="250"} 89
+klabautermann_agent_request_latency_ms_bucket{agent_name="researcher",le="500"} 125
+
+# Running status (1=running, 0=stopped)
+klabautermann_agent_running{agent_name="researcher"} 1
+
+# Inbox queue size
+klabautermann_agent_inbox_size{agent_name="researcher"} 2</code></pre>
+
+                <h2>API Metrics</h2>
+                <p>The FastAPI server tracks every request:</p>
+
+                <pre><code># Request counter by method/endpoint/status
+klabautermann_api_requests_total{method="GET",endpoint="/health",status_code="200"} 847
+klabautermann_api_requests_total{method="GET",endpoint="/metrics",status_code="200"} 142
+
+# Latency histogram
+klabautermann_api_request_latency_seconds_bucket{method="GET",endpoint="/health",le="0.01"} 845
+
+# WebSocket connections
+klabautermann_api_websocket_connections 3</code></pre>
+
+                <p>The metrics middleware automatically times every request. The /metrics endpoint itself is excluded to avoid recursive tracking.</p>
+
+                <h2>Graph and LLM Metrics</h2>
+                <p>For deep performance analysis:</p>
+
+                <pre><code># Graph operations
+klabautermann_graph_operations_total{operation_type="search"} 256
+klabautermann_graph_operation_latency_seconds_bucket{operation_type="search",le="0.1"} 180
+
+# LLM calls
+klabautermann_llm_calls_total{model="haiku",purpose="extraction"} 89
+klabautermann_llm_tokens_total{model="haiku",token_type="input"} 45230
+klabautermann_llm_tokens_total{model="haiku",token_type="output"} 12450
+klabautermann_llm_call_latency_seconds_bucket{model="haiku",le="1.0"} 72</code></pre>
+
+                <h2>The Implementation</h2>
+                <p>A custom registry for clean separation:</p>
+
+                <pre><code>from prometheus_client import CollectorRegistry, Counter, Histogram, Gauge
+
+REGISTRY = CollectorRegistry()
+
+AGENT_REQUESTS_TOTAL = Counter(
+    "klabautermann_agent_requests_total",
+    "Total requests processed by agents",
+    ["agent_name"],
+    registry=REGISTRY,
+)</code></pre>
+
+                <p>Helper functions for clean integration:</p>
+
+                <pre><code>def record_agent_request(agent_name: str) -> None:
+    AGENT_REQUESTS_TOTAL.labels(agent_name=agent_name).inc()
+
+def record_agent_latency(agent_name: str, latency_ms: float) -> None:
+    AGENT_REQUEST_LATENCY_MS.labels(agent_name=agent_name).observe(latency_ms)</code></pre>
+
+                <p>BaseAgent integration is automatic:</p>
+
+                <pre><code>async def _handle_message(self, msg: AgentMessage) -> None:
+    start_time = time.time()
+    record_agent_request(self.name)
+    set_agent_inbox_size(self.name, self.inbox.qsize())
+
+    try:
+        response = await self.process_message(msg)
+        record_agent_success(self.name)
+    except Exception:
+        record_agent_error(self.name)
+        raise
+    finally:
+        elapsed_ms = (time.time() - start_time) * 1000
+        record_agent_latency(self.name, elapsed_ms)</code></pre>
+
+                <h2>The Endpoint</h2>
+                <p>Metrics are exposed at <code>/metrics</code>:</p>
+
+                <pre><code>@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    return Response(
+        content=get_metrics(),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )</code></pre>
+
+                <p>Standard Prometheus text format. Scrape with any Prometheus instance.</p>
+
+                <h2>API Middleware</h2>
+                <p>Request timing happens automatically:</p>
+
+                <pre><code>@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    elapsed = time.perf_counter() - start_time
+
+    if request.url.path != "/metrics":  # Avoid recursion
+        record_api_request(request.method, request.url.path, response.status_code)
+        record_api_latency(request.method, request.url.path, elapsed)
+
+    return response</code></pre>
+
+                <h2>Timed Operations</h2>
+                <p>For custom timing, there's a decorator:</p>
+
+                <pre><code>from klabautermann.core.metrics import timed_operation, record_graph_latency
+
+@timed_operation(record_graph_latency, "search")
+async def search(self, query: str) -> list[dict]:
+    # Latency automatically recorded
+    return await self._execute_search(query)</code></pre>
+
+                <p>Works with both sync and async functions. Records even when exceptions occur.</p>
+
+                <h2>Histogram Buckets</h2>
+                <p>Carefully chosen for each metric type:</p>
+
+                <pre><code># Agent latency (milliseconds): 10ms to 10s
+buckets=[10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000]
+
+# API latency (seconds): 10ms to 10s
+buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+
+# LLM latency (seconds): 100ms to 60s (LLM calls can be slow)
+buckets=[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0]</code></pre>
+
+                <h2>The Tests</h2>
+                <p>27 tests verify the metrics system:</p>
+
+                <ul>
+                    <li><strong>TestRegistry</strong>: Registry exists, get_metrics returns bytes, metric names appear</li>
+                    <li><strong>TestAgentMetrics</strong>: Request/success/error counters, latency histogram, running gauge, inbox size</li>
+                    <li><strong>TestAPIMetrics</strong>: Request counter with labels, latency histogram, WebSocket connections</li>
+                    <li><strong>TestGraphMetrics</strong>: Operation counter, latency histogram</li>
+                    <li><strong>TestLLMMetrics</strong>: Call counter, token counters, latency histogram</li>
+                    <li><strong>TestTimedOperation</strong>: Sync functions, async functions, exception handling</li>
+                    <li><strong>TestIntegration</strong>: Prometheus format, histogram buckets, label separation</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>362 lines in <code>src/klabautermann/core/metrics.py</code></li>
+                    <li>50 lines added to <code>src/klabautermann/api/server.py</code></li>
+                    <li>16 lines added to <code>src/klabautermann/agents/base_agent.py</code></li>
+                    <li>27 new unit tests</li>
+                    <li>All 1728 tests pass</li>
+                </ul>
+
+                <h2>What's Next</h2>
+                <p>Wire this up to Grafana for dashboards. Set up alerting for error rates and latency spikes. The data is there - now it's about making it visible.</p>
+
+                <p>Issue #271, closed. The ship now has instruments.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
