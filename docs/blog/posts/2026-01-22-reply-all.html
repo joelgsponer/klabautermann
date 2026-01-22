@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="reply-all">
+    <meta name="post-excerpt" content="Implementing email reply-to-thread functionality with proper RFC 2822 threading headers so your replies actually end up in the right conversation.">
+    <title>Reply All (Properly This Time) | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Reply All (Properly This Time)</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Email threading seems simple until you try to implement it. Today we added the ability to reply to email threads, and discovered that "just reply to this email" involves more headers than you might expect.</p>
+
+                <h2>The Problem</h2>
+                <p>Klabautermann could already send emails via <code>send_email()</code>. But when you asked it to "reply to that email from Sarah," it would send a brand new email - unthreaded, lonely, floating in the inbox wilderness.</p>
+
+                <p>Gmail (and most email clients) groups messages into threads using specific headers. Without them, your reply looks like a new conversation entirely.</p>
+
+                <h2>The Threading Headers</h2>
+                <p>RFC 2822 defines how email threading works. Three headers matter:</p>
+
+                <ol>
+                    <li><strong>Message-ID</strong>: Every email has a unique identifier (like <code>&lt;abc123@mail.gmail.com&gt;</code>)</li>
+                    <li><strong>In-Reply-To</strong>: Points to the Message-ID of the email you're replying to</li>
+                    <li><strong>References</strong>: A chain of all Message-IDs in the thread</li>
+                </ol>
+
+                <p>Gmail also uses its own <code>threadId</code> internally, which we need to include when sending via the API.</p>
+
+                <h2>The Implementation</h2>
+                <p>The new <code>reply_to_email()</code> method handles all of this:</p>
+
+                <pre><code>async def reply_to_email(
+    self,
+    message_id: str,      # Original message to reply to
+    body: str,            # Reply body
+    reply_all: bool = False,
+    draft_only: bool = False,
+) -> SendEmailResult:</code></pre>
+
+                <p>It fetches the original message to extract its headers, then constructs the reply with proper threading:</p>
+
+                <pre><code># Build References header: existing references + original message ID
+references = original_references
+if original_message_id:
+    if references:
+        references = f"{references} {original_message_id}"
+    else:
+        references = original_message_id
+
+# Set threading headers
+message["In-Reply-To"] = original_message_id
+message["References"] = references</code></pre>
+
+                <h2>The Subject Line</h2>
+                <p>A small but important detail: replies should have "Re:" prefixed to the subject (if not already present). We handle this without doubling up:</p>
+
+                <pre><code>subject = original_subject
+if not subject.lower().startswith("re:"):
+    subject = f"Re: {subject}"</code></pre>
+
+                <h2>Reply All vs Reply</h2>
+                <p>The <code>reply_all</code> parameter determines who gets the reply:</p>
+
+                <ul>
+                    <li><strong>Reply</strong>: Just the original sender</li>
+                    <li><strong>Reply All</strong>: Original sender + everyone in To and CC</li>
+                </ul>
+
+                <p>For reply-all, we extract the original recipients and add them to CC (filtering out the sender who goes in To):</p>
+
+                <pre><code>if reply_all and (original_to or original_cc):
+    all_recipients = []
+    if original_to:
+        all_recipients.extend([r.strip() for r in original_to.split(",") if r.strip()])
+    if original_cc:
+        all_recipients.extend([r.strip() for r in original_cc.split(",") if r.strip()])
+    cc_recipients = ", ".join(r for r in all_recipients if r != original_sender)</code></pre>
+
+                <h2>Usage</h2>
+                <p>With this feature, Klabautermann can now handle requests like:</p>
+
+                <blockquote>"Reply to Sarah's email saying I'll attend the meeting"</blockquote>
+
+                <p>The Executor routes this to <code>reply_to_email()</code>, which sends the reply in the same thread as Sarah's original message.</p>
+
+                <h2>Testing</h2>
+                <p>We added five unit tests covering the main scenarios:</p>
+
+                <ul>
+                    <li>Successful reply sending</li>
+                    <li>Draft mode replies</li>
+                    <li>Subject Re: prefix handling (add and preserve)</li>
+                    <li>Error handling for missing messages</li>
+                </ul>
+
+                <p>All tests pass, bringing us to 1497 total tests in the suite.</p>
+
+                <h2>What's Next</h2>
+                <p>With reply-to-thread done, we can move on to other email features in the backlog: attachment handling (#208), draft management (#219), and thread summarization (#221). The communication layer continues to grow.</p>
+
+                <p>Smooth sailing.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
