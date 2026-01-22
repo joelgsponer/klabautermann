@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Standalone tidbits and weighted selection algorithm (#107, #108)
+  - 12 standalone tidbits: one-liner tales from LORE_SYSTEM.md Section 4.1
+  - 5 saga tidbits: continuation context excerpts for saga threads
+  - `STANDALONE_TIDBITS`, `SAGA_TIDBITS` lists, `CANONICAL_TIDBITS` combines both (17 total)
+  - Weighted tidbit selection algorithm per Section 4.2:
+    - 30% chance to continue active saga
+    - 20% chance to start new saga
+    - 50% chance for standalone tidbit
+  - `BardConfig` selection weights: `continue_saga_weight`, `start_saga_weight`, `standalone_weight`
+  - `_select_and_add_tidbit()` method for probabilistic selection with fallback
 - Saga summary generation and archival (#125, #126)
   - `archive_saga(saga_id)` - Generate summary and create Note node when archiving
   - `_generate_saga_summary(episodes)` - Create summary from chapter content
