@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- HullCleaner orphan message management (#82, #83)
+  - `find_orphan_messages()` detects messages without thread connections
+  - `remove_orphan_messages()` with dry-run support and audit logging
+  - `scrape_barnacles()` now includes orphan cleanup in full maintenance
+  - Configurable via `remove_orphan_messages` and `orphan_batch_size` settings
+  - Integration with existing `orphan_cleanup.py` infrastructure
+  - 8 new unit tests (33 total for HullCleaner)
 - HullCleaner agent for graph maintenance (#79, #80, #81, #88)
   - `HullCleaner` agent skeleton extending `BaseAgent`
   - `HullCleanerConfig` for configurable pruning behavior (threshold, age_days, dry_run)
