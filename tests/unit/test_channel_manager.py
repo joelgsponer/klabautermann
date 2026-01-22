@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from klabautermann.channels.manager import (
+    BroadcastResult,
     ChannelConfig,
     ChannelManager,
     ChannelStatus,
@@ -567,3 +568,306 @@ class TestGlobalInstance:
         reset_channel_manager()
         manager2 = get_channel_manager()
         assert manager1 is not manager2
+
+
+# =============================================================================
+# Test Auto-Restart (#154)
+# =============================================================================
+
+
+class TestAutoRestart:
+    """Tests for automatic channel restart on failure."""
+
+    def test_config_auto_restart_defaults(self) -> None:
+        """Test auto-restart configuration defaults."""
+        config = ChannelConfig()
+        assert config.auto_restart is True
+        assert config.max_restart_attempts == 3
+        assert config.restart_backoff_seconds == 5.0
+
+    def test_config_auto_restart_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test loading auto-restart config from environment."""
+        monkeypatch.setenv("CHANNEL_AUTO_RESTART", "false")
+        monkeypatch.setenv("CHANNEL_MAX_RESTART_ATTEMPTS", "5")
+        monkeypatch.setenv("CHANNEL_RESTART_BACKOFF", "10.0")
+
+        config = ChannelConfig.from_env()
+
+        assert config.auto_restart is False
+        assert config.max_restart_attempts == 5
+        assert config.restart_backoff_seconds == 10.0
+
+    @pytest.mark.asyncio
+    async def test_restart_tracks_attempts(
+        self, manager: ChannelManager, mock_channel: MagicMock
+    ) -> None:
+        """Test that restart tracks attempt count."""
+        manager.register("test", mock_channel)
+        await manager.start_all()
+
+        assert manager.get_restart_attempts("test") == 0
+
+        await manager.restart_channel("test")
+        # Attempt resets to 0 on success
+        assert manager.get_restart_attempts("test") == 0
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_restart_increments_on_failure(self, manager: ChannelManager) -> None:
+        """Test that failed restart increments attempt count."""
+        channel = MagicMock()
+        channel.channel_type = "failing"
+        channel.start = AsyncMock(side_effect=RuntimeError("Start failed"))
+        channel.stop = AsyncMock()
+
+        manager.register("failing", channel)
+
+        # First attempt
+        result = await manager.restart_channel("failing")
+        assert result is False
+        assert manager.get_restart_attempts("failing") == 1
+
+        # Second attempt
+        result = await manager.restart_channel("failing")
+        assert result is False
+        assert manager.get_restart_attempts("failing") == 2
+
+    def test_reset_restart_attempts(self, manager: ChannelManager, mock_channel: MagicMock) -> None:
+        """Test resetting restart attempt counter."""
+        manager.register("test", mock_channel)
+        manager._restart_attempts["test"] = 5
+
+        manager.reset_restart_attempts("test")
+
+        assert manager.get_restart_attempts("test") == 0
+
+    @pytest.mark.asyncio
+    async def test_failure_callback_called(self, manager: ChannelManager) -> None:
+        """Test that failure callbacks are called on restart failure."""
+        channel = MagicMock()
+        channel.channel_type = "failing"
+        channel.start = AsyncMock(side_effect=RuntimeError("Start failed"))
+        channel.stop = AsyncMock()
+
+        manager.register("failing", channel)
+
+        failures: list[tuple[str, str]] = []
+
+        def on_failure(name: str, error: str) -> None:
+            failures.append((name, error))
+
+        manager.on_failure(on_failure)
+
+        await manager.restart_channel("failing")
+
+        assert len(failures) == 1
+        assert failures[0][0] == "failing"
+        assert "Start failed" in failures[0][1]
+
+    @pytest.mark.asyncio
+    async def test_async_failure_callback(self, manager: ChannelManager) -> None:
+        """Test that async failure callbacks are awaited."""
+        channel = MagicMock()
+        channel.channel_type = "failing"
+        channel.start = AsyncMock(side_effect=RuntimeError("Start failed"))
+        channel.stop = AsyncMock()
+
+        manager.register("failing", channel)
+
+        failures: list[tuple[str, str]] = []
+
+        async def async_on_failure(name: str, error: str) -> None:
+            await asyncio.sleep(0.01)
+            failures.append((name, error))
+
+        manager.on_failure(async_on_failure)
+
+        await manager.restart_channel("failing")
+
+        assert len(failures) == 1
+
+
+# =============================================================================
+# Test Cross-Channel Messaging (#156)
+# =============================================================================
+
+
+class TestBroadcast:
+    """Tests for broadcast (cross-channel) messaging."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_to_all_channels(self, manager: ChannelManager) -> None:
+        """Test broadcasting to all active channels."""
+        channels = {}
+        for name in ["ch1", "ch2", "ch3"]:
+            ch = MagicMock()
+            ch.channel_type = name
+            ch.start = AsyncMock()
+            ch.stop = AsyncMock()
+            ch.send_message = AsyncMock()
+            channels[name] = ch
+            manager.register(name, ch)
+
+        await manager.start_all()
+
+        result = await manager.broadcast("Test broadcast message")
+
+        assert isinstance(result, BroadcastResult)
+        assert result.delivered_count == 3
+        assert result.failed_count == 0
+        assert result.all_delivered is True
+
+        for ch in channels.values():
+            ch.send_message.assert_called_once()
+            call_kwargs = ch.send_message.call_args.kwargs
+            assert call_kwargs["content"] == "Test broadcast message"
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_with_thread_ids(self, manager: ChannelManager) -> None:
+        """Test broadcasting with custom thread IDs."""
+        channel = MagicMock()
+        channel.channel_type = "test"
+        channel.start = AsyncMock()
+        channel.stop = AsyncMock()
+        channel.send_message = AsyncMock()
+
+        manager.register("test", channel)
+        await manager.start_all()
+
+        await manager.broadcast(
+            "Test message",
+            thread_ids={"test": "custom-thread-123"},
+        )
+
+        call_kwargs = channel.send_message.call_args.kwargs
+        assert call_kwargs["thread_id"] == "custom-thread-123"
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_exclude_channels(self, manager: ChannelManager) -> None:
+        """Test excluding channels from broadcast."""
+        for name in ["ch1", "ch2", "ch3"]:
+            ch = MagicMock()
+            ch.channel_type = name
+            ch.start = AsyncMock()
+            ch.stop = AsyncMock()
+            ch.send_message = AsyncMock()
+            manager.register(name, ch)
+
+        await manager.start_all()
+
+        result = await manager.broadcast(
+            "Test message",
+            exclude_channels=["ch2"],
+        )
+
+        assert result.delivered_count == 2
+        assert "ch1" in result.channels_delivered
+        assert "ch3" in result.channels_delivered
+        assert "ch2" not in result.channels_delivered
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_partial_failure(self, manager: ChannelManager) -> None:
+        """Test broadcast with some channels failing."""
+        good_channel = MagicMock()
+        good_channel.channel_type = "good"
+        good_channel.start = AsyncMock()
+        good_channel.stop = AsyncMock()
+        good_channel.send_message = AsyncMock()
+
+        bad_channel = MagicMock()
+        bad_channel.channel_type = "bad"
+        bad_channel.start = AsyncMock()
+        bad_channel.stop = AsyncMock()
+        bad_channel.send_message = AsyncMock(side_effect=RuntimeError("Send failed"))
+
+        manager.register("good", good_channel)
+        manager.register("bad", bad_channel)
+
+        await manager.start_all()
+
+        result = await manager.broadcast("Test message")
+
+        assert result.delivered_count == 1
+        assert result.failed_count == 1
+        assert result.all_delivered is False
+        assert "good" in result.channels_delivered
+        assert "bad" in result.channels_failed
+        assert "Send failed" in result.errors["bad"]
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_broadcast_result_properties(self, manager: ChannelManager) -> None:
+        """Test BroadcastResult properties."""
+        for name in ["ch1", "ch2"]:
+            ch = MagicMock()
+            ch.channel_type = name
+            ch.start = AsyncMock()
+            ch.stop = AsyncMock()
+            ch.send_message = AsyncMock()
+            manager.register(name, ch)
+
+        await manager.start_all()
+
+        result = await manager.broadcast("Test")
+
+        assert isinstance(result.timestamp, datetime)
+        assert result.content == "Test"
+        assert set(result.channels_delivered) == {"ch1", "ch2"}
+        assert result.channels_failed == []
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_send_to_channel(self, manager: ChannelManager, mock_channel: MagicMock) -> None:
+        """Test sending to a specific channel."""
+        mock_channel.send_message = AsyncMock()
+        manager.register("test", mock_channel)
+        await manager.start_all()
+
+        result = await manager.send_to_channel(
+            channel_name="test",
+            content="Hello",
+            thread_id="thread-123",
+        )
+
+        assert result is True
+        mock_channel.send_message.assert_called_once()
+        call_kwargs = mock_channel.send_message.call_args.kwargs
+        assert call_kwargs["content"] == "Hello"
+        assert call_kwargs["thread_id"] == "thread-123"
+
+        await manager.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_send_to_nonexistent_channel(self, manager: ChannelManager) -> None:
+        """Test sending to nonexistent channel."""
+        result = await manager.send_to_channel(
+            channel_name="nonexistent",
+            content="Hello",
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_send_to_stopped_channel(
+        self, manager: ChannelManager, mock_channel: MagicMock
+    ) -> None:
+        """Test sending to stopped channel."""
+        mock_channel.send_message = AsyncMock()
+        manager.register("test", mock_channel)
+        # Don't start the channel
+
+        result = await manager.send_to_channel(
+            channel_name="test",
+            content="Hello",
+        )
+
+        assert result is False
+        mock_channel.send_message.assert_not_called()
