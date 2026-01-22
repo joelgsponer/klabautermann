@@ -43,6 +43,8 @@ dependencies = [
     "watchdog>=4.0",
     # Prometheus metrics
     "prometheus-client>=0.20",
+    # Telegram bot
+    "python-telegram-bot>=21.0",
 ]
 
 [project.optional-dependencies]
