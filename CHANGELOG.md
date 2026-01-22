@@ -18,6 +18,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Bard integration with Orchestrator for response salting (#109, #116, #117)
+  - `config/agents/bard.yaml` configuration file for Bard settings
+    - `tidbit_probability`: 0.07 (7% of responses get tidbits)
+    - `saga_rules`: max_chapters=5, max_active=3, timeout_days=30, min_interval_hours=1
+    - `storm_mode`: Disable tidbits for urgent responses (keywords: urgent, emergency, critical, asap)
+    - `display`: italic format with newline separator
+  - New Pydantic config models in `config/manager.py`
+    - `BardConfig` - main configuration with model, probabilities, rules
+    - `SagaRulesConfig` - saga lifecycle settings
+    - `SelectionWeightsConfig` - tidbit selection weights
+    - `StormModeConfig` - urgent response detection
+    - `LoreDisplayConfig` - tidbit formatting options
+    - `LoreConfig` - personality-level lore settings
+  - Orchestrator integration
+    - `captain_uuid` parameter added to `Orchestrator.__init__`
+    - `_apply_personality()` now calls `bard.salt_response()`
+    - `_detect_storm_mode()` checks for urgent keywords
+    - `_load_bard_config()` loads from config/agents/bard.yaml
+    - Graceful fallback on Bard errors (returns original response)
+    - Bard registered in `_agent_registry`
+  - 27 new unit tests for config validation and Orchestrator integration
 - Saga lifecycle management for BardOfTheBilge agent (#118, #119, #120, #121)
   - Max chapters per saga enforcement (`max_saga_chapters`, default 5)
     - Raises `SagaCompleteError` when attempting to continue a completed saga
