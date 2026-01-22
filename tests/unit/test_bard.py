@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from klabautermann.agents.bard import (
+    CANONICAL_SAGAS,
     CANONICAL_TIDBITS,
     ActiveSaga,
     BardConfig,
@@ -104,6 +105,51 @@ class TestBardOfTheBilgeInit:
         # 12 standalone tidbits + 5 saga tidbits = 17 total (#107)
         assert len(bard.CANONICAL_TIDBITS) == 17
         assert len(CANONICAL_TIDBITS) == 17
+
+    def test_canonical_sagas_available(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """BardOfTheBilge should have access to canonical sagas (#102-106)."""
+        # Verify BardOfTheBilge can be instantiated (has access to sagas)
+        _ = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        # 5 canonical sagas from LORE_SYSTEM.md Section 4.1
+        assert len(CANONICAL_SAGAS) == 5
+
+        # Verify each saga has required fields
+        for saga_id, saga_data in CANONICAL_SAGAS.items():
+            assert "name" in saga_data, f"Saga {saga_id} missing name"
+            assert "theme" in saga_data, f"Saga {saga_id} missing theme"
+            assert "chapters" in saga_data, f"Saga {saga_id} missing chapters"
+            assert len(saga_data["chapters"]) == 5, f"Saga {saga_id} should have 5 chapters"
+
+    def test_canonical_sagas_content_matches_spec(self) -> None:
+        """Canonical sagas should match LORE_SYSTEM.md Section 4.1 exactly (#102-106)."""
+        # #102: The Great Maelstrom of '98
+        assert "great-maelstrom" in CANONICAL_SAGAS
+        assert CANONICAL_SAGAS["great-maelstrom"]["name"] == "The Great Maelstrom of '98"
+        assert CANONICAL_SAGAS["great-maelstrom"]["theme"] == "origin"
+
+        # #103: The Kraken of the Infinite Scroll
+        assert "kraken-scroll" in CANONICAL_SAGAS
+        assert CANONICAL_SAGAS["kraken-scroll"]["name"] == "The Kraken of the Infinite Scroll"
+        assert CANONICAL_SAGAS["kraken-scroll"]["theme"] == "battle"
+
+        # #104: The Sirens of the Inbox
+        assert "sirens-inbox" in CANONICAL_SAGAS
+        assert CANONICAL_SAGAS["sirens-inbox"]["name"] == "The Sirens of the Inbox"
+        assert CANONICAL_SAGAS["sirens-inbox"]["theme"] == "warning"
+
+        # #105: The Ghost Ship of Abandoned Projects
+        assert "ghost-ship" in CANONICAL_SAGAS
+        assert CANONICAL_SAGAS["ghost-ship"]["name"] == "The Ghost Ship of Abandoned Projects"
+        assert CANONICAL_SAGAS["ghost-ship"]["theme"] == "melancholy"
+
+        # #106: The Lighthouse of Forgotten Passwords
+        assert "lighthouse-passwords" in CANONICAL_SAGAS
+        assert (
+            CANONICAL_SAGAS["lighthouse-passwords"]["name"]
+            == "The Lighthouse of Forgotten Passwords"
+        )
+        assert CANONICAL_SAGAS["lighthouse-passwords"]["theme"] == "humor"
 
 
 # =============================================================================

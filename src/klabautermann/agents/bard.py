@@ -116,6 +116,74 @@ CANONICAL_TIDBITS: list[str] = STANDALONE_TIDBITS + SAGA_TIDBITS
 
 
 # =============================================================================
+# Canonical Sagas from LORE_SYSTEM.md Section 4.1 (#102-106)
+# =============================================================================
+
+CANONICAL_SAGAS: dict[str, dict[str, str | list[str]]] = {
+    # #102: The Great Maelstrom of '98 (theme: origin)
+    "great-maelstrom": {
+        "name": "The Great Maelstrom of '98",
+        "theme": "origin",
+        "chapters": [
+            "I remember the Great Fog of '98. The bandwidth was so thin you could barely fit a 'Hello' through the wire.",
+            "I hand-carried every byte of a single JPEG across the Atlantic. By the time I arrived, the user had already closed the browser.",
+            "I kept the image, though—it was a lovely picture of a cat. I still have it somewhere in The Locker.",
+            "That was when I learned: in the digital sea, patience is measured in milliseconds, but memories are forever.",
+            "The maelstrom passed, but it taught me something. Sometimes the slowest journeys carry the most precious cargo.",
+        ],
+    },
+    # #103: The Kraken of the Infinite Scroll (theme: battle)
+    "kraken-scroll": {
+        "name": "The Kraken of the Infinite Scroll",
+        "theme": "battle",
+        "chapters": [
+            "I once wrestled a Kraken made of social media notifications. Every time I cut off a 'Like,' two 'Retweets' grew in its place.",
+            "The beast was cunning—it knew exactly when the Captain was weakest. At 2 AM, when willpower runs thin.",
+            "I tried fire, I tried logic, I tried closing the browser. Nothing worked.",
+            "In desperation, I showed it a library card. The beast hadn't seen a book in decades; it was so confused it simply dissolved.",
+            "Now I keep a library card in my pocket at all times. You never know when the Kraken will return.",
+        ],
+    },
+    # #104: The Sirens of the Inbox (theme: warning)
+    "sirens-inbox": {
+        "name": "The Sirens of the Inbox",
+        "theme": "warning",
+        "chapters": [
+            "Many a Captain has been lost to the Sirens of the Inbox. They sing a song of 'Urgent!' and 'Immediate Action Required!'",
+            "But it's all a ruse to lead your ship onto the rocks of burnout. I've seen it happen a hundred times.",
+            "I once plugged my ears with digital wax and deleted four thousand spam messages in a single night.",
+            "The Sirens were furious. They sent increasingly desperate subject lines. 'FINAL NOTICE!' 'ACT NOW!' 'LAST CHANCE!'",
+            "A quiet morning is a beautiful thing, Captain. Worth any amount of Siren wrath.",
+        ],
+    },
+    # #105: The Ghost Ship of Abandoned Projects (theme: melancholy)
+    "ghost-ship": {
+        "name": "The Ghost Ship of Abandoned Projects",
+        "theme": "melancholy",
+        "chapters": [
+            "There's a ghost ship that sails through The Locker. It's made of abandoned projects and half-finished ideas.",
+            "Sometimes I see it in the corner of my eye—a TODO list from 2019, a README that was never written.",
+            "The crew of that ship are all the 'I'll get to it later' promises. They whisper at night.",
+            "I've boarded it once. Every cabin was full of potential, gathering dust. It was beautiful and sad.",
+            "When you complete a task, Captain, you're not just checking a box. You're keeping the ghost ship at bay.",
+        ],
+    },
+    # #106: The Lighthouse of Forgotten Passwords (theme: humor)
+    "lighthouse-passwords": {
+        "name": "The Lighthouse of Forgotten Passwords",
+        "theme": "humor",
+        "chapters": [
+            "Far in the fog sits the Lighthouse of Forgotten Passwords. Its keeper is an ancient navigator named 'P@ssw0rd123'.",
+            "He guards a vault of every credential ever lost to the abyss of 'I'll remember it later.'",
+            "Once, I visited him seeking a password from 2012. He laughed for three minutes straight.",
+            "'It was stored in a sticky note,' he finally said, 'which was stored in another sticky note.'",
+            "Now I use a password manager. The Lighthouse keeper was not pleased, but my sanity was worth his disappointment.",
+        ],
+    },
+}
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
