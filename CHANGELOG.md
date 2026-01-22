@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- HullCleaner duplicate entity detection and merge (#84, #85)
+  - `DuplicateCandidate` dataclass with confidence levels (HIGH/MEDIUM/LOW)
+  - `MergeResult` dataclass for tracking merge operation statistics
+  - `find_duplicate_entities()` using APOC Levenshtein similarity (threshold > 0.85)
+  - `merge_duplicates()` using `apoc.refactor.mergeNodes` preserving all relationships
+  - HIGH confidence duplicates (similarity >= 0.95 or email match) auto-merged
+  - MEDIUM confidence duplicates flagged for review with preview entries
+  - Supports Person and Organization entity types
+  - Integration with `scrape_barnacles()` for automatic duplicate detection
+  - Configurable via `detect_duplicates`, `duplicate_similarity_threshold`, etc.
+  - 26 new unit tests (59 total for HullCleaner)
 - Cartographer community detection agent (#69, #70, #71, #72, #73)
   - `Cartographer` agent skeleton extending `BaseAgent`
   - `CartographerConfig` for configurable detection settings (projection, thresholds)
