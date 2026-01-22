@@ -437,6 +437,139 @@ async def traverse_dependency_chain(
     )
 
 
+async def traverse_reporting_chain(
+    client: Neo4jClient,
+    person_uuid: str | None = None,
+    person_name: str | None = None,
+    direction: TraversalDirection = TraversalDirection.OUTGOING,
+    max_depth: int = 5,
+    include_expired: bool = False,
+    trace_id: str | None = None,
+) -> TraversalResult:
+    """
+    Traverse REPORTS_TO management chain for a person.
+
+    Args:
+        client: Connected Neo4j client.
+        person_uuid: UUID of the starting person (optional).
+        person_name: Name of the starting person (optional, used if uuid not provided).
+        direction: OUTGOING for managers above, INCOMING for reports below.
+        max_depth: Maximum chain depth to traverse.
+        include_expired: Whether to include expired relationships.
+        trace_id: Optional trace ID for logging.
+
+    Returns:
+        TraversalResult with the reporting hierarchy.
+
+    Issue: #19 - [AGT-P-013] Add structural traversal queries (REPORTS_TO chains)
+    """
+    start_time = time.time()
+
+    if not person_uuid and not person_name:
+        logger.warning(
+            "[SWELL] traverse_reporting_chain requires person_uuid or person_name",
+            extra={"trace_id": trace_id},
+        )
+        return TraversalResult(
+            nodes=[],
+            relationships=[],
+            paths=[],
+            stats=TraversalStats(
+                query_time_ms=0,
+                nodes_visited=0,
+                relationships_traversed=0,
+                paths_found=0,
+                depth_reached=0,
+            ),
+        )
+
+    # Build the match condition
+    if person_uuid:
+        start_match = "MATCH (start:Person {uuid: $person_uuid})"
+        params: dict[str, Any] = {"person_uuid": person_uuid}
+    else:
+        start_match = (
+            "MATCH (start:Person) WHERE toLower(start.name) CONTAINS toLower($person_name)"
+        )
+        params = {"person_name": person_name}
+
+    # Build temporal filter
+    temporal_filter = "" if include_expired else "AND ALL(r IN rels WHERE r.expired_at IS NULL)"
+
+    # Build direction-specific pattern
+    if direction == TraversalDirection.OUTGOING:
+        # Person's managers (upward chain)
+        pattern = f"(start)-[rels:REPORTS_TO*1..{max_depth}]->(manager:Person)"
+        return_fields = """
+            manager.uuid as uuid,
+            manager.name as name,
+            length(rels) as depth,
+            [r IN rels | r.title] as titles
+        """
+        order_by = "depth"
+    else:
+        # Person's direct reports (downward chain)
+        pattern = f"(report:Person)-[rels:REPORTS_TO*1..{max_depth}]->(start)"
+        return_fields = """
+            report.uuid as uuid,
+            report.name as name,
+            length(rels) as depth,
+            [r IN rels | r.title] as titles
+        """
+        order_by = "depth"
+
+    query = f"""
+    {start_match}
+    MATCH path = {pattern}
+    WHERE start <> {'manager' if direction == TraversalDirection.OUTGOING else 'report'}
+    {temporal_filter}
+    RETURN DISTINCT
+        {return_fields}
+    ORDER BY {order_by}
+    """
+
+    results = await client.execute_query(query, params, trace_id=trace_id)
+
+    query_time = (time.time() - start_time) * 1000
+
+    nodes = []
+    max_depth_found = 0
+
+    for record in results:
+        depth = record["depth"]
+        nodes.append(
+            {
+                "uuid": record["uuid"],
+                "name": record["name"],
+                "depth": depth,
+                "titles": record.get("titles", []),
+                "role": "manager" if direction == TraversalDirection.OUTGOING else "report",
+            }
+        )
+        max_depth_found = max(max_depth_found, depth)
+
+    stats = TraversalStats(
+        query_time_ms=query_time,
+        nodes_visited=len(nodes) + 1,  # +1 for start node
+        relationships_traversed=sum(n["depth"] for n in nodes),
+        paths_found=len(nodes),
+        depth_reached=max_depth_found,
+    )
+
+    logger.debug(
+        f"[WHISPER] Reporting chain traversal: found {len(nodes)} "
+        f"{'managers' if direction == TraversalDirection.OUTGOING else 'reports'}",
+        extra={"trace_id": trace_id},
+    )
+
+    return TraversalResult(
+        nodes=nodes,
+        relationships=[{"type": "REPORTS_TO"} for _ in nodes],
+        paths=[],
+        stats=stats,
+    )
+
+
 async def find_connected_entities(
     client: Neo4jClient,
     entity_uuid: str,

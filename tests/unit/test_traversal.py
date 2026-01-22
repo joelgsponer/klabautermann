@@ -23,6 +23,7 @@ from klabautermann.memory.traversal import (
     get_search_index,
     traverse_dependency_chain,
     traverse_from_node,
+    traverse_reporting_chain,
 )
 
 
@@ -479,6 +480,142 @@ class TestTraverseDependencyChain:
 
 
 # =============================================================================
+# traverse_reporting_chain Tests (#19)
+# =============================================================================
+
+
+class TestTraverseReportingChain:
+    """Tests for traverse_reporting_chain function (Issue #19)."""
+
+    @pytest.fixture
+    def mock_client(self):
+        """Create a mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    async def test_find_managers_by_uuid(self, mock_client):
+        """Test finding managers above a person by UUID."""
+        mock_client.execute_query.return_value = [
+            {
+                "uuid": "manager-1",
+                "name": "John Manager",
+                "depth": 1,
+                "titles": ["Senior Engineer"],
+            },
+            {"uuid": "cto-1", "name": "Sarah CTO", "depth": 2, "titles": ["VP Engineering", "CTO"]},
+        ]
+
+        result = await traverse_reporting_chain(
+            client=mock_client,
+            person_uuid="employee-uuid",
+            direction=TraversalDirection.OUTGOING,
+        )
+
+        assert len(result.nodes) == 2
+        assert result.nodes[0]["name"] == "John Manager"
+        assert result.nodes[0]["role"] == "manager"
+        assert result.stats.depth_reached == 2
+
+    @pytest.mark.asyncio
+    async def test_find_managers_by_name(self, mock_client):
+        """Test finding managers above a person by name."""
+        mock_client.execute_query.return_value = [
+            {"uuid": "manager-1", "name": "Alice Manager", "depth": 1, "titles": ["Team Lead"]},
+        ]
+
+        result = await traverse_reporting_chain(
+            client=mock_client,
+            person_name="Bob Employee",
+            direction=TraversalDirection.OUTGOING,
+        )
+
+        assert len(result.nodes) == 1
+        assert result.nodes[0]["name"] == "Alice Manager"
+        # Check query used name matching
+        call_args = mock_client.execute_query.call_args
+        query = call_args[0][0]
+        assert "toLower(start.name)" in query
+
+    @pytest.mark.asyncio
+    async def test_find_reports_incoming(self, mock_client):
+        """Test finding direct reports (people who report to someone)."""
+        mock_client.execute_query.return_value = [
+            {"uuid": "report-1", "name": "Alice Report", "depth": 1, "titles": ["Engineer"]},
+            {"uuid": "report-2", "name": "Bob Report", "depth": 1, "titles": ["Designer"]},
+            {"uuid": "report-3", "name": "Charlie Indirect", "depth": 2, "titles": ["Junior Dev"]},
+        ]
+
+        result = await traverse_reporting_chain(
+            client=mock_client,
+            person_uuid="manager-uuid",
+            direction=TraversalDirection.INCOMING,
+        )
+
+        assert len(result.nodes) == 3
+        assert result.nodes[0]["role"] == "report"
+        assert result.stats.depth_reached == 2
+
+    @pytest.mark.asyncio
+    async def test_no_person_identifier_returns_empty(self, mock_client):
+        """Test that missing both uuid and name returns empty result."""
+        result = await traverse_reporting_chain(
+            client=mock_client,
+            direction=TraversalDirection.OUTGOING,
+        )
+
+        assert result.is_empty
+        assert result.stats.nodes_visited == 0
+        mock_client.execute_query.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_respects_max_depth(self, mock_client):
+        """Test that max_depth is used in the query."""
+        mock_client.execute_query.return_value = []
+
+        await traverse_reporting_chain(
+            client=mock_client,
+            person_uuid="employee-uuid",
+            max_depth=3,
+        )
+
+        call_args = mock_client.execute_query.call_args
+        query = call_args[0][0]
+        assert "*1..3" in query
+
+    @pytest.mark.asyncio
+    async def test_respects_include_expired(self, mock_client):
+        """Test that include_expired=False adds temporal filter."""
+        mock_client.execute_query.return_value = []
+
+        await traverse_reporting_chain(
+            client=mock_client,
+            person_uuid="employee-uuid",
+            include_expired=False,
+        )
+
+        call_args = mock_client.execute_query.call_args
+        query = call_args[0][0]
+        assert "expired_at IS NULL" in query
+
+    @pytest.mark.asyncio
+    async def test_no_temporal_filter_when_expired_included(self, mock_client):
+        """Test that include_expired=True skips temporal filter."""
+        mock_client.execute_query.return_value = []
+
+        await traverse_reporting_chain(
+            client=mock_client,
+            person_uuid="employee-uuid",
+            include_expired=True,
+        )
+
+        call_args = mock_client.execute_query.call_args
+        query = call_args[0][0]
+        assert "expired_at IS NULL" not in query
+
+
+# =============================================================================
 # find_connected_entities Tests
 # =============================================================================
 
@@ -603,6 +740,7 @@ class TestModuleExports:
             get_search_index,
             traverse_dependency_chain,
             traverse_from_node,
+            traverse_reporting_chain,
         )
 
         # Verify imports succeeded
@@ -616,6 +754,7 @@ class TestModuleExports:
         assert traverse_from_node is not None
         assert find_shortest_path is not None
         assert traverse_dependency_chain is not None
+        assert traverse_reporting_chain is not None
         assert find_connected_entities is not None
         assert benchmark_traversal is not None
         assert get_index_hint is not None
