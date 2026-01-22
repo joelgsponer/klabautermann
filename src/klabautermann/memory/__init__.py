@@ -15,6 +15,7 @@ Contains:
 - temporal_spine: Day-based temporal queries
 - relevance_scoring: Context relevance scoring for prioritization
 - summary_cache: Thread summary caching
+- semantic_cache: Semantic query result caching with TTL
 - weight_decay: Relationship weight decay for graph maintenance
 """
 
@@ -72,6 +73,22 @@ from klabautermann.memory.relevance_scoring import (
     score_and_truncate,
     score_context_items,
     truncate_by_relevance,
+)
+from klabautermann.memory.semantic_cache import (
+    DEFAULT_MAX_ENTRIES,
+    DEFAULT_TTL_SECONDS,
+    CacheEntry,
+    CacheStats,
+    SemanticCache,
+    cache_search_results,
+    clear_search_cache,
+    get_cached_search_results,
+    get_search_cache_stats,
+    get_semantic_cache,
+    hash_query,
+    hash_query_with_params,
+    invalidate_search_cache,
+    reset_semantic_cache,
 )
 from klabautermann.memory.summary_cache import (
     CachedSummary,
@@ -143,6 +160,21 @@ __all__ = [
     "AIZoomLevelSelector",
     # Summary Cache
     "CachedSummary",
+    # Semantic Cache
+    "CacheEntry",
+    "CacheStats",
+    "DEFAULT_MAX_ENTRIES",
+    "DEFAULT_TTL_SECONDS",
+    "SemanticCache",
+    "cache_search_results",
+    "clear_search_cache",
+    "get_cached_search_results",
+    "get_search_cache_stats",
+    "get_semantic_cache",
+    "hash_query",
+    "hash_query_with_params",
+    "invalidate_search_cache",
+    "reset_semantic_cache",
     # Context Statistics
     "ContextWindowMetrics",
     # Clients
