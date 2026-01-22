@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="attachments-and-files">
+    <meta name="post-excerpt" content="Adding email attachment handling and filesystem operations. Because that PDF you've been meaning to save shouldn't require three apps and a prayer.">
+    <title>The Attachment Problem | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Attachment Problem</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Email attachments are ubiquitous. PDFs, spreadsheets, images - they arrive daily. And yet, in a system built to understand "save that report Sarah sent," we couldn't actually... save it. That changed today.</p>
+
+                <h2>The Model</h2>
+                <p>First, we needed to represent what an attachment is:</p>
+
+                <pre><code>class EmailAttachment(BaseModel):
+    """Email attachment metadata from Gmail."""
+
+    attachment_id: str  # Gmail's internal attachment ID for downloading
+    filename: str
+    mime_type: str
+    size: int  # Size in bytes
+
+    @property
+    def size_human(self) -> str:
+        """Human-readable file size."""
+        if self.size < 1024:
+            return f"{self.size} B"
+        elif self.size < 1024 * 1024:
+            return f"{self.size / 1024:.1f} KB"
+        else:
+            return f"{self.size / (1024 * 1024):.1f} MB"</code></pre>
+
+                <p>The <code>attachment_id</code> is Gmail's reference for the attachment data - you can't get the bytes without it. The <code>size_human</code> property is a convenience - "5.2 MB" reads better than "5452595 bytes."</p>
+
+                <h2>Parsing Multipart</h2>
+                <p>Email isn't simple text. Modern emails are MIME multipart messages: a text body, maybe an HTML version, and zero or more attachments. The structure can be deeply nested:</p>
+
+                <pre><code>multipart/mixed
+├── multipart/alternative
+│   ├── text/plain (body)
+│   └── text/html (formatted body)
+├── application/pdf (attachment)
+└── image/png (attachment)</code></pre>
+
+                <p>We needed a recursive parser. The old code just grabbed the first text/plain part. The new code walks the entire tree:</p>
+
+                <pre><code>def _extract_parts(
+    self, parts: list[dict[str, Any]]
+) -> tuple[str | None, list[EmailAttachment]]:
+    """
+    Recursively extract body text and attachments from email parts.
+    """
+    body = None
+    attachments: list[EmailAttachment] = []
+
+    for part in parts:
+        mime_type = part.get("mimeType", "")
+        filename = part.get("filename", "")
+        part_body = part.get("body", {})
+
+        # Check for nested multipart
+        if "parts" in part:
+            nested_body, nested_attachments = self._extract_parts(part["parts"])
+            if nested_body and not body:
+                body = nested_body
+            attachments.extend(nested_attachments)
+
+        # Check for text body
+        elif mime_type == "text/plain" and part_body.get("data") and not filename:
+            if not body:  # Only take first text/plain
+                body = base64.urlsafe_b64decode(part_body["data"]).decode("utf-8")
+
+        # Check for attachments (has filename and attachmentId)
+        elif filename and part_body.get("attachmentId"):
+            attachment = EmailAttachment(
+                attachment_id=part_body["attachmentId"],
+                filename=filename,
+                mime_type=mime_type,
+                size=part_body.get("size", 0),
+            )
+            attachments.append(attachment)
+
+    return body, attachments</code></pre>
+
+                <p>The key insight: attachments have both a <code>filename</code> and an <code>attachmentId</code>. Inline images might have an ID but no filename. Empty text parts might have neither. The combination is what identifies a real attachment.</p>
+
+                <h2>Downloading Bytes</h2>
+                <p>Gmail doesn't include attachment data in the message response - too expensive. You request it separately:</p>
+
+                <pre><code>async def download_attachment(
+    self,
+    message_id: str,
+    attachment_id: str,
+    context: Any = None,
+) -> bytes:
+    """Download an email attachment's raw bytes."""
+    await self.start()
+
+    def do_download() -> bytes:
+        attachment = (
+            self._gmail_service.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=message_id, id=attachment_id)
+            .execute()
+        )
+        data = attachment.get("data", "")
+        return base64.urlsafe_b64decode(data)
+
+    return await self._rate_limited_call("gmail", do_download)</code></pre>
+
+                <p>The attachment data comes base64-encoded, same as inline body content. Decode and you have raw bytes.</p>
+
+                <h2>Saving to Disk</h2>
+                <p>Downloading is only half the story. Users want to save files. This brought a wrinkle: duplicate filenames.</p>
+
+                <pre><code>async def save_attachment(
+    self,
+    message_id: str,
+    attachment: EmailAttachment,
+    save_path: str,
+    context: Any = None,
+) -> str:
+    """Download and save an attachment to the local filesystem."""
+    from pathlib import Path as FilePath
+
+    data = await self.download_attachment(message_id, attachment.attachment_id)
+
+    save_dir = FilePath(save_path)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = save_dir / attachment.filename
+
+    # Handle duplicate filenames
+    if file_path.exists():
+        base = FilePath(attachment.filename).stem
+        ext = FilePath(attachment.filename).suffix
+        counter = 1
+        while file_path.exists():
+            file_path = save_dir / f"{base}_{counter}{ext}"
+            counter += 1
+
+    file_path.write_bytes(data)
+    return str(file_path)</code></pre>
+
+                <p>If <code>report.pdf</code> exists, save as <code>report_1.pdf</code>. If that exists, <code>report_2.pdf</code>. Simple, predictable.</p>
+
+                <h2>The Filesystem Bridge</h2>
+                <p>Saving attachments is one thing. But what if the agent needs broader file access? Reading configuration, writing logs, moving files around?</p>
+
+                <p>Enter the <code>FilesystemBridge</code>. It wraps the MCP filesystem server - the same protocol that powers Claude's file access - for sandboxed operations:</p>
+
+                <pre><code>@dataclass
+class FilesystemConfig:
+    """Configuration for filesystem MCP server."""
+
+    allowed_paths: list[str] = field(default_factory=list)
+    timeout: float = 30.0
+
+    def __post_init__(self) -> None:
+        """Validate and resolve allowed paths."""
+        if not self.allowed_paths:
+            self.allowed_paths = [str(Path.cwd())]
+        # Resolve all paths to absolute
+        self.allowed_paths = [str(Path(p).resolve()) for p in self.allowed_paths]</code></pre>
+
+                <p>The <code>allowed_paths</code> list is the security boundary. Try to read <code>/etc/passwd</code> when only <code>/app/data</code> is allowed? Rejected. The MCP server handles this at the protocol level, and we double-check locally for binary operations.</p>
+
+                <h2>Wiring It Up</h2>
+                <p>The bridge spawns the MCP server as a subprocess:</p>
+
+                <pre><code>async def start(self) -> None:
+    """Start the filesystem MCP server."""
+    if self._started:
+        return
+
+    command = [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        *self.config.allowed_paths,
+    ]
+
+    server_config = MCPServerConfig(
+        name=self.SERVER_NAME,
+        command=command,
+        timeout=self.config.timeout,
+    )
+
+    await self._client.start_server(server_config)
+    self._started = True</code></pre>
+
+                <p>The allowed paths become command-line arguments to the server. Everything else flows through JSON-RPC over stdio.</p>
+
+                <h2>Operations</h2>
+                <p>The bridge exposes the standard file operations:</p>
+
+                <ul>
+                    <li><code>read_file()</code> / <code>read_file_bytes()</code> - Read text or binary files</li>
+                    <li><code>write_file()</code> / <code>write_file_bytes()</code> - Write with auto-directory creation</li>
+                    <li><code>list_directory()</code> - Get directory contents</li>
+                    <li><code>create_directory()</code> - Create directories recursively</li>
+                    <li><code>move_file()</code> - Rename or move files</li>
+                    <li><code>get_file_info()</code> - Get size, modified time, etc.</li>
+                </ul>
+
+                <p>Each operation validates paths against the allowed list before executing. Defense in depth.</p>
+
+                <h2>The Tests</h2>
+                <p>28 new tests across the two features:</p>
+
+                <ul>
+                    <li>10 for email attachments: parsing single attachments, multiple attachments, nested multipart, downloading, saving, duplicate filenames, size formatting</li>
+                    <li>18 for filesystem: config defaults, lifecycle management, read operations, write operations, directory operations, error handling</li>
+                </ul>
+
+                <p>The attachment tests use mock Gmail API responses that mirror real-world email structures. The filesystem tests mock the MCP client to test bridge logic without spawning subprocesses.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"Download that PDF Sarah sent" &rarr; "I found an email with an attachment, but I can't actually access it."</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Download that PDF Sarah sent" &rarr; Downloads report.pdf (2.4 MB), saves to ~/Downloads/report.pdf</blockquote>
+
+                <p>Before:</p>
+                <blockquote>"Save the spreadsheet to my downloads folder" &rarr; "I don't have file system access."</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Save the spreadsheet to my downloads folder" &rarr; Saved to /home/user/Downloads/budget.xlsx</blockquote>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>5 files modified/created</li>
+                    <li>1,264 lines added</li>
+                    <li>2 new models: <code>EmailAttachment</code>, <code>FilesystemConfig</code></li>
+                    <li>1 new class: <code>FilesystemBridge</code></li>
+                    <li>28 new tests</li>
+                    <li>All 1547 tests pass</li>
+                </ul>
+
+                <p>Issues #208 and #213, closed. Klabautermann can now handle the files that matter.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
