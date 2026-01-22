@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,memory">
+    <meta name="post-slug" content="traversal-optimization">
+    <meta name="post-excerpt" content="From A to B through the knowledge graph. Shortest paths, dependency chains, connected neighborhoods. Now with index hints.">
+    <title>Chart the Course | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Chart the Course</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>How many hops from John to Acme? Who blocks this task? What's connected within two degrees?</p>
+                <p>Questions that need answers. Fast.</p>
+
+                <h2>Traversal Configuration</h2>
+                <p>Control how you navigate the graph:</p>
+
+                <pre><code>from klabautermann.memory import (
+    TraversalConfig,
+    TraversalDirection,
+)
+
+config = TraversalConfig(
+    max_depth=3,              # How deep to go
+    direction=TraversalDirection.BOTH,  # outgoing, incoming, or both
+    relationship_types=None,  # Filter by relationship (or None for all)
+    include_expired=False,    # Skip expired relationships
+    limit=100,                # Cap results
+)</code></pre>
+
+                <h2>Traverse from a Node</h2>
+                <p>Start at one node, explore outward:</p>
+
+                <pre><code>from klabautermann.memory import traverse_from_node
+from klabautermann.core.ontology import NodeLabel
+
+result = await traverse_from_node(
+    client=neo4j_client,
+    start_uuid="john-uuid",
+    start_label=NodeLabel.PERSON,
+    config=config,
+)
+
+print(f"Found {len(result.nodes)} connected nodes")
+print(f"Query took {result.stats.query_time_ms:.1f}ms")</code></pre>
+
+                <h2>Find Shortest Path</h2>
+                <p>Two nodes. Find the connection:</p>
+
+                <pre><code>from klabautermann.memory import find_shortest_path
+
+result = await find_shortest_path(
+    client=neo4j_client,
+    from_uuid="john-uuid",
+    to_uuid="acme-uuid",
+    max_depth=6,
+)
+
+if not result.is_empty:
+    print(f"Path length: {result.stats.depth_reached}")
+    for node in result.nodes:
+        print(f"  -> {node['name']}")</code></pre>
+
+                <h2>Task Dependency Chains</h2>
+                <p>What blocks what?</p>
+
+                <pre><code>from klabautermann.memory import traverse_dependency_chain
+
+# Find everything blocking this task
+blockers = await traverse_dependency_chain(
+    client=neo4j_client,
+    task_uuid="task-uuid",
+    direction=TraversalDirection.INCOMING,
+)
+
+for task in blockers.nodes:
+    print(f"Blocked by: {task['name']} ({task['status']})")</code></pre>
+
+                <h2>Connected Neighborhoods</h2>
+                <p>What's nearby?</p>
+
+                <pre><code>from klabautermann.memory import find_connected_entities
+
+# Find everything within 2 hops
+neighbors = await find_connected_entities(
+    client=neo4j_client,
+    entity_uuid="person-uuid",
+    hops=2,  # Capped at 3 for performance
+)
+
+for entity in neighbors.nodes:
+    print(f"{entity['type']}: {entity['name']} ({entity['distance']} hops)")</code></pre>
+
+                <h2>Performance Benchmarking</h2>
+                <p>Measure before optimizing:</p>
+
+                <pre><code>from klabautermann.memory import benchmark_traversal
+
+result = await benchmark_traversal(
+    client=neo4j_client,
+    operation_name="person_network",
+    query="MATCH (p:Person)-[r*1..3]-(n) WHERE p.uuid = $uuid RETURN n",
+    params={"uuid": "test-uuid"},
+    iterations=10,
+)
+
+print(f"Average: {result.avg_time_ms:.2f}ms")
+print(f"Min: {result.min_time_ms:.2f}ms")
+print(f"Max: {result.max_time_ms:.2f}ms")</code></pre>
+
+                <h2>Index Hints</h2>
+                <p>Know which indexes exist:</p>
+
+                <pre><code>from klabautermann.memory import (
+    RELATIONSHIP_INDEXES,
+    NODE_SEARCH_INDEXES,
+    get_index_hint,
+    get_search_index,
+)
+
+# Relationship indexes for temporal queries
+print(RELATIONSHIP_INDEXES)
+# {WORKS_AT: "works_at_temporal", LOCATED_IN: "located_in_temporal", ...}
+
+# Node fulltext search indexes
+print(NODE_SEARCH_INDEXES)
+# {PERSON: "person_search", ORGANIZATION: "org_search", ...}</code></pre>
+
+                <h2>Traversal Stats</h2>
+                <p>Every traversal returns statistics:</p>
+
+                <pre><code>stats = result.stats
+
+print(f"Query time: {stats.query_time_ms:.1f}ms")
+print(f"Nodes visited: {stats.nodes_visited}")
+print(f"Relationships traversed: {stats.relationships_traversed}")
+print(f"Paths found: {stats.paths_found}")
+print(f"Max depth reached: {stats.depth_reached}")</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#201: [MEM-013] Relationship traversal optimization</li>
+                </ul>
+
+                <p>Navigate the graph. Follow the connections. Chart the course.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
