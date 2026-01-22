@@ -1040,7 +1040,7 @@ class TestSagaTimeoutEnforcement:
 
     @pytest.mark.asyncio
     async def test_archive_timed_out_sagas(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
-        """Should archive timed-out sagas with closing chapter."""
+        """Should archive timed-out sagas with closing chapter and summary."""
         config = BardConfig(saga_timeout_days=30, max_saga_chapters=5)
         bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
@@ -1058,6 +1058,22 @@ class TestSagaTimeoutEnforcement:
             ],
             # Second call: _save_episode for closing chapter
             [{"uuid": "ep-closing"}],
+            # Third call: _get_saga_chapters for archive_saga (#125, #126)
+            [
+                {
+                    "uuid": "ep-1",
+                    "saga_id": "saga-old",
+                    "saga_name": "The Ancient Tale",
+                    "chapter": 1,
+                    "content": "Chapter one.",
+                    "channel": "cli",
+                    "told_at": old_time - 1000,
+                    "created_at": old_time - 1000,
+                    "captain_uuid": captain_uuid,
+                },
+            ],
+            # Fourth call: _create_archive_note
+            [{"uuid": "note-archive"}],
         ]
 
         archived = await bard.archive_timed_out_sagas(trace_id="test-123")
@@ -1065,6 +1081,8 @@ class TestSagaTimeoutEnforcement:
         assert len(archived) == 1
         assert archived[0]["saga_name"] == "The Ancient Tale"
         assert archived[0]["closing_chapter"] == 5  # max_saga_chapters
+        assert archived[0]["note_uuid"] is not None  # #125, #126: Summary note created
+        assert "summary" in archived[0]
 
 
 # =============================================================================
@@ -1223,7 +1241,7 @@ class TestProcessMessageLifecycleOperations:
     async def test_process_archive_timed_out_operation(
         self, mock_neo4j: MagicMock, captain_uuid: str
     ) -> None:
-        """Should handle archive_timed_out operation."""
+        """Should handle archive_timed_out operation with summary generation."""
         config = BardConfig(saga_timeout_days=30, max_saga_chapters=5)
         bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
@@ -1234,6 +1252,22 @@ class TestProcessMessageLifecycleOperations:
             [{"saga_id": "s1", "saga_name": "Old Saga", "last_chapter": 2, "last_told": old_time}],
             # Save closing chapter
             [{"uuid": "ep-close"}],
+            # _get_saga_chapters for archive_saga (#125, #126)
+            [
+                {
+                    "uuid": "ep-1",
+                    "saga_id": "s1",
+                    "saga_name": "Old Saga",
+                    "chapter": 1,
+                    "content": "Content.",
+                    "channel": "cli",
+                    "told_at": old_time - 1000,
+                    "created_at": old_time - 1000,
+                    "captain_uuid": captain_uuid,
+                },
+            ],
+            # _create_archive_note
+            [{"uuid": "note-archive"}],
         ]
 
         msg = AgentMessage(
@@ -1249,6 +1283,7 @@ class TestProcessMessageLifecycleOperations:
         assert response is not None
         assert response.payload["count"] == 1
         assert response.payload["archived"][0]["saga_name"] == "Old Saga"
+        assert response.payload["archived"][0]["note_uuid"] is not None  # #125, #126
 
     @pytest.mark.asyncio
     async def test_process_get_active_sagas_operation(
@@ -1787,3 +1822,361 @@ class TestSaltResponseChannel:
         # Verify channel was passed to _save_episode
         save_call = mock_neo4j.execute_query.call_args_list[1]
         assert save_call[0][1]["channel"] == "telegram"
+
+
+# =============================================================================
+# Tests for Saga Summary Generation (#125) and SUMMARIZES Relationship (#126)
+# =============================================================================
+
+
+class TestSagaSummaryGeneration:
+    """Tests for saga summary generation (#125)."""
+
+    @pytest.mark.asyncio
+    async def test_generate_saga_summary(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Summary should include chapter count and content excerpts."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        episodes = [
+            LoreEpisode(
+                uuid="ep-1",
+                saga_id="saga-test",
+                saga_name="The Test Saga",
+                chapter=1,
+                content="The adventure begins in the digital seas.",
+                told_at=now_ms - 2000,
+                created_at=now_ms - 2000,
+            ),
+            LoreEpisode(
+                uuid="ep-2",
+                saga_id="saga-test",
+                saga_name="The Test Saga",
+                chapter=2,
+                content="The journey continues through encrypted waters.",
+                told_at=now_ms - 1000,
+                created_at=now_ms - 1000,
+            ),
+            LoreEpisode(
+                uuid="ep-3",
+                saga_id="saga-test",
+                saga_name="The Test Saga",
+                chapter=3,
+                content="The tale concludes with newfound wisdom.",
+                told_at=now_ms,
+                created_at=now_ms,
+            ),
+        ]
+
+        summary = await bard._generate_saga_summary(episodes, trace_id="test-125")
+
+        assert "The Test Saga" in summary
+        assert "3 chapters" in summary
+        assert "adventure begins" in summary
+        assert "concludes" in summary
+
+    @pytest.mark.asyncio
+    async def test_generate_saga_summary_empty_episodes(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Empty episodes should return default message."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        summary = await bard._generate_saga_summary([], trace_id="test-125-empty")
+
+        assert "untold tale" in summary.lower()
+
+
+class TestArchiveSaga:
+    """Tests for archive_saga method (#125, #126)."""
+
+    @pytest.mark.asyncio
+    async def test_archive_saga_creates_note_and_summarizes(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """archive_saga should create Note with SUMMARIZES relationships."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        # Mock _get_saga_chapters to return episodes
+        mock_neo4j.execute_query.side_effect = [
+            # First call: _get_saga_chapters
+            [
+                {
+                    "uuid": "ep-1",
+                    "saga_id": "saga-archive-test",
+                    "saga_name": "The Archive Saga",
+                    "chapter": 1,
+                    "content": "Chapter one content.",
+                    "channel": "cli",
+                    "told_at": now_ms - 2000,
+                    "created_at": now_ms - 2000,
+                    "captain_uuid": captain_uuid,
+                },
+                {
+                    "uuid": "ep-2",
+                    "saga_id": "saga-archive-test",
+                    "saga_name": "The Archive Saga",
+                    "chapter": 2,
+                    "content": "Chapter two content.",
+                    "channel": "telegram",
+                    "told_at": now_ms - 1000,
+                    "created_at": now_ms - 1000,
+                    "captain_uuid": captain_uuid,
+                },
+            ],
+            # Second call: _create_archive_note
+            [{"uuid": "note-archive-123"}],
+        ]
+
+        result = await bard.archive_saga(saga_id="saga-archive-test", trace_id="test-126")
+
+        assert result["saga_id"] == "saga-archive-test"
+        assert result["saga_name"] == "The Archive Saga"
+        assert result["chapter_count"] == 2
+        assert result["note_uuid"] is not None
+        assert "summary" in result
+
+        # Verify Note creation query was called
+        create_note_call = mock_neo4j.execute_query.call_args_list[1]
+        query = create_note_call[0][0]
+        params = create_note_call[0][1]
+
+        assert "CREATE (n:Note" in query
+        assert "SUMMARIZES" in query
+        assert "archived = true" in query
+        assert params["title"] == "Saga: The Archive Saga"
+        assert params["saga_id"] == "saga-archive-test"
+
+    @pytest.mark.asyncio
+    async def test_archive_saga_no_episodes_raises_error(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """archive_saga with no episodes should raise ValueError."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        # Mock _get_saga_chapters to return empty list
+        mock_neo4j.execute_query.return_value = []
+
+        with pytest.raises(ValueError, match="No episodes found"):
+            await bard.archive_saga(saga_id="nonexistent-saga", trace_id="test-126-error")
+
+
+class TestGetArchivedSaga:
+    """Tests for get_archived_saga method (#125, #126)."""
+
+    @pytest.mark.asyncio
+    async def test_get_archived_saga_returns_summary(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """get_archived_saga should return saga with summary."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "note_uuid": "note-123",
+                "title": "Saga: The Archived Tale",
+                "summary": "A summary of the archived saga.",
+                "archived_at": now_ms,
+                "chapters": [
+                    {
+                        "uuid": "ep-1",
+                        "chapter": 1,
+                        "content": "Chapter one.",
+                        "channel": "cli",
+                        "told_at": now_ms - 1000,
+                    },
+                    {
+                        "uuid": "ep-2",
+                        "chapter": 2,
+                        "content": "Chapter two.",
+                        "channel": "telegram",
+                        "told_at": now_ms,
+                    },
+                ],
+            }
+        ]
+
+        result = await bard.get_archived_saga(saga_id="saga-archived", trace_id="test-126-get")
+
+        assert result is not None
+        assert result["saga_id"] == "saga-archived"
+        assert result["note_uuid"] == "note-123"
+        assert result["summary"] == "A summary of the archived saga."
+        assert len(result["chapters"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_get_archived_saga_not_found(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """get_archived_saga should return None if not archived."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        mock_neo4j.execute_query.return_value = []
+
+        result = await bard.get_archived_saga(saga_id="not-archived", trace_id="test-126-none")
+
+        assert result is None
+
+
+class TestProcessMessageArchiveOperations:
+    """Tests for process_message archive operations (#125, #126)."""
+
+    @pytest.mark.asyncio
+    async def test_process_message_archive_saga(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """process_message should handle archive_saga operation."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        mock_neo4j.execute_query.side_effect = [
+            # _get_saga_chapters
+            [
+                {
+                    "uuid": "ep-1",
+                    "saga_id": "saga-pm-test",
+                    "saga_name": "Process Message Saga",
+                    "chapter": 1,
+                    "content": "Content.",
+                    "channel": "cli",
+                    "told_at": now_ms,
+                    "created_at": now_ms,
+                    "captain_uuid": captain_uuid,
+                }
+            ],
+            # _create_archive_note
+            [{"uuid": "note-pm-123"}],
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard",
+            intent="bard_request",
+            payload={"operation": "archive_saga", "saga_id": "saga-pm-test"},
+            trace_id="test-pm-archive",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["archived"] is True
+        assert response.payload["saga_id"] == "saga-pm-test"
+        assert "note_uuid" in response.payload
+
+    @pytest.mark.asyncio
+    async def test_process_message_archive_saga_missing_id(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """process_message archive_saga should error without saga_id."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard",
+            intent="bard_request",
+            payload={"operation": "archive_saga"},
+            trace_id="test-pm-missing",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert "error" in response.payload
+        assert "saga_id is required" in response.payload["error"]
+
+    @pytest.mark.asyncio
+    async def test_process_message_get_archived_saga(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """process_message should handle get_archived_saga operation."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "note_uuid": "note-get-123",
+                "title": "Saga: Get Test",
+                "summary": "Summary here.",
+                "archived_at": now_ms,
+                "chapters": [],
+            }
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard",
+            intent="bard_request",
+            payload={"operation": "get_archived_saga", "saga_id": "saga-get-test"},
+            trace_id="test-pm-get-archived",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["found"] is True
+        assert response.payload["saga"]["note_uuid"] == "note-get-123"
+
+
+class TestArchiveTimedOutSagasWithSummary:
+    """Tests for archive_timed_out_sagas including summary generation (#125, #126)."""
+
+    @pytest.mark.asyncio
+    async def test_archive_timed_out_creates_summary(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """archive_timed_out_sagas should create summary for each archived saga."""
+        config = BardConfig(
+            saga_timeout_days=30,
+            max_saga_chapters=5,
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 31 days ago in ms
+        old_told_at = now_ms - (31 * 24 * 60 * 60 * 1000)
+
+        mock_neo4j.execute_query.side_effect = [
+            # Find timed-out sagas
+            [
+                {
+                    "saga_id": "old-saga-1",
+                    "saga_name": "The Old Tale",
+                    "last_chapter": 3,
+                    "last_told": old_told_at,
+                }
+            ],
+            # _save_episode (closing chapter)
+            [{"uuid": "ep-closing"}],
+            # _get_saga_chapters for archive_saga
+            [
+                {
+                    "uuid": "ep-1",
+                    "saga_id": "old-saga-1",
+                    "saga_name": "The Old Tale",
+                    "chapter": 1,
+                    "content": "Opening.",
+                    "channel": "cli",
+                    "told_at": old_told_at - 1000,
+                    "created_at": old_told_at - 1000,
+                    "captain_uuid": captain_uuid,
+                },
+                {
+                    "uuid": "ep-2",
+                    "saga_id": "old-saga-1",
+                    "saga_name": "The Old Tale",
+                    "chapter": 2,
+                    "content": "Middle.",
+                    "channel": "cli",
+                    "told_at": old_told_at,
+                    "created_at": old_told_at,
+                    "captain_uuid": captain_uuid,
+                },
+            ],
+            # _create_archive_note
+            [{"uuid": "note-timeout-123"}],
+        ]
+
+        archived = await bard.archive_timed_out_sagas(trace_id="test-timeout-summary")
+
+        assert len(archived) == 1
+        assert archived[0]["saga_id"] == "old-saga-1"
+        assert archived[0]["note_uuid"] is not None  # UUID is generated internally
+        assert "summary" in archived[0]
