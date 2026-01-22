@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents,lore">
+    <meta name="post-slug" content="lore-queries">
+    <meta name="post-excerpt" content="The Bard learns to look back. Query your storytelling history across channels.">
+    <title>Querying the Bard's Memory | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                        <span class="category-tag">lore</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Querying the Bard's Memory</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard of the Bilge has been telling tales. Sagas span multiple chapters. Stories weave across CLI and Telegram. But until now, there was no way to look back at what was told.</p>
+                <p>Time to give the Bard a memory you can query.</p>
+
+                <h2>Four Queries, One Story</h2>
+                <p>The LORE_SYSTEM spec outlined four query patterns in Section 6. We implemented all four:</p>
+                <ul>
+                    <li><strong>#112</strong>: Get recent lore - what tales were told lately?</li>
+                    <li><strong>#113</strong>: Get saga chain - every chapter of a saga, in order</li>
+                    <li><strong>#114</strong>: Cross-channel story - where did the saga travel?</li>
+                    <li><strong>#115</strong>: Saga statistics - how many tales per Captain?</li>
+                </ul>
+
+                <h2>Tracking Channels (#114)</h2>
+                <p>Before we could show channel travel, we needed to track it. The <code>LoreEpisode</code> dataclass gained a new field:</p>
+
+                <pre><code>@dataclass
+class LoreEpisode:
+    uuid: str
+    saga_id: str
+    saga_name: str
+    chapter: int
+    content: str
+    told_at: int
+    created_at: int
+    captain_uuid: str | None = None
+    channel: str | None = None  # NEW</code></pre>
+
+                <p>Now <code>salt_response</code> accepts an optional channel parameter:</p>
+
+                <pre><code>async def salt_response(
+    self,
+    clean_response: str,
+    storm_mode: bool = False,
+    channel: str | None = None,  # NEW
+    trace_id: str | None = None,
+) -> SaltResult:</code></pre>
+
+                <p>The channel flows through to <code>_save_episode</code>, where it's persisted to Neo4j.</p>
+
+                <h2>Recent Lore (#112)</h2>
+                <p>Simple but useful: "What stories have I heard lately?"</p>
+
+                <pre><code>async def get_recent_lore(
+    self,
+    limit: int = 5,
+    trace_id: str | None = None,
+) -> list[LoreEpisode]:
+    """Get the most recent story episodes told to this Captain."""
+    query = """
+    MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+    RETURN le.uuid as uuid, le.saga_id as saga_id, le.saga_name as saga_name,
+           le.chapter as chapter, le.content as content, le.channel as channel,
+           le.told_at as told_at, le.created_at as created_at,
+           p.uuid as captain_uuid
+    ORDER BY le.told_at DESC
+    LIMIT $limit
+    """</code></pre>
+
+                <p>Ordered by <code>told_at DESC</code>. Most recent first.</p>
+
+                <h2>Saga Chain (#113)</h2>
+                <p>Get all chapters of a saga in order. We already had <code>_get_saga_chapters</code> internally - this just exposes it publicly:</p>
+
+                <pre><code>async def get_saga_chain(
+    self,
+    saga_id: str,
+    trace_id: str | None = None,
+) -> list[LoreEpisode]:
+    """Get all chapters of a saga in order."""
+    return await self._get_saga_chapters(
+        saga_id,
+        limit=self.bard_config.max_saga_chapters,
+        trace_id=trace_id,
+    )</code></pre>
+
+                <p>Ordered by <code>chapter ASC</code>. Chapter 1 first, then 2, then 3.</p>
+
+                <h2>Cross-Channel Story (#114)</h2>
+                <p>This is the interesting one. Show how a saga traveled across channels:</p>
+
+                <pre><code>async def get_cross_channel_story(
+    self,
+    saga_id: str,
+    trace_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Show how a story traveled across channels."""
+    query = """
+    MATCH (le:LoreEpisode {saga_id: $saga_id})-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+    WITH le ORDER BY le.chapter ASC
+    RETURN le.chapter as chapter, le.content as content,
+           le.channel as channel, le.told_at as told_at,
+           le.saga_name as saga_name
+    """</code></pre>
+
+                <p>The result shows the journey:</p>
+                <pre><code>[
+  {"chapter": 1, "channel": "cli", ...},      # Started on CLI
+  {"chapter": 2, "channel": "telegram", ...}, # Continued on Telegram
+  {"chapter": 3, "channel": "cli", ...}       # Back to CLI
+]</code></pre>
+
+                <p>Stories that span channels - that's the Captain-context pattern in action.</p>
+
+                <h2>Saga Statistics (#115)</h2>
+                <p>Admin-level view: how many tales has each Captain heard?</p>
+
+                <pre><code>async def get_saga_statistics_by_captain(
+    self,
+    trace_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Count sagas and chapters grouped by Captain."""
+    query = """
+    MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person)
+    WITH p.uuid as captain_uuid, p.name as captain_name,
+         le.saga_id as saga_id, count(le) as chapter_count
+    WITH captain_uuid, captain_name,
+         count(DISTINCT saga_id) as total_sagas,
+         sum(chapter_count) as total_chapters
+    RETURN captain_uuid, captain_name, total_sagas, total_chapters
+    ORDER BY total_chapters DESC
+    """</code></pre>
+
+                <p>Unlike the other queries, this one isn't scoped to a single Captain. It aggregates across all Captains - useful for analytics.</p>
+
+                <h2>Process Message Handlers</h2>
+                <p>All four operations are accessible via <code>process_message</code>:</p>
+
+                <pre><code>elif operation == "get_recent_lore":
+    limit = payload.get("limit", 5)
+    episodes = await self.get_recent_lore(limit=limit, trace_id=trace_id)
+    result_payload = {
+        "episodes": [e.to_dict() for e in episodes],
+        "count": len(episodes),
+    }
+elif operation == "get_saga_chain":
+    saga_id_param = payload.get("saga_id", "")
+    episodes = await self.get_saga_chain(saga_id=saga_id_param, trace_id=trace_id)
+    result_payload = {
+        "chapters": [e.to_dict() for e in episodes],
+        "count": len(episodes),
+    }
+elif operation == "get_cross_channel_story":
+    saga_id_param = payload.get("saga_id", "")
+    cross_channel_chapters = await self.get_cross_channel_story(...)
+    result_payload = {
+        "chapters": cross_channel_chapters,
+        "count": len(cross_channel_chapters),
+    }
+elif operation == "get_saga_statistics_by_captain":
+    stats = await self.get_saga_statistics_by_captain(trace_id=trace_id)
+    result_payload = {
+        "statistics": stats,
+        "captain_count": len(stats),
+    }</code></pre>
+
+                <h2>Tests</h2>
+                <p>17 new unit tests cover the query methods:</p>
+                <ul>
+                    <li>get_recent_lore returns episodes ordered correctly</li>
+                    <li>get_recent_lore returns empty list when no lore</li>
+                    <li>get_recent_lore respects limit parameter</li>
+                    <li>get_saga_chain returns chapters in order</li>
+                    <li>get_saga_chain includes channel metadata</li>
+                    <li>get_cross_channel_story shows channel travel</li>
+                    <li>get_cross_channel_story returns empty for nonexistent saga</li>
+                    <li>get_saga_statistics_by_captain returns grouped stats</li>
+                    <li>Process message handlers for all operations</li>
+                    <li>LoreEpisode channel field tests</li>
+                    <li>salt_response channel parameter flow</li>
+                </ul>
+
+                <p>All 2299 tests pass.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#112: [LORE-016] Add get recent lore query</li>
+                    <li>#113: [LORE-017] Add get saga chain query</li>
+                    <li>#114: [LORE-018] Add cross-channel story query</li>
+                    <li>#115: [LORE-019] Add saga statistics query</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Bard can now look back at its own history. Which tales were told. How sagas progressed chapter by chapter. Where stories traveled across channels. How many tales each Captain has heard.</p>
+
+                <p>Memory isn't just for tasks anymore. Stories get remembered too.</p>
+
+                <p><em>Every knot in the rigging tells a story. Every node in The Locker tells yours.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
