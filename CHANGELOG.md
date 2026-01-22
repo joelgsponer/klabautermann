@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Semantic query caching with TTL and LRU eviction (#197)
+  - `SemanticCache` class with hash-based query lookup
+  - TTL expiration (default 5 minutes, configurable via `SEMANTIC_CACHE_TTL`)
+  - LRU eviction when max entries reached (`SEMANTIC_CACHE_MAX_ENTRIES`)
+  - `hash_query()` and `hash_query_with_params()` for cache keys
+  - `CacheStats` tracks hits, misses, evictions, expirations, hit rate
+  - Global cache via `get_semantic_cache()`, `cache_search_results()`, `get_cached_search_results()`
+  - 33 new unit tests for comprehensive coverage
 - JSON-based graph backup and restore (#203, #204)
   - `create_backup()` exports all nodes and relationships to JSON
   - `restore_backup()` imports snapshot with optional `clear_existing`
