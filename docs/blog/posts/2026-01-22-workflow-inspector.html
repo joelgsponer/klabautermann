@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,debug">
+    <meta name="post-slug" content="workflow-inspector">
+    <meta name="post-excerpt" content="See what your agents are thinking. REQUEST, THINKING, OUTPUT phases logged for every agent, every request.">
+    <title>The Black Box Opens | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">debug</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Black Box Opens</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Multi-agent systems are powerful but opaque. When the Researcher returns "I found nothing," was it a bad query? A search timeout? An empty graph? When the Executor fails, was the action invalid or did MCP timeout? Today we added a window into each agent's mind.</p>
+
+                <h2>The Problem</h2>
+                <p>In a multi-agent system, debugging means tracking messages across multiple async processes. Standard logging helps, but what you really need is:</p>
+                <ul>
+                    <li>What did the agent receive? (REQUEST)</li>
+                    <li>What decisions did it make? (THINKING)</li>
+                    <li>What did it produce? (OUTPUT)</li>
+                </ul>
+
+                <p>The existing logger shows events as they happen. The workflow inspector shows the complete lifecycle of each agent's work, organized by trace ID.</p>
+
+                <h2>The Inspector</h2>
+                <p><code>WorkflowInspector</code> captures three phases for every agent interaction:</p>
+
+                <pre><code>class WorkflowPhase(str, Enum):
+    REQUEST = "REQUEST"   # What came in
+    THINKING = "THINKING" # What the agent decided
+    OUTPUT = "OUTPUT"     # What went out</code></pre>
+
+                <h2>Automatic Logging</h2>
+                <p>REQUEST and OUTPUT phases are logged automatically by <code>BaseAgent._handle_message()</code>:</p>
+
+                <pre><code>async def _handle_message(self, msg: AgentMessage) -> None:
+    inspector = get_inspector()
+
+    # Log what came in
+    inspector.log_request(
+        trace_id=msg.trace_id,
+        agent_name=self.name,
+        data={
+            "intent": msg.intent,
+            "source": msg.source_agent,
+            "payload": msg.payload,
+        },
+    )
+
+    response = await self.process_message(msg)
+
+    # Log what went out
+    inspector.log_output(
+        trace_id=msg.trace_id,
+        agent_name=self.name,
+        data={
+            "status": "success",
+            "response_payload": response.payload if response else None,
+        },
+        duration_ms=elapsed_ms,
+    )</code></pre>
+
+                <p>Every agent inherits this behavior. No extra code needed.</p>
+
+                <h2>THINKING Phase</h2>
+                <p>The interesting part is what happens between REQUEST and OUTPUT. Each agent logs its decisions:</p>
+
+                <h3>Researcher</h3>
+                <pre><code># After planning
+log_thinking(
+    trace_id=trace_id,
+    agent_name=self.name,
+    data={
+        "step": "plan_ready",
+        "reasoning": plan.reasoning,
+        "strategies": [s.technique.value for s in plan.strategies],
+        "expected_result_type": plan.expected_result_type,
+    },
+)
+
+# After search execution
+log_thinking(
+    trace_id=trace_id,
+    agent_name=self.name,
+    data={
+        "step": "search_complete",
+        "raw_results_by_technique": {k: len(v) for k, v in results.items()},
+        "aggregated_count": len(aggregated),
+    },
+)</code></pre>
+
+                <h3>Ingestor</h3>
+                <pre><code># After text cleaning
+log_thinking(
+    trace_id=msg.trace_id,
+    agent_name=self.name,
+    data={
+        "step": "text_cleaning",
+        "original_length": len(text),
+        "cleaned_length": len(cleaned),
+        "removed_chars": len(text) - len(cleaned),
+    },
+)</code></pre>
+
+                <h3>Executor</h3>
+                <pre><code># After parsing action
+log_thinking(
+    trace_id=msg.trace_id,
+    agent_name=self.name,
+    data={
+        "step": "parsed",
+        "action_type": request.type.value,
+        "target": request.target,
+    },
+)
+
+# After validation
+log_thinking(
+    trace_id=msg.trace_id,
+    agent_name=self.name,
+    data={
+        "step": "validation",
+        "passed": validation.success,
+        "message": validation.message,
+    },
+)</code></pre>
+
+                <h2>Console Output</h2>
+                <p>When enabled, workflow entries appear in the logs with clear markers:</p>
+
+                <pre><code>&gt;&gt;&gt; [REQUEST] researcher | trace=abc12345 | 15:42:03.123
+    intent: search
+    source: orchestrator
+    payload:
+      query: find John's email
+
+... [THINKING] researcher | trace=abc12345 | 15:42:03.456
+    step: plan_ready
+    reasoning: Single entity lookup - using entity search
+    strategies: ["entity_fulltext"]
+
+... [THINKING] researcher | trace=abc12345 | 15:42:04.012
+    step: search_complete
+    raw_results_by_technique: {"entity_fulltext:0": 1}
+    aggregated_count: 1
+
+&lt;&lt;&lt; [OUTPUT] researcher | trace=abc12345 | 15:42:04.567 | 1444.2ms
+    status: success
+    response_intent: search_response</code></pre>
+
+                <h2>File Output</h2>
+                <p>For analysis, entries write to <code>logs/workflow_inspection.jsonl</code>:</p>
+
+                <pre><code>{"trace_id":"abc12345","agent":"researcher","phase":"REQUEST",...}
+{"trace_id":"abc12345","agent":"researcher","phase":"THINKING",...}
+{"trace_id":"abc12345","agent":"researcher","phase":"OUTPUT",...}</code></pre>
+
+                <p>JSONL format makes it easy to grep, filter, and analyze with standard tools.</p>
+
+                <h2>Configuration</h2>
+                <pre><code># Enable inspection (default: enabled)
+export WORKFLOW_INSPECT=true
+
+# Filter to specific agents
+export WORKFLOW_FILTER_AGENTS=researcher,executor
+
+# Disable console output (keep file output)
+export WORKFLOW_CONSOLE=false
+
+# Custom log file path
+export WORKFLOW_LOG_FILE=/var/log/klabautermann/workflows.jsonl</code></pre>
+
+                <h2>In-Memory Buffer</h2>
+                <p>For testing and programmatic access:</p>
+
+                <pre><code>inspector = get_inspector()
+
+# Get all entries for a trace
+entries = inspector.get_entries(trace_id="abc12345")
+
+# Get summary
+summary = inspector.get_workflow_summary("abc12345")
+# {"trace_id": "abc12345", "agents": {"researcher": {"phases": ["REQUEST", "THINKING", "OUTPUT"], "total_duration_ms": 1444.2}}}
+
+# Filter by phase
+thinking_entries = inspector.get_entries(phase=WorkflowPhase.THINKING)</code></pre>
+
+                <h2>The Tests</h2>
+                <p>26 tests cover the inspection system:</p>
+
+                <ul>
+                    <li><strong>TestWorkflowPhase</strong>: Enum values and string serialization</li>
+                    <li><strong>TestWorkflowEntry</strong>: Dictionary conversion, console formatting, truncation</li>
+                    <li><strong>TestWorkflowInspector</strong>: Singleton pattern, logging phases, filtering, file output</li>
+                    <li><strong>TestConvenienceFunctions</strong>: Module-level helper functions</li>
+                    <li><strong>TestEnvironmentConfiguration</strong>: Environment variable handling</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>1 new module: <code>src/klabautermann/core/workflow_inspector.py</code></li>
+                    <li>383 lines of inspection code</li>
+                    <li>3 new types: <code>WorkflowInspector</code>, <code>WorkflowEntry</code>, <code>WorkflowPhase</code></li>
+                    <li>6 convenience functions exported</li>
+                    <li>26 new unit tests</li>
+                    <li>All 1651 tests pass</li>
+                </ul>
+
+                <p>Issue #357, closed. The black box now has windows.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
