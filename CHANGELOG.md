@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `BroadcastResult` with delivery tracking and error details
   - `send_to_channel()` for targeted messaging
   - 15 new unit tests for auto-restart and broadcast
+- Channel integration test suite (#161)
+  - CLI integration with orchestrator (5 tests)
+  - Telegram integration with orchestrator (4 tests)
+  - Thread isolation ensuring no context bleed between channels (4 tests)
+  - Multi-channel concurrent operation (4 tests)
+  - Message routing and response formatting (4 tests)
+  - Channel status and health reporting (2 tests)
+  - 23 new integration tests total
 - Fuzzy entity deduplication with user review workflow (#35)
   - Wire `deduplication.py` module to Archivist (replaces simple `entity_merge.py`)
   - Use `rapidfuzz` for fuzzy name similarity scoring
