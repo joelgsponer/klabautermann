@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Scheduled community detection for Cartographer (#76)
+  - Cartographer registers with APScheduler for weekly community detection
+  - Default schedule: Sunday midnight (cron: `0 0 * * 0`)
+  - Configurable via `{"cartographer": {"enabled": true, "cron": "..."}}`
+  - Graceful error handling - algorithm failures logged but don't crash scheduler
+  - Trace ID propagation for debugging
+  - 8 new tests for Cartographer scheduled job
 - Community summary generation for Knowledge Islands (#75)
   - `generate_summaries()` method to find and update communities needing summaries
   - `_generate_summary()` helper for rule-based summary generation
