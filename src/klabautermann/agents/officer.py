@@ -59,6 +59,11 @@ class OfficerConfig:
     deadline_warning_hours: int = 24  # Warn when task due within N hours
     meeting_reminder_minutes: int = 15  # Remind N minutes before meeting
 
+    # Morning briefing
+    briefing_hour: int = 7  # Hour (0-23) to generate morning briefing
+    briefing_minute: int = 0  # Minute (0-59)
+    briefing_look_ahead_days: int = 1  # Days to look ahead for events/tasks
+
     # Deep Work detection
     deep_work_keywords: list[str] = field(
         default_factory=lambda: ["Deep Work", "Focus", "Do Not Disturb"]
@@ -119,6 +124,79 @@ class AlertCheckResult:
             "deep_work_event": self.deep_work_event,
             "duration_ms": round(self.duration_ms, 2),
             "alerts": [a.to_dict() for a in self.alerts],
+        }
+
+
+@dataclass
+class CalendarEventSummary:
+    """Summary of a calendar event for morning briefing."""
+
+    uuid: str
+    title: str
+    start_time: int  # Unix timestamp (ms)
+    end_time: int  # Unix timestamp (ms)
+    location: str | None = None
+    description: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "uuid": self.uuid,
+            "title": self.title,
+            "start_time": self.start_time,
+            "end_time": self.end_time,
+            "location": self.location,
+            "description": self.description,
+        }
+
+
+@dataclass
+class TaskSummary:
+    """Summary of a task for morning briefing."""
+
+    uuid: str
+    action: str
+    priority: str
+    status: str
+    due_date: int | None = None  # Unix timestamp (ms)
+    project_name: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "uuid": self.uuid,
+            "action": self.action,
+            "priority": self.priority,
+            "status": self.status,
+            "due_date": self.due_date,
+            "project_name": self.project_name,
+        }
+
+
+@dataclass
+class MorningBriefing:
+    """Morning briefing summary with schedule, tasks, and alerts."""
+
+    generated_at: datetime
+    greeting: str
+    events_today: list[CalendarEventSummary]
+    high_priority_tasks: list[TaskSummary]
+    overdue_tasks: list[TaskSummary]
+    overnight_alerts: list[Alert]
+    summary_text: str
+    duration_ms: float
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "generated_at": self.generated_at.isoformat(),
+            "greeting": self.greeting,
+            "events_today": [e.to_dict() for e in self.events_today],
+            "high_priority_tasks": [t.to_dict() for t in self.high_priority_tasks],
+            "overdue_tasks": [t.to_dict() for t in self.overdue_tasks],
+            "overnight_alerts": [a.to_dict() for a in self.overnight_alerts],
+            "summary_text": self.summary_text,
+            "duration_ms": round(self.duration_ms, 2),
         }
 
 
@@ -208,6 +286,9 @@ class OfficerOfTheWatch(BaseAgent):
                 "is_deep_work": is_deep_work,
                 "deep_work_event": self._current_deep_work_event,
             }
+        elif operation == "morning_briefing":
+            briefing = await self.generate_morning_briefing(trace_id=trace_id)
+            result_payload = briefing.to_dict()
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -294,6 +375,331 @@ class OfficerOfTheWatch(BaseAgent):
         )
 
         return result
+
+    # =========================================================================
+    # Morning Briefing (#4)
+    # =========================================================================
+
+    async def generate_morning_briefing(
+        self,
+        trace_id: str | None = None,
+    ) -> MorningBriefing:
+        """
+        Generate a proactive morning briefing with schedule, tasks, and alerts.
+
+        The morning briefing includes:
+        - Today's calendar events
+        - High-priority tasks (urgent/high)
+        - Overdue tasks
+        - Any overnight alerts
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            MorningBriefing with all relevant information.
+        """
+        start_time = time.time()
+
+        logger.info(
+            "[CHART] Generating morning briefing",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Get today's events
+        events_today = await self._get_todays_events(trace_id=trace_id)
+
+        # Get high-priority tasks
+        high_priority_tasks = await self._get_high_priority_tasks(trace_id=trace_id)
+
+        # Get overdue tasks
+        overdue_tasks = await self._get_overdue_tasks_for_briefing(trace_id=trace_id)
+
+        # Get overnight alerts (any alerts generated in last 12 hours)
+        overnight_alerts = await self._get_overnight_alerts(trace_id=trace_id)
+
+        # Generate greeting based on time and workload
+        greeting = self._generate_greeting(
+            event_count=len(events_today),
+            task_count=len(high_priority_tasks),
+            overdue_count=len(overdue_tasks),
+        )
+
+        # Generate summary text
+        summary_text = self._generate_summary_text(
+            events=events_today,
+            high_priority=high_priority_tasks,
+            overdue=overdue_tasks,
+            alerts=overnight_alerts,
+        )
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        briefing = MorningBriefing(
+            generated_at=datetime.now(),
+            greeting=greeting,
+            events_today=events_today,
+            high_priority_tasks=high_priority_tasks,
+            overdue_tasks=overdue_tasks,
+            overnight_alerts=overnight_alerts,
+            summary_text=summary_text,
+            duration_ms=duration_ms,
+        )
+
+        logger.info(
+            f"[BEACON] Morning briefing generated: "
+            f"{len(events_today)} events, {len(high_priority_tasks)} high-priority tasks, "
+            f"{len(overdue_tasks)} overdue",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return briefing
+
+    async def _get_todays_events(
+        self,
+        trace_id: str | None = None,
+    ) -> list[CalendarEventSummary]:
+        """Get all calendar events for today."""
+        # Calculate today's time bounds (midnight to midnight)
+        now = datetime.now()
+        today_start = datetime(now.year, now.month, now.day)
+        today_end = today_start.replace(hour=23, minute=59, second=59)
+
+        today_start_ms = int(today_start.timestamp() * 1000)
+        today_end_ms = int(today_end.timestamp() * 1000)
+
+        query = """
+        MATCH (e:Event)
+        WHERE e.start_time >= $start_ms
+          AND e.start_time <= $end_ms
+          AND e.expired_at IS NULL
+        RETURN e.uuid as uuid, e.title as title, e.start_time as start_time,
+               e.end_time as end_time, e.location_context as location,
+               e.description as description
+        ORDER BY e.start_time ASC
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {
+                "start_ms": today_start_ms,
+                "end_ms": today_end_ms,
+                "limit": self.officer_config.default_query_limit,
+            },
+            trace_id=trace_id,
+        )
+
+        events = []
+        for row in results:
+            event = CalendarEventSummary(
+                uuid=row.get("uuid", ""),
+                title=row.get("title", "Unknown Event"),
+                start_time=row.get("start_time", 0),
+                end_time=row.get("end_time", 0),
+                location=row.get("location"),
+                description=row.get("description"),
+            )
+            events.append(event)
+
+        return events
+
+    async def _get_high_priority_tasks(
+        self,
+        trace_id: str | None = None,
+    ) -> list[TaskSummary]:
+        """Get high-priority tasks (urgent or high priority)."""
+        query = """
+        MATCH (t:Task)
+        WHERE t.status IN ['todo', 'in_progress']
+          AND t.priority IN ['urgent', 'high']
+        OPTIONAL MATCH (t)-[:PART_OF]->(p:Project)
+        RETURN t.uuid as uuid, t.action as action, t.priority as priority,
+               t.status as status, t.due_date as due_date, p.name as project_name
+        ORDER BY
+            CASE t.priority WHEN 'urgent' THEN 0 ELSE 1 END,
+            t.due_date ASC NULLS LAST
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"limit": self.officer_config.default_query_limit},
+            trace_id=trace_id,
+        )
+
+        tasks = []
+        for row in results:
+            task = TaskSummary(
+                uuid=row.get("uuid", ""),
+                action=row.get("action", "Unknown Task"),
+                priority=row.get("priority", "medium"),
+                status=row.get("status", "todo"),
+                due_date=row.get("due_date"),
+                project_name=row.get("project_name"),
+            )
+            tasks.append(task)
+
+        return tasks
+
+    async def _get_overdue_tasks_for_briefing(
+        self,
+        trace_id: str | None = None,
+    ) -> list[TaskSummary]:
+        """Get overdue tasks for the briefing."""
+        query = """
+        MATCH (t:Task)
+        WHERE t.status IN ['todo', 'in_progress']
+          AND t.due_date IS NOT NULL
+          AND t.due_date < timestamp()
+        OPTIONAL MATCH (t)-[:PART_OF]->(p:Project)
+        RETURN t.uuid as uuid, t.action as action, t.priority as priority,
+               t.status as status, t.due_date as due_date, p.name as project_name
+        ORDER BY t.due_date ASC
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"limit": self.officer_config.default_query_limit},
+            trace_id=trace_id,
+        )
+
+        tasks = []
+        for row in results:
+            task = TaskSummary(
+                uuid=row.get("uuid", ""),
+                action=row.get("action", "Unknown Task"),
+                priority=row.get("priority", "medium"),
+                status=row.get("status", "todo"),
+                due_date=row.get("due_date"),
+                project_name=row.get("project_name"),
+            )
+            tasks.append(task)
+
+        return tasks
+
+    async def _get_overnight_alerts(
+        self,
+        trace_id: str | None = None,
+    ) -> list[Alert]:
+        """
+        Get alerts that would have been generated overnight.
+
+        This re-runs the alert checks to find any conditions
+        that accumulated overnight.
+        """
+        # Get deadline warnings and overdue tasks
+        deadline_alerts = await self.check_upcoming_deadlines(trace_id=trace_id)
+        overdue_alerts = await self.check_overdue_tasks(trace_id=trace_id)
+
+        # Combine and limit
+        all_alerts = deadline_alerts + overdue_alerts
+        return all_alerts[: self.officer_config.max_alerts_per_check]
+
+    def _generate_greeting(
+        self,
+        event_count: int,
+        task_count: int,
+        overdue_count: int,
+    ) -> str:
+        """Generate a nautical greeting based on the day's outlook."""
+        now = datetime.now()
+        hour = now.hour
+
+        # Time-based greeting
+        if hour < 12:
+            time_greeting = "Good morning, Captain"
+        elif hour < 17:
+            time_greeting = "Good afternoon, Captain"
+        else:
+            time_greeting = "Good evening, Captain"
+
+        # Workload assessment
+        total_items = event_count + task_count
+        if overdue_count > 0:
+            outlook = "There are overdue items requiring attention."
+        elif total_items == 0:
+            outlook = "Clear skies ahead - no events or urgent tasks today."
+        elif total_items <= 3:
+            outlook = "Calm seas - a manageable day ahead."
+        elif total_items <= 6:
+            outlook = "Moderate winds - a full but manageable schedule."
+        else:
+            outlook = "Choppy waters - a busy day ahead. Steady as she goes."
+
+        return f"{time_greeting}. {outlook}"
+
+    def _generate_summary_text(
+        self,
+        events: list[CalendarEventSummary],
+        high_priority: list[TaskSummary],
+        overdue: list[TaskSummary],
+        alerts: list[Alert],
+    ) -> str:
+        """Generate a human-readable summary of the morning briefing."""
+        lines = []
+
+        # Events summary
+        if events:
+            lines.append(f"**Schedule**: {len(events)} event(s) today")
+            for event in events[:5]:  # Limit display
+                start_dt = datetime.fromtimestamp(event.start_time / 1000)
+                time_str = start_dt.strftime("%H:%M")
+                location = f" at {event.location}" if event.location else ""
+                lines.append(f"  - {time_str}: {event.title}{location}")
+            if len(events) > 5:
+                lines.append(f"  - ... and {len(events) - 5} more")
+        else:
+            lines.append("**Schedule**: No events today")
+
+        lines.append("")
+
+        # High-priority tasks
+        if high_priority:
+            lines.append(f"**High Priority Tasks**: {len(high_priority)} task(s)")
+            for task in high_priority[:5]:
+                priority_marker = "[!]" if task.priority == "urgent" else "[H]"
+                project = f" ({task.project_name})" if task.project_name else ""
+                lines.append(f"  - {priority_marker} {task.action}{project}")
+            if len(high_priority) > 5:
+                lines.append(f"  - ... and {len(high_priority) - 5} more")
+        else:
+            lines.append("**High Priority Tasks**: None")
+
+        lines.append("")
+
+        # Overdue tasks
+        if overdue:
+            lines.append(f"**Overdue**: {len(overdue)} task(s) past due")
+            for task in overdue[:3]:
+                due_dt = datetime.fromtimestamp(task.due_date / 1000) if task.due_date else None
+                due_str = f" (due {due_dt.strftime('%Y-%m-%d')})" if due_dt else ""
+                lines.append(f"  - {task.action}{due_str}")
+            if len(overdue) > 3:
+                lines.append(f"  - ... and {len(overdue) - 3} more")
+        else:
+            lines.append("**Overdue**: All clear")
+
+        # Alerts
+        if alerts:
+            lines.append("")
+            lines.append(f"**Alerts**: {len(alerts)} item(s) need attention")
+
+        return "\n".join(lines)
+
+    def is_briefing_time(self) -> bool:
+        """
+        Check if current time matches the configured briefing time.
+
+        Returns:
+            True if it's briefing time, False otherwise.
+        """
+        now = datetime.now()
+        return (
+            now.hour == self.officer_config.briefing_hour
+            and now.minute == self.officer_config.briefing_minute
+        )
 
     # =========================================================================
     # Deep Work Detection
@@ -732,6 +1138,9 @@ __all__ = [
     "AlertCheckResult",
     "AlertPriority",
     "AlertType",
+    "CalendarEventSummary",
+    "MorningBriefing",
     "OfficerConfig",
     "OfficerOfTheWatch",
+    "TaskSummary",
 ]

@@ -20,8 +20,11 @@ from klabautermann.agents.officer import (
     AlertCheckResult,
     AlertPriority,
     AlertType,
+    CalendarEventSummary,
+    MorningBriefing,
     OfficerConfig,
     OfficerOfTheWatch,
+    TaskSummary,
 )
 from klabautermann.core.models import AgentMessage
 
@@ -732,3 +735,344 @@ class TestDataClasses:
         assert data["quiet_mode"] is False
         assert data["duration_ms"] == 123.46
         assert len(data["alerts"]) == 1
+
+    def test_calendar_event_summary_to_dict(self) -> None:
+        """CalendarEventSummary should serialize to dict."""
+        event = CalendarEventSummary(
+            uuid="event-123",
+            title="Team Meeting",
+            start_time=1234567890000,
+            end_time=1234571490000,
+            location="Room A",
+            description="Weekly sync",
+        )
+
+        result = event.to_dict()
+
+        assert result["uuid"] == "event-123"
+        assert result["title"] == "Team Meeting"
+        assert result["start_time"] == 1234567890000
+        assert result["location"] == "Room A"
+
+    def test_task_summary_to_dict(self) -> None:
+        """TaskSummary should serialize to dict."""
+        task = TaskSummary(
+            uuid="task-123",
+            action="Review PR",
+            priority="high",
+            status="in_progress",
+            due_date=1234567890000,
+            project_name="Backend",
+        )
+
+        result = task.to_dict()
+
+        assert result["uuid"] == "task-123"
+        assert result["action"] == "Review PR"
+        assert result["priority"] == "high"
+        assert result["project_name"] == "Backend"
+
+    def test_morning_briefing_to_dict(self) -> None:
+        """MorningBriefing should serialize to dict."""
+        from datetime import datetime
+
+        event = CalendarEventSummary(
+            uuid="event-1",
+            title="Meeting",
+            start_time=1234567890000,
+            end_time=1234571490000,
+        )
+        task = TaskSummary(
+            uuid="task-1",
+            action="Task",
+            priority="high",
+            status="todo",
+        )
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Alert",
+        )
+
+        briefing = MorningBriefing(
+            generated_at=datetime(2026, 1, 22, 7, 0, 0),
+            greeting="Good morning, Captain",
+            events_today=[event],
+            high_priority_tasks=[task],
+            overdue_tasks=[],
+            overnight_alerts=[alert],
+            summary_text="Test summary",
+            duration_ms=50.5,
+        )
+
+        result = briefing.to_dict()
+
+        assert result["greeting"] == "Good morning, Captain"
+        assert len(result["events_today"]) == 1
+        assert len(result["high_priority_tasks"]) == 1
+        assert len(result["overdue_tasks"]) == 0
+        assert len(result["overnight_alerts"]) == 1
+        assert result["summary_text"] == "Test summary"
+
+
+# =============================================================================
+# Morning Briefing Tests (#4)
+# =============================================================================
+
+
+class TestMorningBriefing:
+    """Tests for morning briefing generation."""
+
+    @pytest.mark.asyncio
+    async def test_generate_morning_briefing_empty(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock
+    ) -> None:
+        """Should generate briefing with no events/tasks."""
+        mock_neo4j.execute_query.return_value = []
+
+        briefing = await officer.generate_morning_briefing()
+
+        assert isinstance(briefing, MorningBriefing)
+        assert briefing.events_today == []
+        assert briefing.high_priority_tasks == []
+        assert briefing.overdue_tasks == []
+        assert "Captain" in briefing.greeting
+        assert "Clear skies" in briefing.greeting or "No events" in briefing.summary_text
+
+    @pytest.mark.asyncio
+    async def test_generate_morning_briefing_with_events(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should include today's events in briefing."""
+        call_count = 0
+
+        async def mock_execute(query: str, params: dict, **kwargs: Any) -> list:
+            nonlocal call_count
+            call_count += 1
+
+            # Events query (first call)
+            if "e:Event" in query and "e.start_time >=" in query:
+                return [
+                    {
+                        "uuid": "event-1",
+                        "title": "Morning Standup",
+                        "start_time": now_ms + (2 * 60 * 60 * 1000),  # 2 hours from now
+                        "end_time": now_ms + (3 * 60 * 60 * 1000),
+                        "location": "Zoom",
+                        "description": "Daily sync",
+                    }
+                ]
+
+            return []
+
+        mock_neo4j.execute_query.side_effect = mock_execute
+
+        briefing = await officer.generate_morning_briefing()
+
+        assert len(briefing.events_today) == 1
+        assert briefing.events_today[0].title == "Morning Standup"
+        assert "Schedule" in briefing.summary_text
+        assert "Morning Standup" in briefing.summary_text
+
+    @pytest.mark.asyncio
+    async def test_generate_morning_briefing_with_high_priority_tasks(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should include high priority tasks in briefing."""
+        call_count = 0
+
+        async def mock_execute(query: str, params: dict, **kwargs: Any) -> list:
+            nonlocal call_count
+            call_count += 1
+
+            # High priority tasks query
+            if "t.priority IN ['urgent', 'high']" in query:
+                return [
+                    {
+                        "uuid": "task-1",
+                        "action": "Deploy hotfix",
+                        "priority": "urgent",
+                        "status": "todo",
+                        "due_date": now_ms + (4 * 60 * 60 * 1000),
+                        "project_name": "Backend",
+                    }
+                ]
+
+            return []
+
+        mock_neo4j.execute_query.side_effect = mock_execute
+
+        briefing = await officer.generate_morning_briefing()
+
+        assert len(briefing.high_priority_tasks) == 1
+        assert briefing.high_priority_tasks[0].action == "Deploy hotfix"
+        assert "High Priority" in briefing.summary_text
+        assert "Deploy hotfix" in briefing.summary_text
+
+    @pytest.mark.asyncio
+    async def test_generate_morning_briefing_with_overdue_tasks(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should include overdue tasks in briefing."""
+        call_count = 0
+
+        async def mock_execute(query: str, params: dict, **kwargs: Any) -> list:
+            nonlocal call_count
+            call_count += 1
+
+            # Overdue tasks query (for briefing)
+            if "t.due_date < timestamp()" in query and "t.priority IN" not in query:
+                return [
+                    {
+                        "uuid": "task-2",
+                        "action": "Complete report",
+                        "priority": "medium",
+                        "status": "in_progress",
+                        "due_date": now_ms - (24 * 60 * 60 * 1000),  # 1 day ago
+                        "project_name": None,
+                    }
+                ]
+
+            return []
+
+        mock_neo4j.execute_query.side_effect = mock_execute
+
+        briefing = await officer.generate_morning_briefing()
+
+        assert len(briefing.overdue_tasks) == 1
+        assert briefing.overdue_tasks[0].action == "Complete report"
+        assert "Overdue" in briefing.summary_text
+
+    @pytest.mark.asyncio
+    async def test_generate_morning_briefing_greeting_with_overdue(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should mention overdue items in greeting when present."""
+
+        async def mock_execute(query: str, params: dict, **kwargs: Any) -> list:
+            # Overdue tasks
+            if "t.due_date < timestamp()" in query and "t.priority IN" not in query:
+                return [
+                    {
+                        "uuid": "task-1",
+                        "action": "Overdue task",
+                        "priority": "medium",
+                        "status": "todo",
+                        "due_date": now_ms - (1 * 60 * 60 * 1000),
+                        "project_name": None,
+                    }
+                ]
+            return []
+
+        mock_neo4j.execute_query.side_effect = mock_execute
+
+        briefing = await officer.generate_morning_briefing()
+
+        assert "overdue" in briefing.greeting.lower()
+
+    @pytest.mark.asyncio
+    async def test_process_message_morning_briefing(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock
+    ) -> None:
+        """Should handle morning_briefing operation via process_message."""
+        mock_neo4j.execute_query.return_value = []
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="officer_of_the_watch",
+            intent="briefing",
+            payload={"operation": "morning_briefing"},
+            trace_id="test-trace",
+        )
+
+        response = await officer.process_message(msg)
+
+        assert response is not None
+        assert "greeting" in response.payload
+        assert "events_today" in response.payload
+        assert "high_priority_tasks" in response.payload
+        assert "summary_text" in response.payload
+
+
+class TestBriefingTimeConfig:
+    """Tests for briefing time configuration."""
+
+    def test_default_briefing_time(self, mock_neo4j: MagicMock) -> None:
+        """Default briefing time should be 7:00."""
+        officer = OfficerOfTheWatch(neo4j_client=mock_neo4j)
+
+        assert officer.officer_config.briefing_hour == 7
+        assert officer.officer_config.briefing_minute == 0
+
+    def test_custom_briefing_time(self, mock_neo4j: MagicMock) -> None:
+        """Should accept custom briefing time."""
+        config = OfficerConfig(briefing_hour=8, briefing_minute=30)
+        officer = OfficerOfTheWatch(neo4j_client=mock_neo4j, config=config)
+
+        assert officer.officer_config.briefing_hour == 8
+        assert officer.officer_config.briefing_minute == 30
+
+    def test_is_briefing_time_at_configured_time(self, mock_neo4j: MagicMock) -> None:
+        """is_briefing_time should return True at configured time."""
+        from datetime import datetime
+        from unittest.mock import patch
+
+        config = OfficerConfig(briefing_hour=7, briefing_minute=0)
+        officer = OfficerOfTheWatch(neo4j_client=mock_neo4j, config=config)
+
+        # Mock datetime.now() to return 7:00
+        mock_now = datetime(2026, 1, 22, 7, 0, 0)
+        with patch("klabautermann.agents.officer.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_now
+
+            assert officer.is_briefing_time() is True
+
+    def test_is_briefing_time_not_at_configured_time(self, mock_neo4j: MagicMock) -> None:
+        """is_briefing_time should return False at other times."""
+        from datetime import datetime
+        from unittest.mock import patch
+
+        config = OfficerConfig(briefing_hour=7, briefing_minute=0)
+        officer = OfficerOfTheWatch(neo4j_client=mock_neo4j, config=config)
+
+        # Mock datetime.now() to return 9:30
+        mock_now = datetime(2026, 1, 22, 9, 30, 0)
+        with patch("klabautermann.agents.officer.datetime") as mock_datetime:
+            mock_datetime.now.return_value = mock_now
+
+            assert officer.is_briefing_time() is False
+
+
+class TestGreetingGeneration:
+    """Tests for greeting generation."""
+
+    def test_greeting_clear_skies(self, officer: OfficerOfTheWatch) -> None:
+        """Should generate 'clear skies' greeting with no items."""
+        greeting = officer._generate_greeting(event_count=0, task_count=0, overdue_count=0)
+
+        assert "Captain" in greeting
+        assert "Clear skies" in greeting
+
+    def test_greeting_calm_seas(self, officer: OfficerOfTheWatch) -> None:
+        """Should generate 'calm seas' greeting with few items."""
+        greeting = officer._generate_greeting(event_count=1, task_count=1, overdue_count=0)
+
+        assert "calm" in greeting.lower() or "manageable" in greeting.lower()
+
+    def test_greeting_moderate_winds(self, officer: OfficerOfTheWatch) -> None:
+        """Should generate 'moderate winds' greeting with moderate load."""
+        greeting = officer._generate_greeting(event_count=3, task_count=2, overdue_count=0)
+
+        assert "Moderate" in greeting or "full" in greeting.lower()
+
+    def test_greeting_choppy_waters(self, officer: OfficerOfTheWatch) -> None:
+        """Should generate 'choppy waters' greeting with heavy load."""
+        greeting = officer._generate_greeting(event_count=5, task_count=5, overdue_count=0)
+
+        assert "Choppy" in greeting or "busy" in greeting.lower()
+
+    def test_greeting_overdue_warning(self, officer: OfficerOfTheWatch) -> None:
+        """Should mention overdue items when present."""
+        greeting = officer._generate_greeting(event_count=1, task_count=1, overdue_count=2)
+
+        assert "overdue" in greeting.lower()
