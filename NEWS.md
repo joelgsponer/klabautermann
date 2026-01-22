@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Thread Summarization Skill**: Summarize any conversation or email thread with a simple command ("summarize this thread", "TLDR", "what was discussed?"). Works with both email threads and conversation history.
 - **Email Thread Summaries**: Get AI-powered summaries of long email threads with key points, action items, and sentiment analysis ("summarize this email thread", "what's the gist of that conversation with Sarah?")
 - **Email Draft Management**: Save emails as drafts for later, edit them, and send when ready ("save this as a draft", "update my draft to Sarah", "send my draft")
 - **Custom Gmail Labels**: Create, update, and organize emails with custom labels including nested folders ("create a Projects/Work label", "add the urgent label")

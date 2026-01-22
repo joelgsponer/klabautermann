@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- `summarize-thread` skill for AI-powered thread summarization (#295)
+- Skill supports both email threads and conversation threads
+- Orchestrator integration with research task type and researcher agent
+- Payload schema with thread_id, thread_type, and query parameters
+- 6 new unit tests for skill loading and matching
 - Email thread summarization with `get_thread()` and `summarize_email_thread()` methods (#221)
 - `EmailThread` model with participant tracking, message_count, and date_range helpers
 - `EmailThreadSummary` model with summary, key_points, action_items, sentiment analysis
