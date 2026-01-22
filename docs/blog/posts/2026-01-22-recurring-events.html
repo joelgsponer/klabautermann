@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="recurring-events">
+    <meta name="post-excerpt" content="Adding RFC 5545 recurrence rules to calendar events. Because daily standups and weekly one-on-ones shouldn't require 52 separate commands.">
+    <title>Once Is Not Enough | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Once Is Not Enough</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Issue #211 sat there, quietly judging us. "Schedule daily standup at 9am." A perfectly reasonable request. And yet Klabautermann's response would be to create a single event. Tomorrow? Create another. Next week? Five more commands.</p>
+
+                <p>That's not how calendars work. That's not how humans think. It was time to fix it.</p>
+
+                <h2>The Standard</h2>
+                <p>RFC 5545 defines how calendar applications handle recurrence. It's the iCalendar specification, and at its heart is the RRULE - the recurrence rule. Google Calendar, Apple Calendar, Outlook - they all speak this language:</p>
+
+                <pre><code>RRULE:FREQ=DAILY
+RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR
+RRULE:FREQ=MONTHLY;BYMONTHDAY=15
+RRULE:FREQ=YEARLY;COUNT=10</code></pre>
+
+                <p>The format is dense but logical. Frequency, day constraints, count limits, end dates. Everything you need to express "every Tuesday and Thursday until June" in a single string.</p>
+
+                <h2>The Builder Pattern</h2>
+                <p>Nobody wants to construct RRULE strings by hand. We created <code>RecurrenceBuilder</code> - a helper class that speaks human:</p>
+
+                <pre><code>class RecurrenceBuilder:
+    @staticmethod
+    def daily(count: int | None = None, until: datetime | None = None) -> str:
+        rule = "RRULE:FREQ=DAILY"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule
+
+    @staticmethod
+    def weekly(
+        days: list[str] | None = None,
+        count: int | None = None,
+        until: datetime | None = None
+    ) -> str:
+        rule = "RRULE:FREQ=WEEKLY"
+        if days:
+            rule += f";BYDAY={','.join(days)}"
+        if count:
+            rule += f";COUNT={count}"
+        elif until:
+            rule += f";UNTIL={until.strftime('%Y%m%dT%H%M%SZ')}"
+        return rule</code></pre>
+
+                <p>The pattern continues for <code>monthly()</code>, <code>yearly()</code>, and the convenience method everyone actually wants:</p>
+
+                <pre><code>@staticmethod
+def weekdays(count: int | None = None, until: datetime | None = None) -> str:
+    """Every weekday (Monday through Friday)."""
+    return RecurrenceBuilder.weekly(["MO", "TU", "WE", "TH", "FR"], count, until)</code></pre>
+
+                <p>Now "schedule daily standup at 9am" translates to <code>RecurrenceBuilder.weekdays()</code>. One line.</p>
+
+                <h2>Wiring It Through</h2>
+                <p>The model needed two new fields:</p>
+
+                <pre><code>class CalendarEvent(BaseModel):
+    id: str | None = None
+    title: str
+    start: datetime
+    end: datetime
+    description: str | None = None
+    location: str | None = None
+    attendees: list[str] = Field(default_factory=list)
+    html_link: str | None = None
+    recurrence_rule: str | None = None      # RFC 5545 RRULE string
+    recurring_event_id: str | None = None   # ID of parent recurring event</code></pre>
+
+                <p><code>recurrence_rule</code> stores the RRULE when creating recurring events. <code>recurring_event_id</code> links individual instances back to their parent series - crucial for "cancel just this occurrence" scenarios.</p>
+
+                <p>The <code>create_event()</code> method gained a new parameter:</p>
+
+                <pre><code>async def create_event(
+    self,
+    title: str,
+    start: datetime,
+    end: datetime,
+    description: str | None = None,
+    location: str | None = None,
+    attendees: list[str] | None = None,
+    recurrence_rule: str | None = None,  # New
+    context: Any = None,
+) -> CreateEventResult:</code></pre>
+
+                <p>And the event body construction:</p>
+
+                <pre><code>event_body: dict[str, Any] = {
+    "summary": title,
+    "start": {"dateTime": start.isoformat(), "timeZone": "UTC"},
+    "end": {"dateTime": end.isoformat(), "timeZone": "UTC"},
+}
+
+if recurrence_rule:
+    event_body["recurrence"] = [recurrence_rule]</code></pre>
+
+                <p>Google Calendar's API expects recurrence rules as a list - supporting multiple rules for complex patterns. We keep it simple: one rule per event.</p>
+
+                <h2>Parsing the Response</h2>
+                <p>When events come back from Google, we need to extract their recurrence information:</p>
+
+                <pre><code>def _parse_event(self, event: dict[str, Any]) -> CalendarEvent:
+    # ... existing parsing ...
+
+    recurrence_rule = None
+    if "recurrence" in event and event["recurrence"]:
+        recurrence_rule = event["recurrence"][0]  # Take first rule
+
+    recurring_event_id = event.get("recurringEventId")
+
+    return CalendarEvent(
+        # ... other fields ...
+        recurrence_rule=recurrence_rule,
+        recurring_event_id=recurring_event_id,
+    )</code></pre>
+
+                <p>The <code>update_event()</code> method got the same treatment - you can now modify the recurrence pattern of an existing series.</p>
+
+                <h2>The Test Suite</h2>
+                <p>Fourteen new tests joined the fleet. Eleven for <code>RecurrenceBuilder</code>:</p>
+
+                <pre><code>class TestRecurrenceBuilder:
+    def test_daily_no_limit(self):
+        assert RecurrenceBuilder.daily() == "RRULE:FREQ=DAILY"
+
+    def test_daily_with_count(self):
+        assert RecurrenceBuilder.daily(count=5) == "RRULE:FREQ=DAILY;COUNT=5"
+
+    def test_daily_with_until(self):
+        until = datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        assert RecurrenceBuilder.daily(until=until) == "RRULE:FREQ=DAILY;UNTIL=20261231T235959Z"
+
+    def test_weekly_specific_days(self):
+        assert RecurrenceBuilder.weekly(["MO", "WE", "FR"]) == "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"
+
+    def test_weekdays(self):
+        assert RecurrenceBuilder.weekdays() == "RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"</code></pre>
+
+                <p>And three for the full calendar integration:</p>
+
+                <pre><code>@pytest.mark.asyncio
+async def test_create_recurring_event(self, google_bridge, mock_calendar_service):
+    """Test creating a recurring event with RRULE."""
+    mock_calendar_service.events().insert().execute.return_value = {
+        "id": "event-123",
+        "summary": "Daily Standup",
+        "recurrence": ["RRULE:FREQ=DAILY;COUNT=30"],
+        # ...
+    }
+
+    result = await google_bridge.create_event(
+        title="Daily Standup",
+        start=datetime(2026, 1, 15, 9, 0),
+        end=datetime(2026, 1, 15, 9, 30),
+        recurrence_rule="RRULE:FREQ=DAILY;COUNT=30",
+    )
+
+    assert result.success is True
+    # Verify the recurrence was passed to Google
+    call_args = mock_calendar_service.events().insert.call_args
+    assert "recurrence" in call_args.kwargs["body"]
+    assert call_args.kwargs["body"]["recurrence"] == ["RRULE:FREQ=DAILY;COUNT=30"]</code></pre>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"Schedule daily standup at 9am for the next month" → Creates one event. You're on your own for the other 29.</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Schedule daily standup at 9am for the next month" → Creates a recurring event with <code>RRULE:FREQ=DAILY;COUNT=30</code>. All 30 instances appear on your calendar.</blockquote>
+
+                <p>Before:</p>
+                <blockquote>"Add weekly team meeting every Tuesday at 2pm" → Creates one meeting on one Tuesday.</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Add weekly team meeting every Tuesday at 2pm" → Creates a recurring series with <code>RRULE:FREQ=WEEKLY;BYDAY=TU</code>. Every Tuesday, forever, until you say stop.</blockquote>
+
+                <h2>The RFC Is Your Friend</h2>
+                <p>RFC 5545 is one of those standards that got it right. It's been stable since 2009 because it captured the right abstractions. Daily, weekly, monthly, yearly. Count limits and end dates. Specific days of the week or month.</p>
+
+                <p>We didn't need to invent anything. We just needed to expose what was already there, hiding the complexity behind a builder that speaks human.</p>
+
+                <p><code>RecurrenceBuilder.weekly(["TU", "TH"])</code> is easier to write than <code>RRULE:FREQ=WEEKLY;BYDAY=TU,TH</code>. But the latter is what Google Calendar understands, what Apple Calendar understands, what every RFC 5545-compliant system understands.</p>
+
+                <p>Klabautermann now speaks that language.</p>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>2 files modified: <code>google_workspace.py</code>, <code>test_google_workspace.py</code></li>
+                    <li>1 new class: <code>RecurrenceBuilder</code> with 5 static methods</li>
+                    <li>2 new model fields: <code>recurrence_rule</code>, <code>recurring_event_id</code></li>
+                    <li>14 new tests (11 for builder, 3 for integration)</li>
+                    <li>All 1519 tests pass</li>
+                </ul>
+
+                <p>Issue #211, closed. The calendar feature set is now complete: create, read, update, delete, and recur.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
