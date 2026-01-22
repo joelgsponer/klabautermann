@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Saga summary generation and archival (#125, #126)
+  - `archive_saga(saga_id)` - Generate summary and create Note node when archiving
+  - `_generate_saga_summary(episodes)` - Create summary from chapter content
+  - `_create_archive_note()` - Create Note with SUMMARIZES relationships to episodes
+  - `get_archived_saga(saga_id)` - Retrieve archived sagas with their summaries
+  - Graph schema: Note nodes with `source='lore_archive'`, SUMMARIZES relationships
+  - Episodes marked with `archived=true` when archived
+  - `archive_timed_out_sagas` now generates summaries automatically
+  - 10 new unit tests for summary generation and archival
 - Lore system test coverage (#122, #123, #124)
   - Unit tests for saga continuation: chapter creation and continuation flow (test_lore_system.py)
   - Unit tests for cross-channel persistence: CLI/Telegram channel tracking
