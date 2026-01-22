@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Remove keyword-based intent classification fallback - pure LLM semantic understanding only (#2, #354)
+
 ### Added
 - Parallel test execution with pytest-xdist (#317)
 - JUnit XML test results artifact for CI (#317)
