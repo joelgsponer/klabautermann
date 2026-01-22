@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based intent classification fallback - pure LLM semantic understanding only (#2, #354)
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
+### Fixed
+- Integration test mocks for Archivist, Scribe, Executor, and Context flows (#247, #248, #249, #250)
+  - Fix `create_note_with_links` mock to return expected `note_uuid` and `entity_link_count`
+  - Fix Executor test to use correct method name `_handle_gmail_send`
+  - Fix context query function patches to use correct module path with `AsyncMock`
+
 ### Added
 - Grafana dashboard for metrics visualization (#274)
 - Dashboard panels: Agent Performance, API Performance, LLM Performance, Graph Operations
