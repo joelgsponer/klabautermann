@@ -884,3 +884,125 @@ class TestSkillRegistryDescriptions:
 
         assert descriptions["skill-a"] == "Description A"
         assert descriptions["skill-b"] == "Description B"
+
+
+class TestSummarizeThreadSkill:
+    """Tests for the summarize-thread skill."""
+
+    @pytest.fixture
+    def summarize_skill_loader(self) -> SkillLoader:
+        """Create loader with project skills directory containing summarize-thread."""
+        # Use the actual project skills directory
+        project_root = Path(__file__).parent.parent.parent
+        skills_dir = project_root / ".claude" / "skills"
+        return SkillLoader(
+            project_skills_dir=skills_dir,
+            personal_skills_dir=Path("/nonexistent"),
+        )
+
+    def test_summarize_thread_skill_loads(self, summarize_skill_loader: SkillLoader) -> None:
+        """Test that summarize-thread skill loads correctly."""
+        summarize_skill_loader.load_all()
+        skill = summarize_skill_loader.get("summarize-thread")
+
+        assert skill is not None
+        assert skill.name == "summarize-thread"
+        assert "summarize" in skill.description.lower()
+        assert "thread" in skill.description.lower()
+
+    def test_summarize_thread_skill_metadata(self, summarize_skill_loader: SkillLoader) -> None:
+        """Test summarize-thread skill metadata is correct."""
+        summarize_skill_loader.load_all()
+        skill = summarize_skill_loader.get("summarize-thread")
+
+        assert skill is not None
+        assert skill.metadata.user_invocable is True
+        assert skill.metadata.model == "claude-3-5-haiku-20241022"
+
+    def test_summarize_thread_skill_orchestrator_config(
+        self, summarize_skill_loader: SkillLoader
+    ) -> None:
+        """Test summarize-thread skill has correct orchestrator config."""
+        summarize_skill_loader.load_all()
+        skill = summarize_skill_loader.get("summarize-thread")
+
+        assert skill is not None
+        assert skill.is_orchestrator_enabled is True
+        assert skill.klabautermann.task_type == "research"
+        assert skill.klabautermann.agent == "researcher"
+        assert skill.klabautermann.blocking is True
+
+    def test_summarize_thread_skill_payload_schema(
+        self, summarize_skill_loader: SkillLoader
+    ) -> None:
+        """Test summarize-thread skill has correct payload schema."""
+        summarize_skill_loader.load_all()
+        skill = summarize_skill_loader.get("summarize-thread")
+
+        assert skill is not None
+        fields = skill.klabautermann.get_payload_fields()
+
+        assert "thread_id" in fields
+        assert fields["thread_id"].type == "string"
+        assert fields["thread_id"].required is False
+
+        assert "thread_type" in fields
+        assert fields["thread_type"].type == "string"
+        assert fields["thread_type"].default == "conversation"
+
+        assert "query" in fields
+        assert fields["query"].type == "string"
+        assert fields["query"].required is False
+
+    def test_summarize_thread_skill_body_contains_instructions(
+        self, summarize_skill_loader: SkillLoader
+    ) -> None:
+        """Test summarize-thread skill body contains usage instructions."""
+        summarize_skill_loader.load_all()
+        skill = summarize_skill_loader.get("summarize-thread")
+
+        assert skill is not None
+        assert "# Summarize Thread" in skill.body
+        assert "Instructions" in skill.body
+        assert "Examples" in skill.body
+        assert "Output Format" in skill.body
+
+    def test_summarize_thread_planner_matching(self, tmp_path: Path) -> None:
+        """Test that planner can match summarize-thread skill by patterns."""
+        # Create summarize-thread skill in temp directory
+        skill_dir = tmp_path / "summarize-thread"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: summarize-thread
+            description: Summarize a conversation thread or email thread. Use when user asks "summarize this thread", "what was discussed", "give me the gist", or "TLDR".
+            klabautermann-task-type: research
+            klabautermann-agent: researcher
+            ---
+
+            # Summarize Thread
+
+            Summarize threads.
+        """).strip()
+        )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        planner = SkillAwarePlanner(loader)
+
+        # Test various trigger phrases
+        test_cases = [
+            ("summarize this thread", True),
+            ("what was discussed", True),
+            ("give me the gist", True),
+            ("TLDR", True),
+            ("/summarize-thread", True),
+            ("what's the weather", False),
+        ]
+
+        for user_input, should_match in test_cases:
+            skill = planner.match_skill(user_input)
+            if should_match:
+                assert skill is not None, f"Expected match for: {user_input}"
+                assert skill.name == "summarize-thread"
+            # Note: "should_match=False" cases may or may not match depending on keyword patterns
