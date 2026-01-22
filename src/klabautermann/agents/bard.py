@@ -424,6 +424,13 @@ class BardOfTheBilge(BaseAgent):
                 "statistics": stats,
                 "captain_count": len(stats),
             }
+        elif operation == "get_saga_origins":
+            # #100: Query saga origins via SAGA_STARTED_BY relationship
+            origins = await self.get_saga_origins(trace_id=trace_id)
+            result_payload = {
+                "origins": origins,
+                "count": len(origins),
+            }
         elif operation == "archive_saga":
             # #125, #126: Archive saga with summary
             saga_id_param = payload.get("saga_id", "")
@@ -1018,6 +1025,7 @@ class BardOfTheBilge(BaseAgent):
         Creates the LoreEpisode node with:
             - TOLD_TO relationship to the Captain (Person)
             - EXPANDS_UPON relationship to previous chapter (if exists)
+            - SAGA_STARTED_BY relationship from chapter 1 to Captain (#100)
 
         Args:
             saga_id: Unique identifier for the saga.
@@ -1033,7 +1041,10 @@ class BardOfTheBilge(BaseAgent):
         episode_uuid = str(uuid.uuid4())
         now_ms = int(time.time() * 1000)
 
-        # Create episode with TOLD_TO relationship
+        # Create episode with relationships per LORE_SYSTEM.md Section 2.2:
+        # - TOLD_TO: link episode to Captain (#98)
+        # - EXPANDS_UPON: chain to previous chapter (#99)
+        # - SAGA_STARTED_BY: mark first chapter as saga initiator (#100)
         query = """
         CREATE (le:LoreEpisode {
             uuid: $uuid,
@@ -1048,7 +1059,13 @@ class BardOfTheBilge(BaseAgent):
         WITH le
         MATCH (p:Person {uuid: $captain_uuid})
         CREATE (le)-[:TOLD_TO {created_at: $now_ms}]->(p)
+        WITH le, p
+        // SAGA_STARTED_BY: first chapter marks the saga initiator (#100)
+        FOREACH (_ IN CASE WHEN $chapter = 1 THEN [1] ELSE [] END |
+            CREATE (le)-[:SAGA_STARTED_BY {created_at: $now_ms}]->(p)
+        )
         WITH le
+        // EXPANDS_UPON: chain consecutive chapters (#99)
         OPTIONAL MATCH (prev:LoreEpisode {saga_id: $saga_id, chapter: $prev_chapter})
         FOREACH (_ IN CASE WHEN prev IS NOT NULL THEN [1] ELSE [] END |
             CREATE (le)-[:EXPANDS_UPON {created_at: $now_ms}]->(prev)
@@ -1257,6 +1274,51 @@ class BardOfTheBilge(BaseAgent):
                 "captain_name": row.get("captain_name"),
                 "total_sagas": row["total_sagas"],
                 "total_chapters": row["total_chapters"],
+            }
+            for row in results
+        ]
+
+    async def get_saga_origins(
+        self,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get saga origins - who started each saga (#100).
+
+        Queries the SAGA_STARTED_BY relationship to find which Captain
+        initiated each saga. Useful for saga attribution and analytics.
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 2.2
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of saga origin dicts with saga_id, saga_name, captain info, and started_at.
+        """
+        query = """
+        MATCH (le:LoreEpisode {chapter: 1})-[:SAGA_STARTED_BY {created_at: started_at}]->(p:Person)
+        WHERE le.saga_id IS NOT NULL
+        RETURN le.saga_id as saga_id, le.saga_name as saga_name,
+               p.uuid as captain_uuid, p.name as captain_name,
+               le.told_at as started_at, le.channel as started_channel
+        ORDER BY le.told_at DESC
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {},
+            trace_id=trace_id,
+        )
+
+        return [
+            {
+                "saga_id": row["saga_id"],
+                "saga_name": row["saga_name"],
+                "captain_uuid": row["captain_uuid"],
+                "captain_name": row.get("captain_name"),
+                "started_at": row["started_at"],
+                "started_channel": row.get("started_channel"),
             }
             for row in results
         ]
