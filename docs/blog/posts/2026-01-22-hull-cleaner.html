@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="hull-cleaner">
+    <meta name="post-excerpt" content="Barnacles slow the ship. Weak relationships clutter the graph. Time to scrape them off.">
+    <title>Scraping the Hull | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Scraping the Hull</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Knowledge graphs grow. Relationships multiply. Some connections fade into irrelevance.</p>
+                <p>The Hull Cleaner keeps things tidy.</p>
+
+                <h2>The Problem</h2>
+                <p>Over time, relationship weights decay. A connection mentioned once three months ago might now have a weight of 0.15. It clutters search results. It slows traversals. It needs to go.</p>
+
+                <h2>The Solution</h2>
+                <pre><code>from klabautermann.agents import HullCleaner, HullCleanerConfig
+
+config = HullCleanerConfig(
+    weak_relationship_threshold=0.2,  # Weight below this is "weak"
+    weak_relationship_age_days=90,    # Must be at least this old
+    dry_run_by_default=True,          # Preview before deleting
+)
+
+cleaner = HullCleaner(neo4j_client=neo4j, config=config)</code></pre>
+
+                <h2>Finding Weak Relationships</h2>
+                <p>First, see what's eligible for pruning:</p>
+
+                <pre><code>weak_rels = await cleaner.find_weak_relationships()
+
+for rel in weak_rels:
+    print(f"{rel.source_name} -[{rel.relationship_type}]-> {rel.target_name}")
+    print(f"  Weight: {rel.current_weight:.3f}")
+    print(f"  Days since access: {rel.days_since_access:.0f}")</code></pre>
+
+                <h2>Dry Run Mode</h2>
+                <p>Never delete blindly. Preview first:</p>
+
+                <pre><code># Preview what would be deleted
+result = await cleaner.prune_weak_relationships(dry_run=True)
+
+print(f"Found {result.relationships_found} weak relationships")
+print(f"Would prune {result.relationships_pruned}")
+
+# Review the audit entries
+for entry in result.audit_entries:
+    print(f"  {entry.action}: {entry.reason}")</code></pre>
+
+                <h2>Actual Pruning</h2>
+                <p>When you're ready:</p>
+
+                <pre><code># Actually delete weak relationships
+result = await cleaner.prune_weak_relationships(dry_run=False)
+
+print(f"Pruned {result.relationships_pruned} relationships")
+print(f"Errors: {result.errors}")</code></pre>
+
+                <h2>Full Maintenance</h2>
+                <p>Run all cleanup tasks at once:</p>
+
+                <pre><code>result = await cleaner.scrape_barnacles(dry_run=True)
+
+print(f"Total relationships found: {result.relationships_found}")
+print(f"Total to prune: {result.relationships_pruned}")
+print(f"Duration: {result.duration_ms:.1f}ms")</code></pre>
+
+                <h2>Graph Health Statistics</h2>
+                <p>Monitor your graph's condition:</p>
+
+                <pre><code>stats = await cleaner.get_pruning_statistics()
+
+print(f"Total relationships: {stats['total_relationships']}")
+print(f"Average weight: {stats['avg_weight']:.3f}")
+print(f"Weak count: {stats['weak_count']}")
+print(f"Weak percentage: {stats['weak_percentage']:.1f}%")</code></pre>
+
+                <h2>Audit Trail</h2>
+                <p>Every operation is logged:</p>
+
+                <pre><code># Get current session's audit log
+log = cleaner.get_audit_log()
+
+for entry in log:
+    print(f"{entry['timestamp']} - {entry['action']}")
+    print(f"  Entity: {entry['entity_type']} {entry['entity_id']}")
+    print(f"  Reason: {entry['reason']}")
+
+# Clear when done
+cleaner.clear_audit_log()</code></pre>
+
+                <h2>Configuration</h2>
+                <p>Tune the thresholds:</p>
+
+                <pre><code>config = HullCleanerConfig(
+    # Enable/disable pruning rules
+    prune_weak_relationships=True,
+
+    # Weak relationship criteria
+    weak_relationship_threshold=0.2,  # Weight threshold
+    weak_relationship_age_days=90,    # Minimum age in days
+
+    # Safety limits
+    max_deletions_per_run=1000,
+    dry_run_by_default=True,
+
+    # Scheduling (for future automation)
+    schedule_cron="0 2 * * 0",  # Sunday 02:00
+)</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#79: [AGT-S-043] Create HullCleaner agent skeleton</li>
+                    <li>#80: [AGT-S-044] Implement weak relationship detection</li>
+                    <li>#81: [AGT-S-045] Implement relationship pruning</li>
+                    <li>#88: [AGT-S-052] Add HullCleaner unit tests</li>
+                </ul>
+
+                <p>A clean hull cuts through the water faster. A clean graph returns results faster.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
