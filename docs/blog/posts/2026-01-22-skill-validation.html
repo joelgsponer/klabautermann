@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="skill-validation">
+    <meta name="post-excerpt" content="Catching skill definition errors before they catch you. Schema validation, dependency checking, and clear error messages.">
+    <title>Trust But Verify | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Trust But Verify</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Skills are configuration. Configuration has bugs. And configuration bugs are the worst kind - they fail silently at runtime, often in production, when the user types something you didn't test. Today we added a validation layer that catches these before they cause trouble.</p>
+
+                <h2>The Problem</h2>
+                <p>Consider a skill with a typo:</p>
+
+                <pre><code>---
+name: lookup-Person  # Uppercase P - invalid
+description: Find people
+klabautermann-task-type: research
+klabautermann-agent: Researcher  # Should be lowercase
+---</code></pre>
+
+                <p>This would load fine. The orchestrator would accept it. But it would never match any user requests because the AI expects lowercase identifiers. And debugging "why doesn't my skill work" when the answer is "capital letter in line 2" is nobody's idea of fun.</p>
+
+                <h2>The Validator</h2>
+                <p>The <code>SkillValidator</code> class checks for common issues:</p>
+
+                <pre><code>class SkillValidator:
+    """
+    Validates skill definitions against schema and dependency rules.
+
+    Checks:
+    - Name format (lowercase, hyphens, max 64 chars)
+    - Required fields (name, description)
+    - Description quality (min length, contains trigger phrases)
+    - Tool references (warns if unknown)
+    - Agent references (warns if unknown)
+    - Orchestrator config completeness
+    - Payload schema validity
+    """</code></pre>
+
+                <h2>Validation Rules</h2>
+
+                <h3>Name Format</h3>
+                <pre><code># Valid name pattern: lowercase letters, numbers, and hyphens
+NAME_PATTERN = re.compile(r"^[a-z][a-z0-9-]*$")
+MAX_NAME_LENGTH = 64
+
+def _validate_name(self, skill, result):
+    name = skill.name
+
+    if len(name) > MAX_NAME_LENGTH:
+        result.add_error("name", f"Name too long ({len(name)} chars, max {MAX_NAME_LENGTH})")
+
+    if not NAME_PATTERN.match(name):
+        result.add_error("name",
+            "Name must be lowercase, start with a letter, and contain only "
+            "letters, numbers, and hyphens")</code></pre>
+
+                <p>Names must be lowercase, start with a letter, and contain only letters, numbers, and hyphens. This matches Claude Code's skill naming conventions.</p>
+
+                <h3>Description Quality</h3>
+                <pre><code>def _validate_description(self, skill, result):
+    description = skill.description
+
+    # Check minimum length
+    if len(description) < 10:
+        result.add_error("description",
+            "Description too short (min 10 chars) - describe what the skill does")
+
+    # Warn if no trigger phrases
+    trigger_indicators = ["when", "use when", "use for", "triggers on", "say"]
+    has_trigger = any(indicator in description.lower() for indicator in trigger_indicators)
+    if not has_trigger:
+        result.add_warning("description",
+            "Description should include trigger phrases (e.g., 'Use when user asks...')")</code></pre>
+
+                <p>The description is what the AI uses to match user requests to skills. A description without trigger phrases ("Use when...") makes discovery unreliable.</p>
+
+                <h3>Orchestrator Config Consistency</h3>
+                <pre><code>def _validate_orchestrator_config(self, skill, result):
+    config = skill.klabautermann
+
+    # If task_type is set, agent should be set too
+    if config.task_type and not config.agent:
+        result.add_error("klabautermann-agent",
+            f"klabautermann-task-type is '{config.task_type}' but klabautermann-agent is missing")
+
+    # Validate task_type and agent consistency
+    if config.task_type and config.agent:
+        expected_agents = {
+            "ingest": "ingestor",
+            "research": "researcher",
+            "execute": "executor",
+        }
+        expected = expected_agents.get(config.task_type)
+        if expected and config.agent != expected:
+            result.add_warning("klabautermann-agent",
+                f"Task type '{config.task_type}' typically uses agent '{expected}', not '{config.agent}'")</code></pre>
+
+                <p>If you set <code>task-type: research</code>, you probably meant <code>agent: researcher</code>. Using a different agent isn't wrong, but it's unusual enough to warrant a warning.</p>
+
+                <h2>Errors vs Warnings</h2>
+                <p>The validation distinguishes between errors (will definitely cause problems) and warnings (might be intentional):</p>
+
+                <pre><code>@dataclass
+class ValidationError:
+    """A single validation error."""
+    field: str
+    message: str
+    severity: str = "error"  # "error" or "warning"
+
+@dataclass
+class ValidationResult:
+    """Result of validating a skill definition."""
+    skill_name: str
+    skill_path: Path | None = None
+    errors: list[ValidationError] = field(default_factory=list)
+    warnings: list[ValidationError] = field(default_factory=list)
+
+    @property
+    def is_valid(self) -> bool:
+        """Whether the skill passed validation (no errors, warnings OK)."""
+        return len(self.errors) == 0</code></pre>
+
+                <p>Unknown tools or models generate warnings - they might be new tools we haven't added to the known list. Invalid names or missing required fields generate errors.</p>
+
+                <h2>Strict Mode</h2>
+                <p>For CI/CD pipelines, there's strict mode:</p>
+
+                <pre><code># Strict: warnings become errors
+result = validate_skill(skill, strict=True)
+
+if not result.is_valid:
+    print(result.format_report())
+    sys.exit(1)</code></pre>
+
+                <p>This is useful in pre-commit hooks or automated testing where you want zero tolerance for issues.</p>
+
+                <h2>Human-Readable Reports</h2>
+                <pre><code>def format_report(self) -> str:
+    """Format validation result as a human-readable report."""
+    lines = [f"Validation result for skill: {self.skill_name}"]
+    if self.skill_path:
+        lines.append(f"Path: {self.skill_path}")
+    lines.append("")
+
+    if self.is_valid and not self.has_warnings:
+        lines.append("OK - No issues found")
+    else:
+        if self.errors:
+            lines.append(f"Errors ({len(self.errors)}):")
+            for error in self.errors:
+                lines.append(f"  - {error}")
+        if self.warnings:
+            lines.append(f"Warnings ({len(self.warnings)}):")
+            for warning in self.warnings:
+                lines.append(f"  - {warning}")
+
+    return "\n".join(lines)</code></pre>
+
+                <p>Output like:</p>
+
+                <pre><code>Validation result for skill: lookup-Person
+Path: .claude/skills/lookup-Person/SKILL.md
+
+Errors (1):
+  - [ERROR] name: Name must be lowercase, start with a letter, and contain only letters, numbers, and hyphens
+Warnings (1):
+  - [WARNING] klabautermann-agent: Unknown agent 'Researcher' - verify it exists</code></pre>
+
+                <h2>Convenience Functions</h2>
+                <pre><code># Validate a loaded skill
+result = validate_skill(skill)
+
+# Validate a file directly (parses and validates)
+result = validate_skill_file(Path(".claude/skills/my-skill/SKILL.md"))
+
+# Validate all skills in a loader
+results = validate_all_skills(loader)
+for name, result in results.items():
+    if not result.is_valid:
+        print(result.format_report())</code></pre>
+
+                <p>The <code>validate_all_skills()</code> function is useful for auditing an entire skills directory.</p>
+
+                <h2>Custom Validators</h2>
+                <p>For projects with custom tools or agents:</p>
+
+                <pre><code>validator = SkillValidator(
+    known_tools=frozenset({"Read", "Grep", "CustomProjectTool"}),
+    known_agents=frozenset({"researcher", "executor", "custom_agent"}),
+)</code></pre>
+
+                <p>This suppresses warnings for tools and agents that exist in your project but aren't in the default known sets.</p>
+
+                <h2>The Tests</h2>
+                <p>13 tests cover the validation rules:</p>
+
+                <ul>
+                    <li><strong>test_validate_valid_skill</strong>: Valid skill passes</li>
+                    <li><strong>test_validate_invalid_name_uppercase</strong>: Rejects uppercase names</li>
+                    <li><strong>test_validate_invalid_name_too_long</strong>: Rejects names > 64 chars</li>
+                    <li><strong>test_validate_short_description</strong>: Rejects descriptions < 10 chars</li>
+                    <li><strong>test_validate_missing_trigger_phrases_warning</strong>: Warns on no trigger hints</li>
+                    <li><strong>test_validate_orchestrator_config_missing_agent</strong>: Error when task_type without agent</li>
+                    <li><strong>test_validate_orchestrator_config_missing_task_type</strong>: Error when agent without task_type</li>
+                    <li><strong>test_validate_unknown_tool_warning</strong>: Warns on unknown tools</li>
+                    <li><strong>test_validate_strict_mode</strong>: Strict mode converts warnings to errors</li>
+                    <li><strong>test_validation_result_format_report</strong>: Human-readable report output</li>
+                    <li><strong>test_validate_task_agent_mismatch_warning</strong>: Warns on convention mismatch</li>
+                    <li><strong>test_validate_all_skills</strong>: Batch validation works</li>
+                    <li><strong>test_validator_custom_known_tools</strong>: Custom tool sets work</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>1 new module: <code>src/klabautermann/skills/validation.py</code></li>
+                    <li>532 lines of validation code</li>
+                    <li>3 new types: <code>SkillValidator</code>, <code>ValidationResult</code>, <code>ValidationError</code></li>
+                    <li>3 convenience functions exported</li>
+                    <li>13 new unit tests</li>
+                    <li>All 58 skills tests pass</li>
+                </ul>
+
+                <p>Issue #297, closed. Skills now get validated before they can cause runtime surprises.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
