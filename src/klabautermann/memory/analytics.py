@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from klabautermann.core.logger import logger
-from klabautermann.core.models import DailyAnalytics
+from klabautermann.core.models import DailyAnalytics, SagaProgress
 
 
 if TYPE_CHECKING:
@@ -250,6 +250,73 @@ async def get_daily_projects_discussed(
     return result
 
 
+async def get_daily_saga_progress(
+    neo4j: Neo4jClient,
+    date: str,
+    trace_id: str | None = None,
+) -> list[SagaProgress]:
+    """
+    Get saga progress (lore episodes) for a specific day.
+
+    Queries LoreEpisode nodes told on the given day and returns
+    saga progress information for inclusion in daily journal.
+
+    Reference: specs/architecture/LORE_SYSTEM.md Section 5.2 (#110)
+
+    Args:
+        neo4j: Connected Neo4jClient instance
+        date: Date in YYYY-MM-DD format
+        trace_id: Optional trace ID for logging
+
+    Returns:
+        List of SagaProgress models with saga information
+    """
+    day_start, day_end = get_day_bounds(date)
+
+    # Convert to milliseconds for told_at comparison (stored as Unix ms)
+    day_start_ms = day_start * 1000
+    day_end_ms = day_end * 1000
+
+    logger.debug(
+        f"[WHISPER] Gathering saga progress for {date}",
+        extra={"trace_id": trace_id, "agent_name": "analytics"},
+    )
+
+    query = """
+    MATCH (le:LoreEpisode)
+    WHERE le.told_at >= $day_start_ms AND le.told_at < $day_end_ms
+      AND le.saga_id IS NOT NULL
+    RETURN le.saga_id as saga_id,
+           le.saga_name as saga_name,
+           le.chapter as chapter,
+           le.channel as channel
+    ORDER BY le.told_at ASC
+    """
+
+    result = await neo4j.execute_query(
+        query,
+        {"day_start_ms": day_start_ms, "day_end_ms": day_end_ms},
+        trace_id=trace_id,
+    )
+
+    saga_progress = [
+        SagaProgress(
+            saga_id=r["saga_id"],
+            saga_name=r["saga_name"] or r["saga_id"],
+            chapter=r["chapter"],
+            channel=r.get("channel"),
+        )
+        for r in result
+    ]
+
+    logger.debug(
+        f"[WHISPER] Found {len(saga_progress)} saga episodes told on {date}",
+        extra={"trace_id": trace_id, "agent_name": "analytics"},
+    )
+
+    return saga_progress
+
+
 async def get_daily_analytics(
     neo4j: Neo4jClient,
     date: str,
@@ -283,6 +350,7 @@ async def get_daily_analytics(
     new_entities = await get_daily_entity_counts(neo4j, date, trace_id)
     task_stats = await get_daily_task_stats(neo4j, date, trace_id)
     top_projects = await get_daily_projects_discussed(neo4j, date, limit=3, trace_id=trace_id)
+    saga_progress = await get_daily_saga_progress(neo4j, date, trace_id)
 
     # Extract specific entity counts
     notes_created = new_entities.get("Note", 0)
@@ -297,6 +365,7 @@ async def get_daily_analytics(
         top_projects=top_projects,
         notes_created=notes_created,
         events_count=events_count,
+        saga_progress=saga_progress,
     )
 
     logger.info(
@@ -322,6 +391,7 @@ __all__ = [
     "get_daily_entity_counts",
     "get_daily_interaction_count",
     "get_daily_projects_discussed",
+    "get_daily_saga_progress",
     "get_daily_task_stats",
     "get_day_bounds",
 ]
