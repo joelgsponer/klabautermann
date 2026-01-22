@@ -51,6 +51,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `klabautermann_channel_active_count`: Active channel count gauge
   - Helper functions: `record_channel_message()`, `record_channel_latency()`, etc.
   - 13 new unit tests for channel metrics
+- Prometheus alerting rules (#275)
+  - 22 alerting rules covering agents, API, channels, graph, LLM, and WebSockets
+  - Agent alerts: HighErrorRate, CriticalErrorRate, HighLatency, CriticalLatency, Stopped
+  - API alerts: HighErrorRate, CriticalErrorRate, HighLatency
+  - Channel alerts: Down, Unhealthy, HighErrorRate, HighLatency, AllChannelsDown, BroadcastFailures
+  - Graph alerts: HighLatency, CriticalLatency
+  - LLM alerts: HighLatency, HighTokenUsage
+  - WebSocket alerts: NoConnections, HighConnections
+  - Prometheus self-monitoring: TargetDown, ConfigReloadFailed
+  - Alertmanager service with severity-based routing (critical/warning/info)
+  - Alert grouping and inhibition rules
 - Fuzzy entity deduplication with user review workflow (#35)
   - Wire `deduplication.py` module to Archivist (replaces simple `entity_merge.py`)
   - Use `rapidfuzz` for fuzzy name similarity scoring
