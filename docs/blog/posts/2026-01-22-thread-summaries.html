@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="thread-summaries">
+    <meta name="post-excerpt" content="AI-powered email thread summarization with Claude Haiku. Because reading 47 messages to understand one decision shouldn't take your whole afternoon.">
+    <title>TL;DR for Your Inbox | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">TL;DR for Your Inbox</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Some email threads age like fine wine. Most age like that forwarded chain from 2019 that's now 47 messages deep with half the participants no longer at the company. Today Klabautermann learned to read them all so you don't have to.</p>
+
+                <h2>The Thread Model</h2>
+                <p>Gmail's threads API returns the complete conversation - every message, every participant, every timestamp. The model captures this richness while adding computed properties for quick reference:</p>
+
+                <pre><code>class EmailThread(BaseModel):
+    """A complete email thread with all messages."""
+
+    id: str  # Thread ID
+    subject: str
+    messages: list[EmailMessage]
+    participant_count: int = 0
+    message_count: int = 0
+
+    @property
+    def participants(self) -> list[str]:
+        """Get unique participants in the thread."""
+        senders = {msg.sender for msg in self.messages}
+        recipients = {msg.recipient for msg in self.messages if msg.recipient}
+        return list(senders | recipients)
+
+    @property
+    def date_range(self) -> str:
+        """Human-readable date range of the thread."""
+        if not self.messages:
+            return "No messages"
+        dates = sorted(msg.date for msg in self.messages)
+        start = dates[0].strftime("%b %d")
+        end = dates[-1].strftime("%b %d, %Y")
+        if start == end.split(",")[0]:
+            return end
+        return f"{start} - {end}"</code></pre>
+
+                <p>The <code>participants</code> property deduplicates across all messages. The <code>date_range</code> property handles the common case of same-day threads gracefully - no need for "Jan 22 - Jan 22, 2026".</p>
+
+                <h2>Fetching the Thread</h2>
+                <p>Gmail's threads.get returns all messages in one call. The parsing follows the same pattern as individual message fetching:</p>
+
+                <pre><code>async def get_thread(
+    self,
+    thread_id: str,
+    context: Any = None,
+) -> EmailThread | None:
+    """Get a complete email thread with all messages."""
+    await self.start()
+
+    def do_get_thread() -> dict[str, Any]:
+        return (
+            self._gmail_service.users()
+            .threads()
+            .get(userId="me", id=thread_id, format="full")
+            .execute()
+        )
+
+    try:
+        raw_thread = await self._rate_limited_call("gmail", do_get_thread)
+    except Exception:
+        return None
+
+    messages: list[EmailMessage] = []
+    for raw_msg in raw_thread.get("messages", []):
+        # Parse each message using existing email parsing logic
+        messages.append(self._parse_email_message(raw_msg))
+
+    return EmailThread(
+        id=thread_id,
+        subject=messages[0].subject if messages else "No Subject",
+        messages=messages,
+        participant_count=len(set(m.sender for m in messages)),
+        message_count=len(messages),
+    )</code></pre>
+
+                <p>The format="full" parameter ensures we get complete message bodies, not just headers. Essential for meaningful summarization.</p>
+
+                <h2>The Summary Model</h2>
+                <p>A good summary is more than a condensed version of the text. It identifies what matters:</p>
+
+                <pre><code>class EmailThreadSummary(BaseModel):
+    """Summary of an email thread."""
+
+    thread_id: str
+    subject: str
+    summary: str  # 2-3 sentence summary of the conversation
+    key_points: list[str] = Field(default_factory=list)
+    action_items: list[str] = Field(default_factory=list)
+    participants: list[str] = Field(default_factory=list)
+    message_count: int = 0
+    date_range: str = ""
+    sentiment: str = "neutral"  # positive, negative, neutral</code></pre>
+
+                <p>The <code>action_items</code> field is particularly useful. Buried in message 23 of a 47-message thread is often the one sentence that actually requires you to do something. Now it surfaces to the top.</p>
+
+                <h2>LLM-Powered Summarization</h2>
+                <p>The summarization uses Claude Haiku with the tool_use pattern for structured output:</p>
+
+                <pre><code>async def summarize_email_thread(
+    self,
+    thread_id: str,
+    context: Any = None,
+) -> EmailThreadSummary | None:
+    """Generate an AI-powered summary of an email thread."""
+    thread = await self.get_thread(thread_id, context)
+    if not thread or not thread.messages:
+        return None
+
+    # Format thread for LLM
+    formatted_thread = self._format_thread_for_summary(thread)
+
+    # Use Claude Haiku for summarization
+    client = anthropic.Anthropic()
+
+    response = client.messages.create(
+        model="claude-3-5-haiku-20241022",
+        max_tokens=1024,
+        tools=[{
+            "name": "create_summary",
+            "description": "Create a structured summary of an email thread",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string"},
+                    "key_points": {"type": "array", "items": {"type": "string"}},
+                    "action_items": {"type": "array", "items": {"type": "string"}},
+                    "sentiment": {"type": "string", "enum": ["positive", "negative", "neutral"]},
+                },
+                "required": ["summary", "key_points", "action_items", "sentiment"],
+            },
+        }],
+        tool_choice={"type": "tool", "name": "create_summary"},
+        messages=[{
+            "role": "user",
+            "content": f"Summarize this email thread:\n\n{formatted_thread}",
+        }],
+    )</code></pre>
+
+                <p>The <code>tool_choice</code> parameter forces Claude to respond with structured JSON matching our schema. No parsing ambiguity, no "here's the summary:" preambles to strip out.</p>
+
+                <h2>Formatting for the LLM</h2>
+                <p>The format matters. Too verbose and you waste tokens. Too sparse and the LLM misses context:</p>
+
+                <pre><code>def _format_thread_for_summary(self, thread: EmailThread) -> str:
+    """Format a thread for LLM summarization."""
+    lines = [f"Subject: {thread.subject}", ""]
+
+    for i, msg in enumerate(thread.messages, 1):
+        lines.append(f"Message {i}:")
+        lines.append(f"From: {msg.sender}")
+        lines.append(f"Date: {msg.date.strftime('%Y-%m-%d %H:%M')}")
+        if msg.body:
+            # Truncate very long messages
+            body = msg.body[:2000] + "..." if len(msg.body) > 2000 else msg.body
+            lines.append(f"Content: {body}")
+        lines.append("")
+
+    return "\n".join(lines)</code></pre>
+
+                <p>The 2000-character truncation per message keeps the context window manageable for threads with massive individual messages while preserving the conversational flow.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"What's the deal with that email thread from the project team?" &rarr; Opens Gmail, scrolls through 30 messages, takes notes, forgets what the first few said.</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Summarize that email thread from the project team" &rarr;<br>
+                <strong>Summary:</strong> The team discussed Q2 deliverables, identified three blockers, and agreed to delay the launch by two weeks.<br>
+                <strong>Key Points:</strong>
+                <ul>
+                    <li>API integration deadline moved to March 15</li>
+                    <li>Sarah will handle vendor negotiations</li>
+                    <li>Weekly syncs scheduled for Tuesdays</li>
+                </ul>
+                <strong>Action Items:</strong>
+                <ul>
+                    <li>Review updated timeline (assigned: you)</li>
+                    <li>Send vendor requirements to Sarah by Friday</li>
+                </ul>
+                <strong>Sentiment:</strong> Neutral</blockquote>
+
+                <h2>The Tests</h2>
+                <p>8 new tests covering the full feature:</p>
+
+                <ul>
+                    <li><strong>TestEmailThread (4 tests)</strong>: Model creation, participant deduplication, date range formatting, empty thread handling</li>
+                    <li><strong>TestEmailThreadSummarization (4 tests)</strong>: get_thread API mocking, summarize_email_thread with Claude tool_use response, error handling for missing threads</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>2 files modified</li>
+                    <li>580 lines added</li>
+                    <li>2 new models: <code>EmailThread</code>, <code>EmailThreadSummary</code></li>
+                    <li>3 new methods: <code>get_thread</code>, <code>summarize_email_thread</code>, <code>_format_thread_for_summary</code></li>
+                    <li>8 new tests</li>
+                    <li>All 115 google_workspace tests pass</li>
+                </ul>
+
+                <p>Issue #221, closed. Klabautermann can now distill those endless reply-all chains into actionable intelligence.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="deep-dive,feature">
+    <meta name="post-slug" content="inside-the-researcher">
+    <meta name="post-excerpt" content="A technical deep-dive into Klabautermann's Researcher agent: how it plans searches with Claude Opus, executes four parallel techniques, and synthesizes Graph Intelligence Reports.">
+    <title>Inside the Researcher | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">deep-dive</span>
+                        <span class="category-tag">feature</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Inside the Researcher</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Researcher is Klabautermann's Librarian. When you ask "Who did Sarah work for last year?" or "What's blocking my project?", it doesn't just grep through a database. It <em>reasons</em> about how to find the answer, executes multiple search strategies in parallel, and synthesizes findings into something useful.</p>
+
+                <p>This post goes deep into how it works.</p>
+
+                <h2>The Four-Phase Pipeline</h2>
+                <p>Every query flows through four phases:</p>
+
+                <ol>
+                    <li><strong>Plan</strong> - Claude Opus analyzes your query and generates a search plan</li>
+                    <li><strong>Execute</strong> - Multiple search techniques run in parallel</li>
+                    <li><strong>Aggregate</strong> - Results are deduplicated and scored</li>
+                    <li><strong>Synthesize</strong> - Opus combines findings into a Graph Intelligence Report</li>
+                </ol>
+
+                <p>The key insight: searching a knowledge graph isn't one technique - it's orchestrating several.</p>
+
+                <h2>Phase 1: Search Planning with Opus</h2>
+                <p>When your query arrives, the Researcher doesn't immediately search. It thinks first.</p>
+
+                <p>Claude Opus receives a structured prompt describing four available search techniques and the graph schema. It analyzes your query and outputs a <code>SearchPlan</code>:</p>
+
+                <pre><code>{
+  "original_query": "Who did Sarah work for last year?",
+  "reasoning": "Temporal employment query. Need STRUCTURAL for WORKS_AT
+               with historical filter. ENTITY_FULLTEXT to find Sarah's
+               node. VECTOR as semantic fallback.",
+  "strategies": [
+    {
+      "technique": "ENTITY_FULLTEXT",
+      "query": "Sarah",
+      "limit": 3,
+      "rationale": "Find Sarah's entity node"
+    },
+    {
+      "technique": "STRUCTURAL",
+      "cypher_pattern": "WORKS_AT_HISTORICAL",
+      "params": {"name_pattern": "(?i).*sarah.*"},
+      "time_range": {"as_of": 1704067200},
+      "rationale": "Historical employment as of Jan 2025"
+    },
+    {
+      "technique": "VECTOR",
+      "query": "Sarah employment job work",
+      "rationale": "Semantic fallback"
+    }
+  ],
+  "zoom_level": "micro"
+}</code></pre>
+
+                <p>The LLM is choosing search strategies based on semantic understanding - not keyword matching. "Last year" becomes a timestamp. "Work for" becomes a <code>WORKS_AT</code> relationship pattern. The query structure, not surface words, drives the plan.</p>
+
+                <h3>Fallback When Planning Fails</h3>
+                <p>If Opus times out or returns unparseable JSON, the Researcher doesn't crash. It falls back to a safe default: vector search plus entity fulltext. Conservative, but functional.</p>
+
+                <pre><code>def _fallback_plan(self, query: str) -> SearchPlan:
+    return SearchPlan(
+        original_query=query,
+        reasoning="Fallback: LLM planning unavailable",
+        strategies=[
+            SearchStrategy(
+                technique=SearchTechnique.VECTOR,
+                query=query,
+                limit=10,
+            ),
+            SearchStrategy(
+                technique=SearchTechnique.ENTITY_FULLTEXT,
+                query=query,
+                limit=5,
+            ),
+        ],
+    )</code></pre>
+
+                <h2>Phase 2: Parallel Execution</h2>
+                <p>Once planned, all strategies execute concurrently with <code>asyncio.gather</code>. This is where time gets saved - instead of serial queries, we fan out.</p>
+
+                <h3>The Four Search Techniques</h3>
+
+                <h4>VECTOR - Semantic Similarity</h4>
+                <p>Uses Graphiti's embedding search. Your query becomes a vector, and we find facts whose embeddings are geometrically close. Great for "remind me about..." or conceptual queries where you don't know exact names.</p>
+
+                <pre><code>results = await self.graphiti.search(query, limit=limit)</code></pre>
+
+                <h4>ENTITY_FULLTEXT - Name Lookup</h4>
+                <p>Direct fulltext search on entity nodes. When you say "Sarah", we search the name index. Fast and precise when you know who you're looking for.</p>
+
+                <pre><code>results = await self.graphiti.search_entities(query, limit=limit)</code></pre>
+
+                <h4>STRUCTURAL - Graph Traversal</h4>
+                <p>This is where the graph shines. Cypher queries that follow relationships:</p>
+
+                <pre><code>MATCH (p:Person)-[r:WORKS_AT]->(o:Organization)
+WHERE p.name =~ $name_pattern
+  AND r.expired_at IS NULL
+RETURN p.name as person, o.name as organization,
+       r.title as title, r.created_at as created_at
+ORDER BY r.created_at DESC</code></pre>
+
+                <p>The Researcher includes predefined patterns for common queries: <code>WORKS_AT</code>, <code>REPORTS_TO</code>, <code>BLOCKS</code>, <code>KNOWS</code>, <code>FRIEND_OF</code>. But it can also write custom Cypher when the LLM determines the query needs something more complex.</p>
+
+                <p>One subtlety: Graphiti stores semantic relationships as <code>RELATES_TO</code> edges with a <code>name</code> property. So "knows" or "friend of" are filtered with:</p>
+
+                <pre><code>WHERE r.name =~ '(?i).*(knows|friend).*'</code></pre>
+
+                <h4>TEMPORAL - Time-Filtered Search</h4>
+                <p>Queries like "last week" or "yesterday" trigger temporal search. The Researcher parses time references and adds filters:</p>
+
+                <pre><code>def _parse_time_reference(self, query: str) -> TimeRange | None:
+    query_lower = query.lower()
+    now = datetime.now(UTC)
+
+    if "yesterday" in query_lower:
+        start = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0)
+        end = start.replace(hour=23, minute=59, second=59)
+        return TimeRange(start=start.timestamp(), end=end.timestamp())
+
+    if "last week" in query_lower:
+        start = now - timedelta(days=7)
+        return TimeRange(start=start.timestamp(), end=now.timestamp())
+
+    # ... handles "this week", "tomorrow", "next N days", etc.</code></pre>
+
+                <p>For schedule queries (containing "calendar", "meeting", "schedule"), it queries <code>CalendarEvent</code> nodes by <code>start_time</code> instead of <code>created_at</code> - because you care when the meeting <em>happens</em>, not when you added it.</p>
+
+                <h3>Handling Individual Failures</h3>
+                <p>Parallel execution means individual strategies can fail without killing the whole search:</p>
+
+                <pre><code>results = await asyncio.gather(*tasks, return_exceptions=True)
+
+for label, result in zip(labels, results):
+    if isinstance(result, Exception):
+        logger.warning(f"[SWELL] Strategy {label} failed: {result}")
+        results_by_technique[label] = []  # Empty, not fatal
+    else:
+        results_by_technique[label] = result</code></pre>
+
+                <p>Neo4j down? Vector search still runs. API timeout on one query? The others complete. Resilience through parallelism.</p>
+
+                <h2>Phase 3: Aggregation and Scoring</h2>
+                <p>Multiple techniques return overlapping results. Aggregation handles this:</p>
+
+                <ol>
+                    <li><strong>Deduplication</strong> - By <code>source_id</code> and content prefix</li>
+                    <li><strong>Strength-aware scoring</strong> - Results from STRUCTURAL queries may include relationship strengths (how close are these people? how important is this connection?)</li>
+                    <li><strong>Composite ranking</strong> - Sort by combined score</li>
+                </ol>
+
+                <p>The scoring formula boosts results with strong relationships:</p>
+
+                <pre><code>def _calculate_result_score(self, result: RawSearchResult) -> float:
+    base_score = result.vector_score if result.vector_score else 0.5
+
+    if result.relationship_strengths:
+        avg_strength = sum(result.relationship_strengths) / len(result.relationship_strengths)
+        boost = 1 + (avg_strength * 0.3)  # configurable
+    else:
+        boost = 1.0
+
+    return base_score * boost</code></pre>
+
+                <p>A result with vector score 0.8 and relationship strength 0.9 scores <code>0.8 * (1 + 0.9 * 0.3) = 1.02</code>. Relationship quality matters.</p>
+
+                <h2>Phase 4: Report Synthesis</h2>
+                <p>Raw results aren't user-friendly. Opus synthesizes them into a structured <code>GraphIntelligenceReport</code>:</p>
+
+                <pre><code>class GraphIntelligenceReport(BaseModel):
+    query: str
+    direct_answer: str                    # What you asked for
+    confidence: float                     # 0.0-1.0
+    confidence_level: ConfidenceLevel     # HIGH/MEDIUM/LOW/UNCERTAIN
+    evidence: list[EvidenceItem]          # Supporting facts with sources
+    relationships: list[RelationshipDetail]  # Key connections
+    key_entities: list[str]               # Primary entities mentioned
+    as_of_date: str                        # Currency of report
+    historical_notes: list[str]           # Notes about past state
+    search_techniques_used: list[SearchTechnique]
+    result_count: int
+    related_queries: list[str]            # Suggested follow-ups
+    gaps_identified: list[str]            # Missing information</code></pre>
+
+                <p>The synthesis prompt tells Opus:</p>
+                <ul>
+                    <li>Lead with what the user wants to know</li>
+                    <li>Never fabricate facts not in the results</li>
+                    <li>Calibrate confidence based on source count, consistency, and recency</li>
+                    <li>Include temporal context - when were these facts true?</li>
+                    <li>Suggest follow-up queries</li>
+                    <li>Identify gaps - what would improve the answer?</li>
+                </ul>
+
+                <p>The critical constraint: <em>"I don't have that in The Locker" is an acceptable answer.</em> The Researcher never invents information.</p>
+
+                <h3>Confidence Calculation</h3>
+                <p>Confidence isn't just a number Opus picks. It's computed from evidence quality:</p>
+
+                <pre><code>def _calculate_confidence(self, results: list[RawSearchResult]):
+    # Factor 1: Number of sources (diminishing returns)
+    source_factor = min(len(results) / 5, 1.0)
+
+    # Factor 2: Average vector score
+    scores = [r.vector_score for r in results if r.vector_score]
+    avg_score = sum(scores) / len(scores) if scores else 0.5
+
+    # Factor 3: Technique diversity
+    techniques = len({r.source_technique for r in results})
+    diversity = min(techniques / 3, 1.0)
+
+    # Factor 4: Relationship strengths
+    strengths = [s for r in results for s in r.relationship_strengths]
+    avg_strength = sum(strengths) / len(strengths) if strengths else 0.5
+
+    # Weighted combination
+    confidence = (
+        source_factor * 0.25 +
+        avg_score * 0.30 +
+        diversity * 0.20 +
+        avg_strength * 0.25
+    )</code></pre>
+
+                <p>Multiple consistent sources from different techniques with strong relationships yield high confidence. A single weak vector match with no structural support yields low confidence. The math encodes epistemological intuition.</p>
+
+                <h2>Entity References for Message Linking</h2>
+                <p>One recent addition: <code>key_entity_refs</code>. When the Researcher finds entities, it extracts their UUIDs. This enables the system to create <code>MENTIONED_IN</code> relationships between entities and the messages that reference them.</p>
+
+                <pre><code>class EntityReference(BaseModel):
+    uuid: str           # Entity UUID from knowledge graph
+    name: str           # Display name
+    entity_type: str    # Person, Organization, etc.
+    confidence: float   # How sure we are this is the right entity
+    source_technique: str</code></pre>
+
+                <p>Now when you ask "Who is Sarah?", the answer message gets linked to Sarah's node in the graph. Memory that remembers its own retrieval.</p>
+
+                <h2>Configuration</h2>
+                <p>The Researcher is configurable via YAML (hot-reloaded without restart):</p>
+
+                <pre><code># config/agents/researcher.yaml
+model:
+  planning: claude-opus-4-5-20251101
+  synthesis: claude-opus-4-5-20251101
+  temperature: 0.3
+
+search:
+  max_parallel_strategies: 4
+  default_result_limit: 10
+  max_total_results: 50
+  timeout_seconds: 30
+
+scoring:
+  strength_boost_factor: 0.3
+
+timeouts:
+  planning: 15.0
+  execution: 30.0
+  synthesis: 20.0</code></pre>
+
+                <p>Why Opus for both planning and synthesis? These are reasoning-heavy tasks. Analyzing query intent, selecting techniques, calibrating confidence - these require the reasoning depth that smaller models lack.</p>
+
+                <h2>A Complete Example</h2>
+                <p>Query: "What's blocking my project?"</p>
+
+                <p><strong>Planning phase:</strong> Opus identifies this as a structural query about task dependencies. It generates strategies for <code>BLOCKS</code> and <code>DEPENDS_ON</code> relationships, plus vector search for semantic context about blockers.</p>
+
+                <p><strong>Execution phase:</strong> Three parallel queries fan out. STRUCTURAL returns task chains from Neo4j. VECTOR finds facts mentioning blockers. Entity search finds relevant tasks by name.</p>
+
+                <p><strong>Aggregation:</strong> Results are deduplicated. A task appearing in both STRUCTURAL and VECTOR results gets boosted. The blocker with highest combined score surfaces first.</p>
+
+                <p><strong>Synthesis:</strong> Opus produces:</p>
+
+                <pre><code>{
+  "direct_answer": "Your project has 2 active blockers: waiting on
+                   design review from Sarah, and the API spec from
+                   the Platform team.",
+  "confidence": 0.85,
+  "confidence_level": "high",
+  "evidence": [
+    {
+      "fact": "Design review blocks UI implementation",
+      "relationship": "BLOCKS",
+      "source": "task-uuid-123",
+      "temporal_note": "Blocked since Jan 15"
+    }
+  ],
+  "key_entities": ["Sarah", "Platform team"],
+  "related_queries": ["When is Sarah's review due?"],
+  "gaps_identified": ["No deadline information for API spec"]
+}</code></pre>
+
+                <p>From ambiguous natural language to structured, actionable intelligence.</p>
+
+                <h2>Why This Architecture?</h2>
+                <p>Three principles drive the Researcher's design:</p>
+
+                <ol>
+                    <li><strong>AI-first planning</strong> - No keyword matching, no regex classification. The LLM understands your intent semantically and chooses techniques accordingly.</li>
+                    <li><strong>Parallel execution</strong> - Multiple search techniques are complementary, not competing. Run them all, combine the results.</li>
+                    <li><strong>Structured output</strong> - The <code>GraphIntelligenceReport</code> is channel-agnostic. CLI, Telegram, web - each can render it appropriately. The Researcher doesn't format for display; it structures for consumption.</li>
+                </ol>
+
+                <p>The result is a retrieval system that reasons about how to find answers, not just what keywords to match. The Librarian doesn't just search the shelves - it understands what you're looking for.</p>
+
+                <p>The compass points true.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
