@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Recurring calendar events support with RFC 5545 RRULE (#211)
+- `RecurrenceBuilder` helper class for common recurrence patterns (daily, weekly, monthly, yearly)
+- `recurrence_rule` parameter in `create_event()` and `update_event()`
+- `recurrence_rule` and `recurring_event_id` fields in `CalendarEvent` model
+- 14 new unit tests for recurring events functionality
 - Calendar event update with PATCH semantics for partial updates (#209)
 - Calendar event delete functionality (#210)
 - `update_event()` and `delete_event()` methods in GoogleWorkspaceBridge

@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Recurring Calendar Events**: Create recurring meetings and appointments ("schedule daily standup at 9am", "add weekly team meeting every Tuesday")
 - **Calendar Event Management**: Update and delete calendar events via natural language ("reschedule my meeting to 3pm", "cancel my 2pm appointment")
 - **Response Synthesis with Opus**: Orchestrator now uses Claude Opus to synthesize coherent responses from multiple subagent results, with proactive suggestions based on configuration
 - **Gmail & Calendar Integration**: Check emails and calendar events via natural language ("any unread emails?", "what's on my calendar today?")
