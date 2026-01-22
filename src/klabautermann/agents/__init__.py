@@ -17,6 +17,7 @@ Contains:
 """
 
 from klabautermann.agents.bard import (
+    CANONICAL_SAGAS,
     CANONICAL_TIDBITS,
     ActiveSaga,
     BardConfig,
@@ -85,6 +86,7 @@ __all__ = [
     "AuditEntry",
     "BardConfig",
     "BardOfTheBilge",
+    "CANONICAL_SAGAS",
     "CANONICAL_TIDBITS",
     "Cartographer",
     "CartographerConfig",
