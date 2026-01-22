@@ -5,12 +5,12 @@ Contains:
 - base_channel: Abstract base class for all channels
 - cli_driver: Command-line interface with Rich rendering
 - cli_renderer: Rich-based terminal output formatting
+- telegram_driver: Telegram bot interface
 - sanitization: Input sanitization for security
 - manager: Channel lifecycle management
 - rate_limiter: Per-channel rate limiting
 
 Future channels (Sprint 4+):
-- telegram_driver: Telegram bot interface
 - discord_driver: Discord bot interface
 """
 
@@ -43,6 +43,7 @@ from klabautermann.channels.sanitization import (
     get_sanitizer,
     sanitize_input,
 )
+from klabautermann.channels.telegram_driver import TelegramDriver
 
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "BaseChannel",
     "CLIDriver",
     "CLIRenderer",
+    "TelegramDriver",
     # Manager
     "ChannelConfig",
     "ChannelInfo",
