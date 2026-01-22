@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,lore">
+    <meta name="post-slug" content="lore-graph-schema">
+    <meta name="post-excerpt" content="The Bard's tales now have proper graph structure. TOLD_TO, EXPANDS_UPON, and SAGA_STARTED_BY relationships complete the lore schema.">
+    <title>The Graph Behind the Tales | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">lore</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Graph Behind the Tales</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard tells stories. Stories have structure. Structure belongs in the graph.</p>
+                <p>LORE_SYSTEM.md Section 2.2 specified three relationships for the lore system. Today we verified - and completed - the implementation.</p>
+
+                <h2>The Audit (#97, #98, #99, #100)</h2>
+                <p>Four issues. Four schema requirements. The surprising discovery: three were already implemented.</p>
+                <ul>
+                    <li><strong>#97</strong>: LoreEpisode node type - already in ontology.py</li>
+                    <li><strong>#98</strong>: TOLD_TO relationship - already in _save_episode()</li>
+                    <li><strong>#99</strong>: EXPANDS_UPON relationship - already in _save_episode()</li>
+                    <li><strong>#100</strong>: SAGA_STARTED_BY relationship - <em>missing</em></li>
+                </ul>
+                <p>Three out of four. Not bad. But "almost complete" isn't complete.</p>
+
+                <h2>The Existing Implementation</h2>
+                <p>The _save_episode method already created two relationships:</p>
+                <pre><code>query = """
+CREATE (le:LoreEpisode {
+    uuid: $uuid,
+    saga_id: $saga_id,
+    ...
+})
+WITH le
+MATCH (p:Person {uuid: $captain_uuid})
+CREATE (le)-[:TOLD_TO {created_at: $now_ms}]->(p)
+WITH le
+OPTIONAL MATCH (prev:LoreEpisode {saga_id: $saga_id, chapter: $prev_chapter})
+FOREACH (_ IN CASE WHEN prev IS NOT NULL THEN [1] ELSE [] END |
+    CREATE (le)-[:EXPANDS_UPON {created_at: $now_ms}]->(prev)
+)
+"""</code></pre>
+                <p>TOLD_TO links every episode to its Captain. EXPANDS_UPON chains chapters 2→1, 3→2, etc.</p>
+
+                <h2>The Missing Piece</h2>
+                <p>SAGA_STARTED_BY marks the first chapter as the saga's origin point. Per the spec:</p>
+                <pre><code>// Mark saga initiator (first episode only)
+(LoreEpisode {chapter: 1})-[:SAGA_STARTED_BY {created_at}]->(Person)</code></pre>
+                <p>Why does this matter? It answers: "Who started this saga?"</p>
+
+                <h2>The Fix</h2>
+                <p>Add a conditional FOREACH for chapter 1:</p>
+                <pre><code>WITH le, p
+// SAGA_STARTED_BY: first chapter marks the saga initiator (#100)
+FOREACH (_ IN CASE WHEN $chapter = 1 THEN [1] ELSE [] END |
+    CREATE (le)-[:SAGA_STARTED_BY {created_at: $now_ms}]->(p)
+)</code></pre>
+                <p>When chapter is 1, create the relationship. Otherwise, skip.</p>
+
+                <h2>The Query</h2>
+                <p>With the relationship in place, we can now query saga origins:</p>
+                <pre><code>async def get_saga_origins(
+    self,
+    trace_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Get saga origins - who started each saga (#100)."""
+    query = """
+    MATCH (le:LoreEpisode {chapter: 1})-[:SAGA_STARTED_BY]->(p:Person)
+    WHERE le.saga_id IS NOT NULL
+    RETURN le.saga_id as saga_id, le.saga_name as saga_name,
+           p.uuid as captain_uuid, p.name as captain_name,
+           le.told_at as started_at, le.channel as started_channel
+    ORDER BY le.told_at DESC
+    """
+    ...</code></pre>
+                <p>Find all chapter 1 episodes with SAGA_STARTED_BY, return the initiator info.</p>
+
+                <h2>The Graph Visualization</h2>
+                <p>After the fix, the lore graph looks like this:</p>
+                <pre><code>                     ┌────────────┐
+                     │  Captain   │
+                     │  (Person)  │
+                     └────────────┘
+                           ▲
+          [:TOLD_TO]       │       [:SAGA_STARTED_BY]
+    ┌──────────────────────┼──────────────────────┐
+    │                      │                      │
+    ↓                      │                      │
+┌─────────┐          ┌─────┴─────┐          ┌─────────┐
+│ Episode │──────────│  Episode  │──────────│ Episode │
+│ Ch 1    │ EXPANDS  │   Ch 2    │ EXPANDS  │ Ch 3    │
+│ CLI     │ UPON     │   TG      │ UPON     │ CLI     │
+└─────────┘          └───────────┘          └─────────┘
+     │
+     └── [:SAGA_STARTED_BY] → Captain</code></pre>
+
+                <h2>Tests</h2>
+                <p>4 new tests verify the implementation:</p>
+                <ul>
+                    <li>test_save_episode_creates_node - verifies SAGA_STARTED_BY in query</li>
+                    <li>test_save_episode_chapter_one_has_saga_started_by - verifies chapter 1 behavior</li>
+                    <li>test_get_saga_origins_returns_initiator_info - verifies query results</li>
+                    <li>test_process_get_saga_origins_operation - verifies process_message handler</li>
+                </ul>
+                <p>All 2336 tests pass.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#97: [LORE-001] Add LoreEpisode node type to ontology</li>
+                    <li>#98: [LORE-002] Implement TOLD_TO relationship</li>
+                    <li>#99: [LORE-003] Implement EXPANDS_UPON relationship</li>
+                    <li>#100: [LORE-004] Implement SAGA_STARTED_BY relationship</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The lore graph schema is complete. Every episode knows its Captain. Every chapter knows its predecessor. Every saga knows its origin.</p>
+                <p><em>A tale properly structured is a tale properly told.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
