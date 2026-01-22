@@ -659,20 +659,19 @@ class AIZoomLevelSelector:
             )
             return self._fallback_classification(query)
 
-    def _fallback_classification(self, query: str) -> ZoomClassification:
+    def _fallback_classification(self, query: str) -> ZoomClassification:  # noqa: ARG002
         """
-        Fallback to keyword-based classification when AI is unavailable.
+        Fallback classification when AI is unavailable.
 
-        This provides graceful degradation when the LLM call fails.
+        AI-First principle: No keyword matching. Default to MICRO (most
+        common query type) with low confidence to signal uncertainty.
+
+        Issue AGT-P-018: Remove keyword-based zoom level detection.
         """
-        # Use the keyword-based selector as fallback
-        keyword_selector = ZoomLevelSelector()
-        level_str = keyword_selector.select_zoom_level(query)
-
         return ZoomClassification(
-            level=ZoomLevel(level_str),
-            confidence=0.5,  # Lower confidence for keyword fallback
-            reasoning="Fallback to keyword-based classification",
+            level=ZoomLevel.MICRO,
+            confidence=0.3,  # Low confidence signals classification uncertainty
+            reasoning="LLM unavailable - defaulting to MICRO (AI-first, no keyword fallback)",
         )
 
 

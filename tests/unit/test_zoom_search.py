@@ -551,15 +551,20 @@ class TestAIZoomLevelSelector:
 
     @pytest.mark.asyncio
     async def test_fallback_without_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test fallback to keyword selector when API key missing."""
+        """Test fallback when API key missing - AI-first, no keyword matching.
+
+        AI-First principle (AGT-P-018): When LLM unavailable, default to MICRO
+        with low confidence instead of using keyword matching.
+        """
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
         selector = AIZoomLevelSelector()
         classification = await selector.classify_query("Give me an overview")
 
-        # Should fall back to keyword-based classification
-        assert classification.confidence == 0.5  # Fallback confidence
-        assert classification.reasoning == "Fallback to keyword-based classification"
+        # Should NOT use keyword matching - always defaults to MICRO
+        assert classification.level == ZoomLevel.MICRO
+        assert classification.confidence == 0.3  # Low confidence signals uncertainty
+        assert "AI-first" in classification.reasoning
 
     @pytest.mark.asyncio
     async def test_classify_macro_query(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -654,7 +659,10 @@ class TestAIZoomLevelSelector:
 
     @pytest.mark.asyncio
     async def test_fallback_on_no_tool_use_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test fallback when LLM doesn't return tool_use block."""
+        """Test fallback when LLM doesn't return tool_use block.
+
+        AI-First principle: Default to MICRO, no keyword matching.
+        """
         mock_response = MagicMock()
         mock_response.content = [MagicMock(type="text", text="Unable to classify")]
 
@@ -670,12 +678,17 @@ class TestAIZoomLevelSelector:
         selector = AIZoomLevelSelector()
         classification = await selector.classify_query("Some query")
 
-        # Should fall back to keyword-based
-        assert classification.confidence == 0.5
+        # AI-first: Default to MICRO with low confidence (no keyword matching)
+        assert classification.level == ZoomLevel.MICRO
+        assert classification.confidence == 0.3
 
     @pytest.mark.asyncio
     async def test_fallback_on_api_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Test fallback when API call fails."""
+        """Test fallback when API call fails.
+
+        AI-First principle (AGT-P-018): Graceful degradation to MICRO,
+        no keyword matching.
+        """
         import anthropic
 
         mock_client = MagicMock()
@@ -692,9 +705,10 @@ class TestAIZoomLevelSelector:
         selector = AIZoomLevelSelector()
         classification = await selector.classify_query("Some query")
 
-        # Should fall back gracefully
-        assert classification.confidence == 0.5
-        assert classification.reasoning == "Fallback to keyword-based classification"
+        # AI-first: Default to MICRO with low confidence (no keyword matching)
+        assert classification.level == ZoomLevel.MICRO
+        assert classification.confidence == 0.3
+        assert "AI-first" in classification.reasoning
 
 
 class TestAIZoomSearch:

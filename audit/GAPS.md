@@ -32,7 +32,7 @@ This document catalogs gaps between the specifications in `specs/` and the curre
 | Researcher | RESEARCHER.md 2.4 | Missing | Structural traversal queries (REPORTS_TO chains, etc.) | P1 | AGT-P-013 |
 | Researcher | RESEARCHER.md 2.5 | Missing | Time-filtered temporal queries ("Who did X work for last year?") | P1 | AGT-P-014 |
 | Researcher | RESEARCHER.md 2.6 | Missing | Island search (Knowledge Island exploration) | P2 | AGT-P-015 |
-| Researcher | AGENTS_EXTENDED.md 4.4 | AI-First | Zoom level detection uses keyword matching | P0 | AGT-P-018 |
+| ~~Researcher~~ | ~~AGENTS_EXTENDED.md 4.4~~ | ~~AI-First~~ | ~~Zoom level detection uses keyword matching~~ **FIXED** - Removed keyword fallback, pure LLM only | ~~P0~~ | ~~AGT-P-018~~ |
 | Executor | MCP.md | Missing | Email reply-to-thread functionality | P1 | AGT-P-020 |
 | Executor | MCP.md | Missing | Calendar event update/delete | P1 | AGT-P-021 |
 | Executor | MCP.md | Missing | Recurring events support | P2 | AGT-P-022 |
@@ -213,7 +213,7 @@ Per `specs/architecture/AGENTS_EXTENDED.md`, all 6 secondary agents are unimplem
 | Feature | Spec Section | Status | Gap Description | Issue ID |
 |---------|--------------|--------|-----------------|----------|
 | Multi-level retrieval | MEMORY.md | Partial | Zoom levels not implemented | MEM-001 |
-| Zoom level detection | MEMORY.md | AI-First | Uses keyword matching | MEM-002 |
+| ~~Zoom level detection~~ | ~~MEMORY.md~~ | ~~AI-First~~ | ~~Uses keyword matching~~ **FIXED** - Pure LLM semantic understanding | ~~MEM-002~~ |
 | Deduplication wiring | MEMORY.md | Unwired | Module exists, not integrated | MEM-003 |
 | Orphan message detection | MEMORY.md | Missing | No cleanup routine | MEM-004 |
 | Entity merge utility | MEMORY.md | Missing | No merge function | MEM-005 |
@@ -354,9 +354,9 @@ These issues MUST use pure LLM intelligence, no keywords or regex:
 
 | Issue ID | Description | Current Approach | Required Approach |
 |----------|-------------|------------------|-------------------|
-| AGT-P-001 | Intent classification | Keyword lists in config | LLM tool_use classification |
-| AGT-P-018 | Query zoom level detection | Keyword matching | LLM semantic understanding |
-| MEM-002 | Retrieval zoom detection | Keyword matching | LLM context analysis |
+| ~~AGT-P-001~~ | ~~Intent classification~~ | ~~Keyword lists in config~~ | **FIXED** - LLM tool_use classification |
+| ~~AGT-P-018~~ | ~~Query zoom level detection~~ | ~~Keyword matching~~ | **FIXED** - LLM semantic understanding |
+| ~~MEM-002~~ | ~~Retrieval zoom detection~~ | ~~Keyword matching~~ | **FIXED** - LLM context analysis |
 | SKILL-006 | Skill discovery | Pattern matching | Natural language understanding |
 
 ---

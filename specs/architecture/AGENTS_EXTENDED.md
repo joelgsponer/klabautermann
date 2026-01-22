@@ -683,35 +683,42 @@ class Cartographer(BaseAgent):
 
 ### 4.4 Multi-Level Retrieval Support
 
+Uses AI-first semantic understanding for zoom level detection (no keyword matching).
+See `memory/zoom_search.py` for implementation.
+
 ```python
-# In researcher.py
+# In memory/zoom_search.py
 
-async def search(self, query: str, zoom_level: str = "auto") -> List[SearchResult]:
-    """Hybrid search with zoom level support."""
-    if zoom_level == "auto":
-        zoom_level = self._detect_zoom_level(query)
+class AIZoomLevelSelector:
+    """AI-first zoom level detection using Claude Haiku."""
 
-    if zoom_level == "macro":
-        # Query Community nodes
-        return await self._search_communities(query)
-    elif zoom_level == "meso":
-        # Query Project/Note nodes
-        return await self._search_projects_notes(query)
-    else:  # micro
-        # Query Entity nodes
-        return await self._search_entities(query)
+    async def classify_query(self, query: str, trace_id: str | None = None) -> ZoomClassification:
+        """
+        Classify query zoom level using LLM semantic understanding.
 
-def _detect_zoom_level(self, query: str) -> str:
-    """Detect appropriate zoom level from query."""
-    macro_keywords = ["overview", "summary", "big picture", "all my", "everything about"]
-    meso_keywords = ["project", "thread", "topic", "conversation"]
+        AI-First principle: Uses semantic analysis, not keyword matching.
+        Falls back to MICRO with low confidence if LLM unavailable.
+        """
+        # Uses tool_use to extract structured classification
+        response = await anthropic.messages.create(
+            model=ZOOM_CLASSIFICATION_MODEL,
+            system=ZOOM_CLASSIFIER_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": query}],
+            tools=[zoom_classification_tool],
+        )
+        # Parse and return ZoomClassification
 
-    query_lower = query.lower()
-    if any(kw in query_lower for kw in macro_keywords):
-        return "macro"
-    elif any(kw in query_lower for kw in meso_keywords):
-        return "meso"
-    return "micro"
+async def ai_zoom_search(neo4j, query: str, ...) -> ZoomSearchResponse:
+    """Execute search using AI-based zoom level selection."""
+    selector = AIZoomLevelSelector()
+    classification = await selector.classify_query(query)
+
+    if classification.level == ZoomLevel.MACRO:
+        return await macro_search(neo4j, ...)  # Community nodes
+    elif classification.level == ZoomLevel.MESO:
+        return await meso_search(neo4j, query, ...)  # Project/Note nodes
+    else:  # MICRO
+        return await micro_search(neo4j, query, ...)  # Entity facts
 ```
 
 ---
