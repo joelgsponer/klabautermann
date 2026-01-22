@@ -24,7 +24,7 @@ This document catalogs gaps between the specifications in `specs/` and the curre
 
 | Component | Spec Section | Status | Gap Description | Priority | Issue ID |
 |-----------|--------------|--------|-----------------|----------|----------|
-| Orchestrator | MAINAGENT.md 2.1 | AI-First | Intent classification uses keyword matching (search_keywords, action_keywords in config) instead of pure LLM | P0 | AGT-P-001 |
+| ~~Orchestrator~~ | ~~MAINAGENT.md 2.1~~ | ~~AI-First~~ | ~~Intent classification uses keyword matching~~ **FIXED** (PR #xxx) - Removed keyword fallback, pure LLM only | ~~P0~~ | ~~AGT-P-001~~ |
 | Orchestrator | MAINAGENT.md 5.1 | Missing | True multi-model orchestration not implemented - uses single Sonnet model | P1 | AGT-P-002 |
 | Orchestrator | PRD 8.4 | Missing | Storm Mode detection and response adaptation | P2 | AGT-P-004 |
 | Ingestor | AGENTS.md 2.1 | Missing | LLM-based pre-extraction using Haiku - relies entirely on Graphiti | P1 | AGT-P-009 |
