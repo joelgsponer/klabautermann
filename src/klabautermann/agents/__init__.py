@@ -11,6 +11,7 @@ Contains:
 - scribe: Daily journals (The Scribe)
 - hull_cleaner: Graph maintenance (The Hull Cleaner)
 - officer: Proactive alerts (The Officer of the Watch)
+- purser: State synchronization (The Purser)
 """
 
 from klabautermann.agents.executor import Executor
@@ -30,6 +31,16 @@ from klabautermann.agents.officer import (
     OfficerConfig,
     OfficerOfTheWatch,
 )
+from klabautermann.agents.purser import (
+    EmailManifest,
+    Purser,
+    PurserConfig,
+    RiskLevel,
+    SyncResult,
+    SyncService,
+    SyncState,
+    TheSieve,
+)
 from klabautermann.agents.scribe import Scribe
 
 
@@ -39,6 +50,7 @@ __all__ = [
     "AlertPriority",
     "AlertType",
     "AuditEntry",
+    "EmailManifest",
     "Executor",
     "HullCleaner",
     "HullCleanerConfig",
@@ -47,5 +59,12 @@ __all__ = [
     "PruningAction",
     "PruningResult",
     "PruningRule",
+    "Purser",
+    "PurserConfig",
+    "RiskLevel",
     "Scribe",
+    "SyncResult",
+    "SyncService",
+    "SyncState",
+    "TheSieve",
 ]
