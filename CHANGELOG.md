@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Lore system test coverage (#122, #123, #124)
+  - Unit tests for saga continuation: chapter creation and continuation flow (test_lore_system.py)
+  - Unit tests for cross-channel persistence: CLI/Telegram channel tracking
+  - Unit tests for LoreEpisode channel field storage and serialization
+  - E2E tests for cross-conversation saga: CLI start → Telegram continue → CLI retrieve
+  - E2E tests for saga completion at max chapters
+  - E2E tests for storm mode tidbit suppression
+  - 17 new tests covering lore system functionality
 - Lore query methods for BardOfTheBilge agent (#112, #113, #114, #115)
   - `get_recent_lore(limit)` - Retrieve last N story episodes ordered by told_at DESC
   - `get_saga_chain(saga_id)` - Get all chapters of a saga in order with metadata
