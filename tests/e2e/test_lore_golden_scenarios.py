@@ -55,6 +55,10 @@ def bard_e2e(mock_neo4j: MagicMock, captain_uuid: str) -> BardOfTheBilge:
         saga_continuation_probability=1.0,  # Always continue sagas
         max_saga_chapters=5,
         min_chapter_interval_hours=0,  # No interval for testing
+        # Force saga continuation path in weighted selection (#108)
+        continue_saga_weight=1.0,
+        start_saga_weight=0.0,
+        standalone_weight=0.0,
     )
     return BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
@@ -200,6 +204,10 @@ class TestLoreGoldenScenarioCrossConversation:
             saga_continuation_probability=1.0,
             max_saga_chapters=5,
             min_chapter_interval_hours=0,
+            # Force saga continuation path in weighted selection (#108)
+            continue_saga_weight=1.0,
+            start_saga_weight=0.0,
+            standalone_weight=0.0,
         )
         bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 

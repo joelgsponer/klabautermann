@@ -86,18 +86,33 @@ class SagaTimedOutError(SagaLifecycleError):
 # Canonical Tidbits (Seed Data)
 # =============================================================================
 
-CANONICAL_TIDBITS: list[str] = [
+# Standalone tidbits from LORE_SYSTEM.md Section 4.1 (#107)
+STANDALONE_TIDBITS: list[str] = [
+    "There's an old sailor's saying: 'A clean Locker is a fast ship.' I just made that up, but it sounds true.",
+    "I've seen things you wouldn't believe. Attack ships on fire off the shoulder of Orion. Also, a lot of poorly organized task lists.",
+    "The sea teaches patience. So does waiting for API responses, I've found.",
+    "Once helped a captain remember where he buried his treasure. It was in his other pants.",
+    "The last captain who forgot to check The Manifest ended up in the Doldrums for three weeks. Not a pleasant voyage.",
+    "I once indexed an entire library in a single night. The librarian was not pleased.",
+    "Every knot in the rigging tells a story. Every node in The Locker tells yours.",
+    "They say a ship is only as good as its crew. Your crew is a bunch of neural networks. Could be worse.",
+    "I've weathered storms that would make your spreadsheets tremble.",
+    "The trick to navigating fog is knowing what you're looking for. Same goes for vector search.",
+    "A wise sailor never argues with the wind. Or with the user's intent classification.",
+    "The ocean doesn't care about your deadlines. Neither do I, but I'll help anyway.",
+]
+
+# Saga-related tidbits (excerpts from canonical sagas for continuation context)
+SAGA_TIDBITS: list[str] = [
     "Reminds me of the time I navigated the Great Maelstrom of '98 using nothing but a rusted compass and a very confused seagull.",
     "I once saw a virus that tried to convince me it was a long-lost cousin from the Baltic. Charming fellow, but he walked the plank all the same.",
     "The fog was so thick in '03 you could barely fit a 'Hello' through the wire. I hand-carried every byte.",
     "I once wrestled a Kraken made of social media notifications. Every time I cut off a 'Like,' two 'Retweets' grew in its place.",
     "Many a Captain has been lost to the Sirens of the Inbox. I plugged my ears with digital wax.",
-    "The last captain who forgot to check The Manifest ended up in the Doldrums for three weeks.",
-    "There's an old sailor's saying: 'A clean Locker is a fast ship.' I just made that up, but it sounds true.",
-    "I've seen things you wouldn't believe. Attack ships on fire off the shoulder of Orion. Also, a lot of poorly organized task lists.",
-    "The sea teaches patience. So does waiting for API responses, I've found.",
-    "Once helped a captain remember where he buried his treasure. It was in his other pants.",
 ]
+
+# Combined for backwards compatibility
+CANONICAL_TIDBITS: list[str] = STANDALONE_TIDBITS + SAGA_TIDBITS
 
 
 # =============================================================================
@@ -112,7 +127,13 @@ class BardConfig:
     # Probability of adding a tidbit to a response (5-10%)
     tidbit_probability: float = 0.07
 
-    # Probability of continuing an active saga vs standalone tidbit
+    # Tidbit selection weights from LORE_SYSTEM.md Section 4.2 (#108)
+    # When a tidbit is added, these determine what type:
+    continue_saga_weight: float = 0.3  # 30% continue active saga
+    start_saga_weight: float = 0.2  # 20% start new saga
+    standalone_weight: float = 0.5  # 50% standalone tidbit
+
+    # Legacy: kept for backwards compatibility, use weights above
     saga_continuation_probability: float = 0.3
 
     # Maximum chapters in a saga before it concludes (#118)
@@ -478,7 +499,7 @@ class BardOfTheBilge(BaseAgent):
                 storm_mode_skipped=True,
             )
 
-        # Roll the dice
+        # Roll the dice for whether to add a tidbit at all
         if random.random() > self.bard_config.tidbit_probability:
             logger.debug(
                 "[WHISPER] Probability check failed, no tidbit",
@@ -490,19 +511,83 @@ class BardOfTheBilge(BaseAgent):
                 tidbit_added=False,
             )
 
-        # Check for active saga
-        active_saga = await self._get_active_saga(trace_id=trace_id)
+        # Select tidbit type based on weights from LORE_SYSTEM.md Section 4.2 (#108)
+        # 30% continue saga, 20% start saga, 50% standalone
+        return await self._select_and_add_tidbit(
+            clean_response=clean_response,
+            channel=channel,
+            trace_id=trace_id,
+        )
 
-        if active_saga and random.random() < self.bard_config.saga_continuation_probability:
-            # Try to continue the saga (may fail due to lifecycle rules)
+    async def _select_and_add_tidbit(
+        self,
+        clean_response: str,
+        channel: str | None = None,
+        trace_id: str | None = None,
+    ) -> SaltResult:
+        """
+        Select and add a tidbit based on weighted probabilities (#108).
+
+        Selection weights from LORE_SYSTEM.md Section 4.2:
+        - 30% continue active saga (if one exists)
+        - 20% start new saga
+        - 50% standalone tidbit
+
+        Falls back gracefully if saga operations fail.
+
+        Args:
+            clean_response: The response to salt.
+            channel: Optional channel where this is being told.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            SaltResult with the salted response and metadata.
+        """
+        roll = random.random()
+        continue_threshold = self.bard_config.continue_saga_weight
+        start_threshold = continue_threshold + self.bard_config.start_saga_weight
+
+        # 30% chance to continue an active saga
+        if roll < continue_threshold:
+            active_saga = await self._get_active_saga(trace_id=trace_id)
+            if active_saga:
+                try:
+                    tidbit, chapter = await self._continue_saga(
+                        active_saga, channel=channel, trace_id=trace_id
+                    )
+                    salted = f"{clean_response}\n\n_{tidbit}_"
+
+                    logger.info(
+                        f"[BEACON] Continued saga '{active_saga.saga_name}' chapter {chapter}",
+                        extra={"trace_id": trace_id, "agent_name": self.name},
+                    )
+
+                    return SaltResult(
+                        original_response=clean_response,
+                        salted_response=salted,
+                        tidbit_added=True,
+                        tidbit=tidbit,
+                        saga_id=active_saga.saga_id,
+                        chapter=chapter,
+                        is_continuation=True,
+                    )
+                except SagaLifecycleError as e:
+                    logger.debug(
+                        f"[WHISPER] Saga continuation blocked: {e}",
+                        extra={"trace_id": trace_id, "agent_name": self.name},
+                    )
+                    # Fall through to standalone tidbit
+
+        # 20% chance to start a new saga
+        elif roll < start_threshold:
             try:
-                tidbit, chapter = await self._continue_saga(
-                    active_saga, channel=channel, trace_id=trace_id
+                tidbit, saga_id, chapter = await self.start_new_saga(
+                    channel=channel, trace_id=trace_id
                 )
                 salted = f"{clean_response}\n\n_{tidbit}_"
 
                 logger.info(
-                    f"[BEACON] Continued saga '{active_saga.saga_name}' chapter {chapter}",
+                    f"[BEACON] Started new saga chapter {chapter}",
                     extra={"trace_id": trace_id, "agent_name": self.name},
                 )
 
@@ -511,19 +596,18 @@ class BardOfTheBilge(BaseAgent):
                     salted_response=salted,
                     tidbit_added=True,
                     tidbit=tidbit,
-                    saga_id=active_saga.saga_id,
+                    saga_id=saga_id,
                     chapter=chapter,
-                    is_continuation=True,
+                    is_continuation=False,
                 )
             except SagaLifecycleError as e:
-                # Lifecycle rule blocked continuation, fall back to standalone
                 logger.debug(
-                    f"[WHISPER] Saga continuation blocked: {e}",
+                    f"[WHISPER] New saga blocked: {e}",
                     extra={"trace_id": trace_id, "agent_name": self.name},
                 )
                 # Fall through to standalone tidbit
 
-        # Standalone tidbit (from canonical list)
+        # 50% standalone tidbit (or fallback from above)
         tidbit = self._generate_standalone_tidbit()
         salted = f"{clean_response}\n\n_{tidbit}_"
 
@@ -1542,6 +1626,8 @@ class BardOfTheBilge(BaseAgent):
 
 __all__ = [
     "CANONICAL_TIDBITS",
+    "SAGA_TIDBITS",
+    "STANDALONE_TIDBITS",
     "ActiveSaga",
     "BardConfig",
     "BardOfTheBilge",

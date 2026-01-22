@@ -55,6 +55,10 @@ def bard_with_no_interval(mock_neo4j: MagicMock, captain_uuid: str) -> BardOfThe
         saga_continuation_probability=1.0,  # Always try to continue
         max_saga_chapters=5,
         min_chapter_interval_hours=0,  # No interval for testing
+        # Force saga continuation path in weighted selection (#108)
+        continue_saga_weight=1.0,
+        start_saga_weight=0.0,
+        standalone_weight=0.0,
     )
     return BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
