@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="bugfix,tooling">
+    <meta name="post-slug" content="integration-test-fixes">
+    <meta name="post-excerpt" content="Fixing broken mocks in integration tests. When link_count goes missing and methods get renamed, the tests tell you honestly.">
+    <title>Mocking the Right Things | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">bugfix</span>
+                        <span class="category-tag">tooling</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Mocking the Right Things</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Tests tell stories. Sometimes those stories are "this code works." Sometimes they're "your mocks are stale and the real code moved on without you."</p>
+
+                <p>Today was the second kind.</p>
+
+                <h2>The Symptoms</h2>
+                <p>Four integration test issues sat open: #247 (Archivist to Thread), #248 (Scribe to Day nodes), #249 (Skills to Executor), #250 (Context to Response). All P1-high priority. All claiming to test critical integration flows.</p>
+
+                <p>All failing with the same theme: mocks returning the wrong shape.</p>
+
+                <pre><code>KeyError: 'link_count'
+
+AttributeError: Executor does not have the attribute '_handle_email_action'</code></pre>
+
+                <h2>The Root Causes</h2>
+
+                <h3>Problem 1: Missing link_count</h3>
+                <p>The Archivist creates Note nodes when archiving threads. The <code>create_note_with_links</code> function returns both the note UUID and how many entities were linked. The mock only returned the UUID.</p>
+
+                <pre><code># What the mock returned
+mock_neo4j_client.execute_write = AsyncMock(
+    return_value=[{"uuid": str(uuid.uuid4())}]
+)
+
+# What the code expected
+link_count: int = int(result[0]["link_count"]) if result else 0</code></pre>
+
+                <p>The fix: mock the right function at the right level.</p>
+
+                <pre><code>with (
+    patch("klabautermann.agents.archivist.summarize_thread", new_callable=AsyncMock),
+    patch("klabautermann.agents.archivist.create_note_with_links", new_callable=AsyncMock) as mock_create_note,
+):
+    mock_create_note.return_value = {
+        "note_uuid": expected_note_uuid,
+        "entity_link_count": 1,
+    }</code></pre>
+
+                <h3>Problem 2: Renamed Methods</h3>
+                <p>The test tried to mock <code>_handle_email_action</code>. The Executor has <code>_handle_gmail_send</code>.</p>
+
+                <p>Code evolves. Tests that mock internal methods need to evolve with them.</p>
+
+                <pre><code># Before (wrong)
+with patch.object(executor, "_handle_email_action", new_callable=AsyncMock):
+
+# After (right)
+with patch.object(executor, "_handle_gmail_send", new_callable=AsyncMock):</code></pre>
+
+                <h3>Problem 3: Wrong Import Path</h3>
+                <p>The orchestrator v2 test patched <code>klabautermann.agents.orchestrator.get_recent_summaries</code>. That module doesn't export that function. It's imported from <code>klabautermann.memory.context_queries</code> into <code>_orchestrator.py</code>.</p>
+
+                <p>When mocking, patch where the function is <em>used</em>, not where it's <em>defined</em>.</p>
+
+                <pre><code># Before (wrong)
+patch("klabautermann.agents.orchestrator.get_recent_summaries", ...)
+
+# After (right)
+patch("klabautermann.agents.orchestrator._orchestrator.get_recent_summaries",
+      new_callable=AsyncMock, ...)</code></pre>
+
+                <h2>The Philosophy</h2>
+                <p>Tests define what code should do. If tests fail, fix the code.</p>
+
+                <p>But what if tests fail because <em>mocks</em> are wrong?</p>
+
+                <p>Then you fix the mocks. The tests were right about what behavior to verify. They were just speaking a language the code no longer understood.</p>
+
+                <h2>The Results</h2>
+                <ul>
+                    <li>35 tests pass in <code>test_memory_lifecycle.py</code> and <code>test_orchestrator_v2.py</code></li>
+                    <li>4 issues closed: #247, #248, #249, #250</li>
+                    <li>Integration test coverage for Archivist, Scribe, Executor, and Context flows validated</li>
+                </ul>
+
+                <h2>The Lesson</h2>
+                <p>Mocks are contracts. They say "when you call this, you get that." When the real code changes what "this" looks like or what "that" contains, the contract is broken.</p>
+
+                <p>The tests didn't lie. They told us exactly where the contracts had drifted.</p>
+
+                <p>The voyage continues. With better mocks.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
