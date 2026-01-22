@@ -18,6 +18,17 @@ Contains:
 - weight_decay: Relationship weight decay for graph maintenance
 """
 
+from klabautermann.memory.backup import (
+    BackupMetadata,
+    BackupSnapshot,
+    RestoreResult,
+    clear_database,
+    create_backup,
+    load_backup_from_file,
+    restore_backup,
+    save_backup_to_file,
+    validate_backup,
+)
 from klabautermann.memory.context_statistics import (
     ContextWindowMetrics,
     GlobalContextMetrics,
@@ -113,6 +124,16 @@ from klabautermann.memory.zoom_search import (
 
 
 __all__ = [
+    # Backup/Restore
+    "BackupMetadata",
+    "BackupSnapshot",
+    "RestoreResult",
+    "clear_database",
+    "create_backup",
+    "load_backup_from_file",
+    "restore_backup",
+    "save_backup_to_file",
+    "validate_backup",
     # Weight Decay
     "DEFAULT_ACCESS_BOOST",
     "DEFAULT_HALF_LIFE_SECONDS",
