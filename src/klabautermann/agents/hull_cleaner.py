@@ -5,8 +5,11 @@ Graph pruning and maintenance agent that removes "barnacles" - weak relationship
 redundant paths, and stale data that accumulate over time. This keeps the graph
 performant and reduces noise in search results.
 
+Also handles duplicate entity detection using Levenshtein similarity and
+entity merging using APOC refactor operations.
+
 Reference: specs/architecture/AGENTS_EXTENDED.md Section 5
-Issues: #79, #80, #81, #88
+Issues: #79, #80, #81, #84, #85, #88
 """
 
 from __future__ import annotations
@@ -48,6 +51,30 @@ class PruningAction(str, Enum):
     MERGE_NODES = "MERGE_NODES"
     ARCHIVE_THREAD = "ARCHIVE_THREAD"
     PREVIEW = "PREVIEW"
+    MERGE_PREVIEW = "MERGE_PREVIEW"
+
+
+@dataclass
+class DuplicateCandidate:
+    """A candidate pair of potentially duplicate entities."""
+
+    uuid1: str
+    uuid2: str
+    name1: str
+    name2: str
+    entity_type: str  # "Person" or "Organization"
+    similarity: float
+    email_match: bool = False
+
+    @property
+    def confidence(self) -> str:
+        """Get confidence level for this duplicate pair."""
+        if self.email_match or self.similarity >= 0.95:
+            return "HIGH"
+        elif self.similarity >= 0.85:
+            return "MEDIUM"
+        else:
+            return "LOW"
 
 
 @dataclass
@@ -73,6 +100,12 @@ class HullCleanerConfig:
     # Orphan cleanup settings
     remove_orphan_messages: bool = True
     orphan_batch_size: int = 50
+
+    # Duplicate detection settings
+    detect_duplicates: bool = True
+    duplicate_similarity_threshold: float = 0.85
+    duplicate_auto_merge_threshold: float = 0.95  # Auto-merge above this threshold
+    max_duplicates_per_run: int = 100
 
     # Run limits
     max_deletions_per_run: int = 1000
@@ -133,6 +166,35 @@ class PruningResult:
             "relationships_pruned": self.relationships_pruned,
             "nodes_found": self.nodes_found,
             "nodes_removed": self.nodes_removed,
+            "errors": self.errors,
+            "duration_ms": round(self.duration_ms, 2),
+            "audit_entry_count": len(self.audit_entries),
+        }
+
+
+@dataclass
+class MergeResult:
+    """Result of a duplicate merge operation."""
+
+    operation: str
+    dry_run: bool
+    duplicates_found: int
+    duplicates_merged: int
+    high_confidence: int
+    medium_confidence: int
+    errors: list[str]
+    duration_ms: float
+    audit_entries: list[AuditEntry] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "operation": self.operation,
+            "dry_run": self.dry_run,
+            "duplicates_found": self.duplicates_found,
+            "duplicates_merged": self.duplicates_merged,
+            "high_confidence": self.high_confidence,
+            "medium_confidence": self.medium_confidence,
             "errors": self.errors,
             "duration_ms": round(self.duration_ms, 2),
             "audit_entry_count": len(self.audit_entries),
@@ -233,6 +295,27 @@ class HullCleaner(BaseAgent):
         elif operation == "remove_orphan_messages":
             result = await self.remove_orphan_messages(dry_run=dry_run, trace_id=trace_id)
             result_payload = result.to_dict()
+        elif operation == "find_duplicates":
+            duplicates = await self.find_duplicate_entities(trace_id=trace_id)
+            result_payload = {
+                "duplicates": [
+                    {
+                        "uuid1": d.uuid1,
+                        "uuid2": d.uuid2,
+                        "name1": d.name1,
+                        "name2": d.name2,
+                        "entity_type": d.entity_type,
+                        "similarity": round(d.similarity, 3),
+                        "confidence": d.confidence,
+                        "email_match": d.email_match,
+                    }
+                    for d in duplicates
+                ],
+                "count": len(duplicates),
+            }
+        elif operation == "merge_duplicates":
+            merge_result = await self.merge_duplicates(dry_run=dry_run, trace_id=trace_id)
+            result_payload = merge_result.to_dict()
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -313,8 +396,23 @@ class HullCleaner(BaseAgent):
                 )
                 errors.append(error_msg)
 
+        # 3. Detect and merge duplicate entities
+        if self.hull_config.detect_duplicates:
+            try:
+                merge_result = await self.merge_duplicates(dry_run=dry_run, trace_id=trace_id)
+                # Merged nodes count as "removed" (uuid2 merged into uuid1)
+                total_nodes_found += merge_result.duplicates_found
+                total_nodes_removed += merge_result.duplicates_merged
+                self._audit_log.extend(merge_result.audit_entries)
+            except Exception as e:
+                error_msg = f"Duplicate entity merge failed: {e}"
+                logger.error(
+                    f"[STORM] {error_msg}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                errors.append(error_msg)
+
         # Future: Add more pruning operations here
-        # - Duplicate entity detection
         # - Transitive path reduction
 
         duration_ms = (time.time() - start_time) * 1000
@@ -664,6 +762,306 @@ class HullCleaner(BaseAgent):
         return result
 
     # =========================================================================
+    # Duplicate Entity Operations
+    # =========================================================================
+
+    async def find_duplicate_entities(
+        self,
+        threshold: float | None = None,
+        limit: int | None = None,
+        trace_id: str | None = None,
+    ) -> list[DuplicateCandidate]:
+        """
+        Find potential duplicate Person/Organization nodes using Levenshtein similarity.
+
+        Uses APOC text similarity functions to compare entity names.
+
+        Args:
+            threshold: Similarity threshold (default from config, typically 0.85).
+            limit: Maximum duplicates to return (default from config).
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of DuplicateCandidate objects representing potential duplicates.
+        """
+        threshold = threshold or self.hull_config.duplicate_similarity_threshold
+        limit = limit or self.hull_config.max_duplicates_per_run
+
+        logger.debug(
+            f"[WHISPER] Finding duplicate entities (threshold={threshold})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        duplicates: list[DuplicateCandidate] = []
+
+        # Find duplicate Persons
+        person_query = """
+        MATCH (p1:Person), (p2:Person)
+        WHERE p1.uuid < p2.uuid
+          AND p1.name IS NOT NULL
+          AND p2.name IS NOT NULL
+          AND apoc.text.levenshteinSimilarity(
+              toLower(p1.name),
+              toLower(p2.name)
+          ) > $threshold
+        WITH p1, p2,
+             apoc.text.levenshteinSimilarity(toLower(p1.name), toLower(p2.name)) as similarity,
+             CASE WHEN p1.email IS NOT NULL AND p1.email = p2.email THEN true ELSE false END as email_match
+        RETURN p1.uuid as uuid1, p2.uuid as uuid2,
+               p1.name as name1, p2.name as name2,
+               similarity, email_match
+        ORDER BY similarity DESC
+        LIMIT $limit
+        """
+
+        person_results = await self.neo4j.execute_query(
+            person_query,
+            {"threshold": threshold, "limit": limit},
+            trace_id=trace_id,
+        )
+
+        for row in person_results:
+            duplicates.append(
+                DuplicateCandidate(
+                    uuid1=row["uuid1"],
+                    uuid2=row["uuid2"],
+                    name1=row["name1"],
+                    name2=row["name2"],
+                    entity_type="Person",
+                    similarity=row["similarity"],
+                    email_match=row["email_match"],
+                )
+            )
+
+        # Find duplicate Organizations
+        org_query = """
+        MATCH (o1:Organization), (o2:Organization)
+        WHERE o1.uuid < o2.uuid
+          AND o1.name IS NOT NULL
+          AND o2.name IS NOT NULL
+          AND apoc.text.levenshteinSimilarity(
+              toLower(o1.name),
+              toLower(o2.name)
+          ) > $threshold
+        WITH o1, o2,
+             apoc.text.levenshteinSimilarity(toLower(o1.name), toLower(o2.name)) as similarity
+        RETURN o1.uuid as uuid1, o2.uuid as uuid2,
+               o1.name as name1, o2.name as name2,
+               similarity
+        ORDER BY similarity DESC
+        LIMIT $limit
+        """
+
+        org_results = await self.neo4j.execute_query(
+            org_query,
+            {"threshold": threshold, "limit": limit},
+            trace_id=trace_id,
+        )
+
+        for row in org_results:
+            duplicates.append(
+                DuplicateCandidate(
+                    uuid1=row["uuid1"],
+                    uuid2=row["uuid2"],
+                    name1=row["name1"],
+                    name2=row["name2"],
+                    entity_type="Organization",
+                    similarity=row["similarity"],
+                    email_match=False,
+                )
+            )
+
+        # Sort by similarity descending (highest confidence first)
+        duplicates.sort(key=lambda d: d.similarity, reverse=True)
+
+        logger.debug(
+            f"[WHISPER] Found {len(duplicates)} potential duplicates "
+            f"({sum(1 for d in duplicates if d.entity_type == 'Person')} persons, "
+            f"{sum(1 for d in duplicates if d.entity_type == 'Organization')} orgs)",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return duplicates
+
+    async def merge_duplicates(
+        self,
+        dry_run: bool = True,
+        auto_merge_only: bool = True,
+        trace_id: str | None = None,
+    ) -> MergeResult:
+        """
+        Merge duplicate entities, preserving all relationships.
+
+        Uses APOC refactor to merge nodes. By default, only auto-merges
+        HIGH confidence duplicates (similarity >= 0.95 or email match).
+
+        Args:
+            dry_run: If True, only preview changes without merging.
+            auto_merge_only: If True, only merge HIGH confidence duplicates.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            MergeResult with operation statistics.
+        """
+        start_time = time.time()
+
+        logger.info(
+            f"[CHART] Merging duplicate entities "
+            f"(dry_run={dry_run}, auto_merge_only={auto_merge_only})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Find all duplicates
+        duplicates = await self.find_duplicate_entities(trace_id=trace_id)
+
+        audit_entries: list[AuditEntry] = []
+        merged_count = 0
+        high_confidence_count = 0
+        medium_confidence_count = 0
+        errors: list[str] = []
+
+        for dup in duplicates:
+            if dup.confidence == "HIGH":
+                high_confidence_count += 1
+            elif dup.confidence == "MEDIUM":
+                medium_confidence_count += 1
+
+            # Skip low confidence duplicates
+            if dup.confidence == "LOW":
+                continue
+
+            # In auto_merge_only mode, skip MEDIUM confidence
+            if auto_merge_only and dup.confidence == "MEDIUM":
+                # Still create a preview entry for review
+                entry = AuditEntry(
+                    timestamp=datetime.now(),
+                    action=PruningAction.MERGE_PREVIEW,
+                    entity_type=dup.entity_type.lower(),
+                    entity_id=f"{dup.uuid1}:{dup.uuid2}",
+                    reason=f"Medium confidence duplicate: '{dup.name1}' ≈ '{dup.name2}' "
+                    f"(similarity: {dup.similarity:.2%})",
+                    metadata={
+                        "uuid1": dup.uuid1,
+                        "uuid2": dup.uuid2,
+                        "name1": dup.name1,
+                        "name2": dup.name2,
+                        "similarity": dup.similarity,
+                        "confidence": dup.confidence,
+                        "requires_review": True,
+                    },
+                )
+                audit_entries.append(entry)
+                continue
+
+            # Create audit entry for HIGH confidence merge
+            entry = AuditEntry(
+                timestamp=datetime.now(),
+                action=PruningAction.MERGE_PREVIEW if dry_run else PruningAction.MERGE_NODES,
+                entity_type=dup.entity_type.lower(),
+                entity_id=f"{dup.uuid1}:{dup.uuid2}",
+                reason=f"High confidence duplicate: '{dup.name1}' ≈ '{dup.name2}' "
+                f"(similarity: {dup.similarity:.2%}"
+                f"{', email match' if dup.email_match else ''})",
+                metadata={
+                    "uuid1": dup.uuid1,
+                    "uuid2": dup.uuid2,
+                    "name1": dup.name1,
+                    "name2": dup.name2,
+                    "similarity": dup.similarity,
+                    "confidence": dup.confidence,
+                    "email_match": dup.email_match,
+                },
+            )
+            audit_entries.append(entry)
+
+            if not dry_run:
+                try:
+                    await self._merge_nodes(dup.uuid1, dup.uuid2, trace_id)
+                    merged_count += 1
+                except Exception as e:
+                    error_msg = f"Failed to merge {dup.name1} with {dup.name2}: {e}"
+                    logger.error(
+                        f"[STORM] {error_msg}",
+                        extra={"trace_id": trace_id, "agent_name": self.name},
+                    )
+                    errors.append(error_msg)
+            else:
+                merged_count += 1  # Count as "would be merged" in dry run
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        result = MergeResult(
+            operation="merge_duplicates",
+            dry_run=dry_run,
+            duplicates_found=len(duplicates),
+            duplicates_merged=merged_count,
+            high_confidence=high_confidence_count,
+            medium_confidence=medium_confidence_count,
+            errors=errors,
+            duration_ms=duration_ms,
+            audit_entries=audit_entries,
+        )
+
+        logger.info(
+            f"[BEACON] Duplicate merge complete: "
+            f"found {len(duplicates)} duplicates, "
+            f"merged {merged_count} HIGH confidence "
+            f"({medium_confidence_count} MEDIUM require review) "
+            f"({'preview' if dry_run else 'actual'})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return result
+
+    async def _merge_nodes(
+        self,
+        keep_uuid: str,
+        remove_uuid: str,
+        trace_id: str | None = None,
+    ) -> bool:
+        """
+        Merge two nodes using APOC, preserving all relationships.
+
+        The node with keep_uuid is preserved, and all relationships from
+        remove_uuid are transferred to it.
+
+        Args:
+            keep_uuid: UUID of the node to keep.
+            remove_uuid: UUID of the node to merge into keep_uuid.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            True if merge was successful, False otherwise.
+        """
+        # Use APOC refactor to merge nodes
+        # properties: 'combine' keeps all properties from both nodes
+        # mergeRels: true transfers all relationships
+        query = """
+        MATCH (keep {uuid: $keep_uuid}), (remove {uuid: $remove_uuid})
+        CALL apoc.refactor.mergeNodes([keep, remove], {
+            properties: 'combine',
+            mergeRels: true
+        })
+        YIELD node
+        RETURN node.uuid as merged_uuid
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {"keep_uuid": keep_uuid, "remove_uuid": remove_uuid},
+            trace_id=trace_id,
+        )
+
+        if result:
+            logger.debug(
+                f"[WHISPER] Merged {remove_uuid} into {keep_uuid}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return True
+
+        return False
+
+    # =========================================================================
     # Statistics
     # =========================================================================
 
@@ -744,8 +1142,10 @@ class HullCleaner(BaseAgent):
 
 __all__ = [
     "AuditEntry",
+    "DuplicateCandidate",
     "HullCleaner",
     "HullCleanerConfig",
+    "MergeResult",
     "PruningAction",
     "PruningResult",
     "PruningRule",
