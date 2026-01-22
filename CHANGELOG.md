@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- TelegramDriver for Telegram bot integration (#129, #130, #131, #132, #133, #134)
+  - `TelegramDriver` class extending `BaseChannel`
+  - Bot token configuration via `TELEGRAM_BOT_TOKEN` env or config
+  - `/start`, `/help`, `/status` commands
+  - Text message handling with input sanitization
+  - Voice message transcription via OpenAI Whisper
+  - User authorization via `allowed_user_ids` whitelist
+  - Thread isolation per `chat_id`
+  - 21 new unit tests
 - Grafana dashboard for metrics visualization (#274)
 - Dashboard panels: Agent Performance, API Performance, LLM Performance, Graph Operations
 - `docker-compose.monitoring.yml` for Prometheus + Grafana monitoring stack
