@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -23,7 +24,12 @@ from klabautermann.core.logger import logger
 
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
+
     from klabautermann.channels.base_channel import BaseChannel
+
+# Type alias for failure callback (sync or async)
+FailureCallback = Callable[[str, str], "Awaitable[None] | None"]
 
 
 # =============================================================================
@@ -94,6 +100,33 @@ class ChannelStatusReport:
     unhealthy_count: int
 
 
+@dataclass
+class BroadcastResult:
+    """Result of a broadcast operation."""
+
+    timestamp: datetime
+    content: str
+    results: dict[str, bool]  # channel_name -> success
+    errors: dict[str, str]  # channel_name -> error message
+    delivered_count: int
+    failed_count: int
+
+    @property
+    def all_delivered(self) -> bool:
+        """Check if message was delivered to all channels."""
+        return self.failed_count == 0
+
+    @property
+    def channels_delivered(self) -> list[str]:
+        """List of channels that received the message."""
+        return [name for name, success in self.results.items() if success]
+
+    @property
+    def channels_failed(self) -> list[str]:
+        """List of channels that failed to receive the message."""
+        return [name for name, success in self.results.items() if not success]
+
+
 # =============================================================================
 # Channel Configuration
 # =============================================================================
@@ -111,6 +144,9 @@ class ChannelConfig:
     discord_config: dict[str, Any] = field(default_factory=dict)
     health_check_interval: float = 30.0
     stale_threshold: float = 300.0  # 5 minutes
+    auto_restart: bool = True  # Auto-restart failed channels
+    max_restart_attempts: int = 3  # Max restart attempts before giving up
+    restart_backoff_seconds: float = 5.0  # Initial backoff between restarts
 
     @classmethod
     def from_env(cls) -> ChannelConfig:
@@ -128,6 +164,9 @@ class ChannelConfig:
             enable_discord=str_to_bool(os.getenv("ENABLE_DISCORD")),
             health_check_interval=float(os.getenv("HEALTH_CHECK_INTERVAL", "30.0")),
             stale_threshold=float(os.getenv("CHANNEL_STALE_THRESHOLD", "300.0")),
+            auto_restart=str_to_bool(os.getenv("CHANNEL_AUTO_RESTART", "true")),
+            max_restart_attempts=int(os.getenv("CHANNEL_MAX_RESTART_ATTEMPTS", "3")),
+            restart_backoff_seconds=float(os.getenv("CHANNEL_RESTART_BACKOFF", "5.0")),
         )
 
 
@@ -173,6 +212,11 @@ class ChannelManager:
         self._health_task: asyncio.Task[None] | None = None
         self._manager_started_at: datetime | None = None
         self._registration_order: list[str] = []
+        # Restart tracking
+        self._restart_attempts: dict[str, int] = {}
+        self._last_restart_at: dict[str, datetime | None] = {}
+        # Failure callbacks
+        self._failure_callbacks: list[FailureCallback] = []
 
     # =========================================================================
     # Registration
@@ -197,6 +241,8 @@ class ChannelManager:
         self._message_counts[name] = 0
         self._last_message_at[name] = None
         self._registration_order.append(name)
+        self._restart_attempts[name] = 0
+        self._last_restart_at[name] = None
 
         logger.debug(
             f"[WHISPER] Registered channel: {name}",
@@ -226,6 +272,8 @@ class ChannelManager:
         self._started_at.pop(name, None)
         self._health_status.pop(name, None)
         self._registration_order.remove(name)
+        self._restart_attempts.pop(name, None)
+        self._last_restart_at.pop(name, None)
 
         logger.debug(f"[WHISPER] Unregistered channel: {name}")
 
@@ -377,7 +425,11 @@ class ChannelManager:
 
         channel = self._channels[name]
 
-        logger.info(f"[CHART] Restarting channel: {name}")
+        # Track restart attempt
+        self._restart_attempts[name] = self._restart_attempts.get(name, 0) + 1
+        self._last_restart_at[name] = datetime.now()
+
+        logger.info(f"[CHART] Restarting channel: {name} (attempt {self._restart_attempts[name]})")
 
         # Stop if running
         if self._status[name] == ChannelStatus.RUNNING:
@@ -393,12 +445,47 @@ class ChannelManager:
             await channel.start()
             self._status[name] = ChannelStatus.RUNNING
             self._started_at[name] = datetime.now()
+            # Reset restart attempts on success
+            self._restart_attempts[name] = 0
             logger.info(f"[BEACON] Channel restarted: {name}")
             return True
         except Exception as e:
             self._status[name] = ChannelStatus.ERROR
-            logger.error(f"[STORM] Failed to restart channel {name}: {e}")
+            error_msg = str(e)
+            logger.error(f"[STORM] Failed to restart channel {name}: {error_msg}")
+            # Notify failure callbacks
+            await self._notify_failure(name, error_msg)
             return False
+
+    def on_failure(self, callback: FailureCallback) -> None:
+        """
+        Register a callback for channel failures.
+
+        The callback receives (channel_name, error_message).
+        Can be sync or async.
+
+        Args:
+            callback: Function to call on channel failure.
+        """
+        self._failure_callbacks.append(callback)
+
+    async def _notify_failure(self, channel_name: str, error: str) -> None:
+        """Notify all registered failure callbacks."""
+        for callback in self._failure_callbacks:
+            try:
+                result = callback(channel_name, error)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.error(f"[STORM] Failure callback error: {e}")
+
+    def get_restart_attempts(self, name: str) -> int:
+        """Get number of restart attempts for a channel."""
+        return self._restart_attempts.get(name, 0)
+
+    def reset_restart_attempts(self, name: str) -> None:
+        """Reset restart attempt counter for a channel."""
+        self._restart_attempts[name] = 0
 
     # =========================================================================
     # Health Monitoring
@@ -494,6 +581,46 @@ class ChannelManager:
                     f"[SWELL] Channel unhealthy: {name}",
                     extra={"channel": name, "error": error},
                 )
+                # Auto-restart if enabled and under retry limit
+                if self._config.auto_restart:
+                    await self._attempt_auto_restart(name, error or "unhealthy")
+
+    async def _attempt_auto_restart(self, name: str, error: str) -> None:
+        """Attempt to auto-restart a failed channel with backoff."""
+        attempts = self._restart_attempts.get(name, 0)
+
+        if attempts >= self._config.max_restart_attempts:
+            logger.error(
+                f"[STORM] Channel {name} exceeded max restart attempts ({attempts}). "
+                "Manual intervention required.",
+                extra={"channel": name, "attempts": attempts},
+            )
+            await self._notify_failure(name, f"Max restarts exceeded: {error}")
+            return
+
+        # Exponential backoff
+        backoff = self._config.restart_backoff_seconds * (2**attempts)
+
+        # Check if enough time has passed since last restart
+        last_restart = self._last_restart_at.get(name)
+        if last_restart is not None:
+            elapsed = (datetime.now() - last_restart).total_seconds()
+            if elapsed < backoff:
+                logger.debug(f"[WHISPER] Waiting {backoff - elapsed:.1f}s before restart: {name}")
+                return
+
+        logger.info(
+            f"[CHART] Auto-restarting unhealthy channel: {name} "
+            f"(attempt {attempts + 1}/{self._config.max_restart_attempts})",
+            extra={"channel": name, "error": error},
+        )
+
+        success = await self.restart_channel(name)
+        if not success:
+            logger.error(
+                f"[STORM] Auto-restart failed for channel: {name}",
+                extra={"channel": name},
+            )
 
     def get_health(self, name: str) -> HealthStatus | None:
         """Get health status for a channel."""
@@ -522,6 +649,128 @@ class ChannelManager:
         if channel_name in self._message_counts:
             self._message_counts[channel_name] += 1
             self._last_message_at[channel_name] = datetime.now()
+
+    # =========================================================================
+    # Cross-Channel Messaging
+    # =========================================================================
+
+    async def broadcast(
+        self,
+        content: str,
+        thread_ids: dict[str, str] | None = None,
+        exclude_channels: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> BroadcastResult:
+        """
+        Broadcast a message to all active channels.
+
+        Each channel formats the message according to its capabilities
+        (e.g., Markdown for Telegram, Rich for CLI).
+
+        Args:
+            content: Message content to broadcast.
+            thread_ids: Optional dict mapping channel names to thread IDs.
+                       If not provided, uses a default broadcast thread.
+            exclude_channels: Channel names to exclude from broadcast.
+            metadata: Optional channel-specific metadata.
+
+        Returns:
+            BroadcastResult with delivery status per channel.
+        """
+        exclude = exclude_channels or []
+        results: dict[str, bool] = {}
+        errors: dict[str, str] = {}
+
+        logger.info(
+            f"[CHART] Broadcasting message to {len(self.active_channels)} channels",
+            extra={"content_length": len(content), "exclude": exclude},
+        )
+
+        for name in self.active_channels:
+            if name in exclude:
+                logger.debug(f"[WHISPER] Skipping excluded channel: {name}")
+                continue
+
+            channel = self._channels.get(name)
+            if channel is None:
+                continue
+
+            # Get thread ID for this channel
+            thread_id = (thread_ids or {}).get(name, f"broadcast-{name}")
+
+            try:
+                await channel.send_message(
+                    thread_id=thread_id,
+                    content=content,
+                    metadata=metadata,
+                )
+                results[name] = True
+                logger.debug(f"[WHISPER] Broadcast delivered to: {name}")
+            except Exception as e:
+                results[name] = False
+                errors[name] = str(e)
+                logger.error(
+                    f"[STORM] Broadcast failed for {name}: {e}",
+                    extra={"channel": name},
+                )
+
+        delivered = sum(1 for v in results.values() if v)
+        failed = len(results) - delivered
+
+        logger.info(
+            f"[BEACON] Broadcast complete: {delivered} delivered, {failed} failed",
+            extra={"results": results},
+        )
+
+        return BroadcastResult(
+            timestamp=datetime.now(),
+            content=content,
+            results=results,
+            errors=errors,
+            delivered_count=delivered,
+            failed_count=failed,
+        )
+
+    async def send_to_channel(
+        self,
+        channel_name: str,
+        content: str,
+        thread_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Send a message to a specific channel.
+
+        Args:
+            channel_name: Name of the channel to send to.
+            content: Message content.
+            thread_id: Optional thread ID. Defaults to default thread.
+            metadata: Optional channel-specific metadata.
+
+        Returns:
+            True if message was sent successfully.
+        """
+        channel = self._channels.get(channel_name)
+        if channel is None:
+            logger.error(f"[STORM] Channel not found: {channel_name}")
+            return False
+
+        if self._status.get(channel_name) != ChannelStatus.RUNNING:
+            logger.warning(f"[SWELL] Channel not running: {channel_name}")
+            return False
+
+        thread = thread_id or f"default-{channel_name}"
+
+        try:
+            await channel.send_message(
+                thread_id=thread,
+                content=content,
+                metadata=metadata,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"[STORM] Failed to send to {channel_name}: {e}")
+            return False
 
     # =========================================================================
     # Status Reporting
@@ -613,6 +862,7 @@ def reset_channel_manager() -> None:
 # =============================================================================
 
 __all__ = [
+    "BroadcastResult",
     "ChannelConfig",
     "ChannelInfo",
     "ChannelManager",

@@ -18,6 +18,7 @@ from klabautermann.channels.base_channel import BaseChannel
 from klabautermann.channels.cli_driver import CLIDriver
 from klabautermann.channels.cli_renderer import CLIRenderer
 from klabautermann.channels.manager import (
+    BroadcastResult,
     ChannelConfig,
     ChannelInfo,
     ChannelManager,
@@ -53,6 +54,7 @@ __all__ = [
     "CLIRenderer",
     "TelegramDriver",
     # Manager
+    "BroadcastResult",
     "ChannelConfig",
     "ChannelInfo",
     "ChannelManager",
