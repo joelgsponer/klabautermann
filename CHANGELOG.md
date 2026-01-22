@@ -18,6 +18,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Cartographer community detection agent (#69, #70, #71, #72, #73)
+  - `Cartographer` agent skeleton extending `BaseAgent`
+  - `CartographerConfig` for configurable detection settings (projection, thresholds)
+  - `Community` node model for Knowledge Islands (themed clusters)
+  - `CommunityMember` for tracking island member nodes
+  - `CommunityTheme` enum for classification (professional, family, social, hobbies, health, finance)
+  - `DetectionResult` for tracking detection run statistics
+  - GDS graph projection with configurable node labels and relationships
+  - Louvain community detection algorithm integration
+  - `classify_theme()` for theme classification based on member node labels
+  - `PART_OF_ISLAND` relationship linking nodes to their Knowledge Islands
+  - Community update with overlap detection (50% threshold)
+  - Statistics queries for community health monitoring
+  - `process_message()` support for inter-agent communication
+  - 36 new unit tests for comprehensive coverage
 - BardOfTheBilge lore storytelling agent (#37, #38, #39, #40)
   - `BardOfTheBilge` agent skeleton extending `BaseAgent`
   - `BardConfig` for configurable tidbit behavior (probability, saga settings)
