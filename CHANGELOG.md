@@ -18,6 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Saga lifecycle management for BardOfTheBilge agent (#118, #119, #120, #121)
+  - Max chapters per saga enforcement (`max_saga_chapters`, default 5)
+    - Raises `SagaCompleteError` when attempting to continue a completed saga
+  - Max active sagas limit (`max_active_sagas`, default 3)
+    - Raises `SagaLimitReachedError` when starting new saga at limit
+    - Lists active saga names in error message
+  - Saga timeout auto-completion (`saga_timeout_days`, default 30)
+    - `is_timed_out` flag on `ActiveSaga` dataclass
+    - `archive_timed_out_sagas()` closes stale sagas with closing chapter
+    - Raises `SagaTimedOutError` when continuing timed-out saga
+  - Minimum time between chapters (`min_chapter_interval_hours`, default 1.0)
+    - `_can_add_chapter()` helper returns (can_add, hours_remaining)
+    - Raises `ChapterTooSoonError` with time remaining info
+  - `SagaLifecycleError` base exception class
+  - `_get_active_sagas()` returns all non-timed-out active sagas
+  - New process_message operations: `archive_timed_out`, `get_active_sagas`
+  - Graceful fallback to standalone tidbits when lifecycle errors occur in `salt_response`
+  - 27 new unit tests for saga lifecycle features
 - Proactive morning briefing generation for OfficerOfTheWatch agent (#4)
   - `generate_morning_briefing()` method produces structured daily summaries
   - `MorningBriefing` dataclass with events, tasks, alerts, and summary text
