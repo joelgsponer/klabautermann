@@ -20,6 +20,7 @@ User-visible changes to Klabautermann.
 ### Improved
 
 - **AI-First Intent Classification**: Intent classification now uses pure LLM semantic understanding - no keyword matching fallback, ensuring more intelligent and context-aware routing
+- **AI-First Zoom Level Detection**: Search queries now use LLM semantic understanding to determine retrieval granularity (macro/meso/micro) - no keyword matching
 - **Multi-Intent Message Handling**: Orchestrator now identifies and handles multiple intents in a single message (e.g., "Learned that Sarah works at Acme. What's her email?")
 - **Parallel Subagent Execution**: Independent tasks (search, ingestion, actions) execute concurrently for faster responses
 - **Richer Context Awareness**: Cross-thread summaries and Knowledge Island context inform responses, enabling more intelligent suggestions

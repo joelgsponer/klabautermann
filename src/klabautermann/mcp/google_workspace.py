@@ -89,6 +89,23 @@ class CreateEventResult(BaseModel):
     error: str | None = None
 
 
+class UpdateEventResult(BaseModel):
+    """Result of updating a calendar event."""
+
+    success: bool
+    event_id: str | None = None
+    event_link: str | None = None
+    error: str | None = None
+
+
+class DeleteEventResult(BaseModel):
+    """Result of deleting a calendar event."""
+
+    success: bool
+    event_id: str | None = None
+    error: str | None = None
+
+
 class EmailOperationResult(BaseModel):
     """Result of email management operations (delete, archive, label)."""
 
@@ -1308,6 +1325,112 @@ class GoogleWorkspaceBridge:
                 extra={"title": title, "start": start.isoformat()},
             )
             return CreateEventResult(success=False, error=str(e))
+
+    async def update_event(
+        self,
+        event_id: str,
+        title: str | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        description: str | None = None,
+        location: str | None = None,
+        attendees: list[str] | None = None,
+        context: Any = None,  # noqa: ARG002
+    ) -> UpdateEventResult:
+        """
+        Update an existing calendar event.
+
+        Uses PATCH to allow partial updates - only specified fields are changed.
+
+        Args:
+            event_id: The ID of the event to update
+            title: New event title/summary (optional)
+            start: New start time (optional)
+            end: New end time (optional)
+            description: New event description (optional)
+            location: New event location (optional)
+            attendees: New list of attendee email addresses (optional)
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result containing updated event ID and link, or error details
+        """
+        await self.start()
+
+        def do_update() -> dict[str, Any]:
+            event_body: dict[str, Any] = {}
+
+            if title is not None:
+                event_body["summary"] = title
+            if start is not None:
+                event_body["start"] = {"dateTime": start.isoformat(), "timeZone": "UTC"}
+            if end is not None:
+                event_body["end"] = {"dateTime": end.isoformat(), "timeZone": "UTC"}
+            if description is not None:
+                event_body["description"] = description
+            if location is not None:
+                event_body["location"] = location
+            if attendees is not None:
+                event_body["attendees"] = [{"email": email} for email in attendees]
+
+            event: dict[str, Any] = (
+                self._calendar_service.events()
+                .patch(calendarId="primary", eventId=event_id, body=event_body)
+                .execute()
+            )
+            return event
+
+        try:
+            result = await self._rate_limited_call("calendar", do_update)
+            logger.info(
+                f"[BEACON] Calendar event updated: {event_id}",
+                extra={"event_id": event_id, "title": title},
+            )
+            return UpdateEventResult(
+                success=True,
+                event_id=result.get("id"),
+                event_link=result.get("htmlLink"),
+            )
+        except (HttpError, ExternalServiceError) as e:
+            logger.error(
+                f"[STORM] Calendar event update failed: {e}",
+                extra={"event_id": event_id},
+            )
+            return UpdateEventResult(success=False, event_id=event_id, error=str(e))
+
+    async def delete_event(
+        self,
+        event_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> DeleteEventResult:
+        """
+        Delete a calendar event.
+
+        Args:
+            event_id: The ID of the event to delete
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Result indicating success or error details
+        """
+        await self.start()
+
+        def do_delete() -> None:
+            self._calendar_service.events().delete(calendarId="primary", eventId=event_id).execute()
+
+        try:
+            await self._rate_limited_call("calendar", do_delete)
+            logger.info(
+                f"[BEACON] Calendar event deleted: {event_id}",
+                extra={"event_id": event_id},
+            )
+            return DeleteEventResult(success=True, event_id=event_id)
+        except (HttpError, ExternalServiceError) as e:
+            logger.error(
+                f"[STORM] Calendar event deletion failed: {e}",
+                extra={"event_id": event_id},
+            )
+            return DeleteEventResult(success=False, event_id=event_id, error=str(e))
 
     async def get_todays_events(
         self,
