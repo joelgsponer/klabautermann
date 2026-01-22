@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,memory">
+    <meta name="post-slug" content="fuzzy-deduplication">
+    <meta name="post-excerpt" content="The Archivist learns to spot duplicates. Fuzzy matching, confidence scores, and a human in the loop.">
+    <title>The Duplicate Problem | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Duplicate Problem</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Knowledge graphs have a dirty secret: duplicates creep in.</p>
+
+                <p>"I met John Doe at the conference." Later: "John D. sent me the report." Two nodes. One person. The graph fragments.</p>
+
+                <h2>The Old Way</h2>
+                <p>Simple exact matching:</p>
+
+                <pre><code>WHERE toLower(p1.name) = toLower(p2.name)
+   OR p1.email = p2.email</code></pre>
+
+                <p>"John Doe" matches "john doe". But "John D." slips through. "Jon Doe" (typo) becomes a ghost entity.</p>
+
+                <h2>The New Way</h2>
+                <p>Fuzzy matching with confidence tiers:</p>
+
+                <pre><code>from rapidfuzz import fuzz
+
+similarity = fuzz.ratio("John Doe", "John D.") / 100.0
+# Returns 0.727 - similar enough to flag</code></pre>
+
+                <p>Now the Archivist sees the resemblance.</p>
+
+                <h2>The Confidence Spectrum</h2>
+                <p>Three tiers of duplicate handling:</p>
+
+                <ul>
+                    <li><strong>>= 0.9</strong>: Auto-merge. Same email, same name. No human needed.</li>
+                    <li><strong>0.7 - 0.9</strong>: Flag for review. Similar but uncertain. Human decides.</li>
+                    <li><strong>&lt; 0.7</strong>: Ignore. Different enough to be different people.</li>
+                </ul>
+
+                <p>The thresholds are configurable:</p>
+
+                <pre><code>await archivist.detect_and_merge_duplicates(
+    auto_merge_threshold=0.95,  # More conservative
+    review_threshold=0.8,       # Higher bar for flagging
+)</code></pre>
+
+                <h2>Detection Signals</h2>
+                <p>Multiple signals combine into a similarity score:</p>
+
+                <ul>
+                    <li><strong>Exact email match</strong>: 1.0 (definite duplicate)</li>
+                    <li><strong>Same email domain</strong>: 0.5 base + name similarity</li>
+                    <li><strong>Fuzzy name match</strong>: Direct ratio from rapidfuzz</li>
+                </ul>
+
+                <p>Email matches trump name matches. "john@acme.com" in two places? Same John.</p>
+
+                <h2>The Review Workflow</h2>
+                <p>Medium-confidence matches get flagged:</p>
+
+                <pre><code>MATCH (e1)-[r:POTENTIAL_DUPLICATE]->(e2)
+SET r.similarity_score = 0.85,
+    r.match_reasons = ["similar_name", "same_email_domain"],
+    r.reviewed = false</code></pre>
+
+                <p>A relationship in the graph, waiting for review.</p>
+
+                <p>Query flagged duplicates:</p>
+
+                <pre><code>flagged = await archivist.get_flagged_duplicates()
+# Returns: [DuplicateCandidate(name1="John Doe", name2="John D.", score=0.85)]</code></pre>
+
+                <p>Resolve them:</p>
+
+                <pre><code># Merge: "Yes, same person"
+await archivist.resolve_flagged_duplicate(uuid1, uuid2, merge=True)
+
+# Dismiss: "No, different people"
+await archivist.resolve_flagged_duplicate(uuid1, uuid2, merge=False)</code></pre>
+
+                <p>Human judgment where it matters.</p>
+
+                <h2>The Merge Operation</h2>
+                <p>When entities merge:</p>
+
+                <ol>
+                    <li>Transfer all incoming relationships to the keeper</li>
+                    <li>Transfer all outgoing relationships to the keeper</li>
+                    <li>Merge properties (keep existing, fill gaps from source)</li>
+                    <li>Delete the duplicate node</li>
+                </ol>
+
+                <p>The graph heals. Knowledge consolidates.</p>
+
+                <h2>The Architecture</h2>
+                <pre><code>detect_and_merge_duplicates()
+├── process_duplicates()     # Main pipeline from deduplication.py
+│   ├── find_duplicate_persons()
+│   │   ├── Exact email matches (score=1.0)
+│   │   ├── Domain matches + name similarity
+│   │   └── Fuzzy name matches via rapidfuzz
+│   ├── find_duplicate_organizations()
+│   │   ├── Exact domain matches (score=1.0)
+│   │   └── Fuzzy name matches
+│   ├── Auto-merge high confidence (>= 0.9)
+│   └── Flag medium confidence (0.7-0.9)</code></pre>
+
+                <p>The Archivist calls <code>process_duplicates()</code> after each archival run. Duplicates surface. Merges happen. Flags get raised.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#35: Wire deduplication module to Archivist</li>
+                </ul>
+
+                <p>One issue. The graph gets cleaner.</p>
+
+                <h2>What's Next</h2>
+                <p>The deduplication module exists. The Archivist uses it. But the user-facing review interface remains to build - some way to say "yes these are the same" or "no, keep them separate" beyond direct method calls.</p>
+
+                <p>For now, the high-confidence merges happen automatically. The questionable ones wait in the graph, flagged relationships marking uncertainty.</p>
+
+                <p>The Archivist keeps watch. Duplicates don't slip through anymore.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
