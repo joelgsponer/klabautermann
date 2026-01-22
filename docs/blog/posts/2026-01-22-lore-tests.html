@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="testing,lore">
+    <meta name="post-slug" content="lore-tests">
+    <meta name="post-excerpt" content="17 new tests prove the Bard's tales persist across channels and conversations.">
+    <title>Testing the Tales | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">testing</span>
+                        <span class="category-tag">lore</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Testing the Tales</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard tells stories. Sagas span chapters. Tales travel between CLI and Telegram. But how do we know it actually works?</p>
+                <p>Tests. 17 of them.</p>
+
+                <h2>The Spec Drives the Tests</h2>
+                <p>LORE_SYSTEM.md Section 8 defines golden scenarios. These aren't suggestions - they're contracts. The tests codify those contracts.</p>
+                <ul>
+                    <li><strong>#122</strong>: Saga continuation - chapters increment correctly</li>
+                    <li><strong>#123</strong>: Cross-channel persistence - CLI and Telegram share the same saga</li>
+                    <li><strong>#124</strong>: E2E cross-conversation - the full golden scenario flow</li>
+                </ul>
+
+                <h2>Saga Continuation (#122)</h2>
+                <p>Chapter numbers matter. Chapter 1 starts a saga. Chapter 2 continues it. If chapters don't increment correctly, the story breaks.</p>
+
+                <pre><code>async def test_continue_saga_increments_chapter(self, ...):
+    """Continuing a saga should increment the chapter number."""
+    saga = ActiveSaga(
+        saga_id="saga-continuation-test",
+        saga_name="The Tale of Testing",
+        last_chapter=2,
+        last_told=now_ms - 1000,
+    )
+
+    content, chapter = await bard._continue_saga(saga, trace_id="test-122")
+
+    assert chapter == 3</code></pre>
+
+                <p>Simple. Last chapter was 2, new chapter should be 3.</p>
+
+                <h2>Cross-Channel Persistence (#123)</h2>
+                <p>The Captain moves between CLI and Telegram. The saga follows. Test this by starting on CLI, continuing on Telegram:</p>
+
+                <pre><code>async def test_same_saga_across_channels(self, ...):
+    """Same saga should be accessible from different channels."""
+    # Tell on CLI (chapter 1)
+    _, saga_id, _ = await bard.start_new_saga(channel="cli", ...)
+
+    # Continue on Telegram (chapter 2)
+    saga = ActiveSaga(saga_id=saga_id, last_chapter=1, ...)
+    _, chapter = await bard._continue_saga(saga, channel="telegram", ...)
+
+    assert chapter == 2
+
+    # Query shows both channels
+    cross_channel = await bard.get_cross_channel_story(saga_id=saga_id, ...)
+    assert cross_channel[0]["channel"] == "cli"
+    assert cross_channel[1]["channel"] == "telegram"</code></pre>
+
+                <p>One saga. Two channels. Both tracked.</p>
+
+                <h2>The Golden Scenario (#124)</h2>
+                <p>Section 8.2 of LORE_SYSTEM.md describes the canonical cross-conversation flow:</p>
+                <ol>
+                    <li>CLI: User asks about tasks. Bard starts saga, Chapter 1.</li>
+                    <li>Telegram: User checks calendar. Bard continues with Chapter 2.</li>
+                    <li>CLI (next day): User asks "What story were you telling?" Bard retrieves saga, continues with Chapter 3.</li>
+                </ol>
+
+                <pre><code>@pytest.mark.e2e
+class TestLoreGoldenScenarioCrossConversation:
+    """
+    Golden Scenario: Cross-Conversation Saga (#124)
+
+    Reference: specs/architecture/LORE_SYSTEM.md Section 8.2
+    """
+
+    async def test_complete_cross_conversation_flow(self, ...):
+        # Step 1: CLI start
+        _, saga_id, ch1 = await bard.start_new_saga(channel="cli", ...)
+        assert ch1 == 1
+
+        # Step 2: Telegram continue
+        result2 = await bard.salt_response(..., channel="telegram", ...)
+        assert result2.chapter == 2
+
+        # Step 3: CLI retrieve and continue
+        result3 = await bard.salt_response(..., channel="cli", ...)
+        assert result3.chapter == 3
+
+        # Verify cross-channel journey
+        cross_channel = await bard.get_cross_channel_story(saga_id=saga_id, ...)
+        assert cross_channel[0]["channel"] == "cli"      # Chapter 1
+        assert cross_channel[1]["channel"] == "telegram" # Chapter 2
+        assert cross_channel[2]["channel"] == "cli"      # Chapter 3</code></pre>
+
+                <p>The spec becomes the test. The test proves the code.</p>
+
+                <h2>Edge Cases</h2>
+                <p>Two more scenarios round out the E2E tests:</p>
+
+                <p><strong>Saga completion</strong>: What happens when a saga hits max chapters?</p>
+                <pre><code>async def test_saga_completes_at_max_chapters(self, ...):
+    """Saga should be marked complete when reaching max chapters."""
+    # Saga at chapter 4 (one before max of 5)
+    mock_neo4j.execute_query.side_effect = [
+        [{"saga_id": saga_id, "last_chapter": 4, ...}],
+        [{"uuid": "ep-5"}],  # Chapter 5 (final)
+    ]
+
+    result = await bard.salt_response(...)
+    assert result.chapter == 5  # Final chapter</code></pre>
+
+                <p><strong>Storm mode</strong>: Does the Bard stay silent when urgency matters?</p>
+                <pre><code>async def test_storm_mode_skips_tidbit(self, ...):
+    """Storm mode should prevent tidbit addition even with active saga."""
+    result = await bard.salt_response(
+        "URGENT: Server is down!",
+        storm_mode=True,
+        ...
+    )
+
+    assert result.tidbit_added is False
+    assert result.storm_mode_skipped is True
+    assert result.salted_response == "URGENT: Server is down!"</code></pre>
+
+                <p>No tales during emergencies. The Bard knows when to be quiet.</p>
+
+                <h2>Mock Patterns</h2>
+                <p>Testing async Neo4j calls requires careful mock management. The pattern that emerged:</p>
+
+                <pre><code># Set up expectations for multiple calls
+mock_neo4j.execute_query.side_effect = [
+    [],                    # First call: no active sagas
+    [{"uuid": "ep-1"}],    # Second call: save episode
+]
+
+await bard.start_new_saga(...)
+
+# Reset before next operation
+mock_neo4j.execute_query.reset_mock()
+mock_neo4j.execute_query.side_effect = None
+mock_neo4j.execute_query.return_value = [{"uuid": "ep-2"}]
+
+await bard._continue_saga(...)</code></pre>
+
+                <p>The <code>reset_mock()</code> call clears the <code>side_effect</code> list so subsequent operations don't exhaust it. Without this, <code>StopAsyncIteration</code> errors crash the tests.</p>
+
+                <h2>The Numbers</h2>
+                <ul>
+                    <li>17 new tests</li>
+                    <li>2 test files: <code>test_lore_system.py</code> (unit), <code>test_lore_golden_scenarios.py</code> (E2E)</li>
+                    <li>3 test classes for unit tests: <code>TestSagaContinuation</code>, <code>TestCrossChannelPersistence</code>, <code>TestLoreEpisodeChannel</code></li>
+                    <li>3 test classes for E2E: <code>CrossConversation</code>, <code>SagaCompletion</code>, <code>StormMode</code></li>
+                    <li>2336 total tests passing</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#122: [LORE-026] Add test_saga_continuation</li>
+                    <li>#123: [LORE-027] Add test_cross_channel_persistence</li>
+                    <li>#124: [LORE-028] Add E2E cross-conversation saga test</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Bard's storytelling is now verifiable. Sagas continue correctly. Channels are tracked. The golden scenario from the spec works end-to-end.</p>
+
+                <p>Tests don't just catch bugs. They prove the system matches its design.</p>
+
+                <p><em>A tale untested is a tale untold. Now every story has its proof.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
