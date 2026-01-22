@@ -28,6 +28,61 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Saga Lifecycle Exceptions
+# =============================================================================
+
+
+class SagaLifecycleError(Exception):
+    """Base exception for saga lifecycle errors."""
+
+    pass
+
+
+class SagaCompleteError(SagaLifecycleError):
+    """Raised when attempting to continue a saga that has reached max chapters."""
+
+    def __init__(self, saga_name: str, max_chapters: int) -> None:
+        self.saga_name = saga_name
+        self.max_chapters = max_chapters
+        super().__init__(f"Saga '{saga_name}' is complete with {max_chapters} chapters")
+
+
+class SagaLimitReachedError(SagaLifecycleError):
+    """Raised when attempting to start a new saga but max active sagas reached."""
+
+    def __init__(self, max_active: int, active_names: list[str]) -> None:
+        self.max_active = max_active
+        self.active_names = active_names
+        super().__init__(
+            f"Maximum {max_active} active sagas reached. " f"Active: {', '.join(active_names)}"
+        )
+
+
+class ChapterTooSoonError(SagaLifecycleError):
+    """Raised when attempting to add a chapter too soon after the previous one."""
+
+    def __init__(self, saga_name: str, hours_remaining: float, min_hours: float) -> None:
+        self.saga_name = saga_name
+        self.hours_remaining = hours_remaining
+        self.min_hours = min_hours
+        super().__init__(
+            f"Cannot add chapter to '{saga_name}' for {hours_remaining:.1f} more hours "
+            f"(minimum {min_hours}h between chapters)"
+        )
+
+
+class SagaTimedOutError(SagaLifecycleError):
+    """Raised when a saga has been inactive too long and was auto-completed."""
+
+    def __init__(self, saga_name: str, days_inactive: int) -> None:
+        self.saga_name = saga_name
+        self.days_inactive = days_inactive
+        super().__init__(
+            f"Saga '{saga_name}' was auto-completed after {days_inactive} days of inactivity"
+        )
+
+
+# =============================================================================
 # Canonical Tidbits (Seed Data)
 # =============================================================================
 
@@ -60,8 +115,17 @@ class BardConfig:
     # Probability of continuing an active saga vs standalone tidbit
     saga_continuation_probability: float = 0.3
 
-    # Maximum chapters in a saga before it concludes
+    # Maximum chapters in a saga before it concludes (#118)
     max_saga_chapters: int = 5
+
+    # Maximum number of active (unfinished) sagas at once (#119)
+    max_active_sagas: int = 3
+
+    # Saga timeout in days - auto-complete after this many days of inactivity (#120)
+    saga_timeout_days: int = 30
+
+    # Minimum hours between chapters of the same saga (#121)
+    min_chapter_interval_hours: float = 1.0
 
     # Maximum words in a tidbit/chapter
     max_tidbit_words: int = 50
@@ -140,6 +204,7 @@ class ActiveSaga:
     last_chapter: int
     last_told: int  # Unix timestamp (milliseconds)
     chapters: list[LoreEpisode] = field(default_factory=list)
+    is_timed_out: bool = False  # True if saga exceeded timeout period
 
 
 # =============================================================================
@@ -282,6 +347,27 @@ class BardOfTheBilge(BaseAgent):
                 "sagas": sagas,
                 "count": len(sagas),
             }
+        elif operation == "archive_timed_out":
+            archived = await self.archive_timed_out_sagas(trace_id=trace_id)
+            result_payload = {
+                "archived": archived,
+                "count": len(archived),
+            }
+        elif operation == "get_active_sagas":
+            active = await self._get_active_sagas(trace_id=trace_id)
+            result_payload = {
+                "active_sagas": [
+                    {
+                        "saga_id": s.saga_id,
+                        "saga_name": s.saga_name,
+                        "last_chapter": s.last_chapter,
+                        "last_told": s.last_told,
+                    }
+                    for s in active
+                ],
+                "count": len(active),
+                "max_active": self.bard_config.max_active_sagas,
+            }
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -347,40 +433,48 @@ class BardOfTheBilge(BaseAgent):
         active_saga = await self._get_active_saga(trace_id=trace_id)
 
         if active_saga and random.random() < self.bard_config.saga_continuation_probability:
-            # Continue the saga
-            tidbit, chapter = await self._continue_saga(active_saga, trace_id=trace_id)
-            salted = f"{clean_response}\n\n_{tidbit}_"
+            # Try to continue the saga (may fail due to lifecycle rules)
+            try:
+                tidbit, chapter = await self._continue_saga(active_saga, trace_id=trace_id)
+                salted = f"{clean_response}\n\n_{tidbit}_"
 
-            logger.info(
-                f"[BEACON] Continued saga '{active_saga.saga_name}' chapter {chapter}",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
+                logger.info(
+                    f"[BEACON] Continued saga '{active_saga.saga_name}' chapter {chapter}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
 
-            return SaltResult(
-                original_response=clean_response,
-                salted_response=salted,
-                tidbit_added=True,
-                tidbit=tidbit,
-                saga_id=active_saga.saga_id,
-                chapter=chapter,
-                is_continuation=True,
-            )
-        else:
-            # Standalone tidbit (from canonical list)
-            tidbit = self._generate_standalone_tidbit()
-            salted = f"{clean_response}\n\n_{tidbit}_"
+                return SaltResult(
+                    original_response=clean_response,
+                    salted_response=salted,
+                    tidbit_added=True,
+                    tidbit=tidbit,
+                    saga_id=active_saga.saga_id,
+                    chapter=chapter,
+                    is_continuation=True,
+                )
+            except SagaLifecycleError as e:
+                # Lifecycle rule blocked continuation, fall back to standalone
+                logger.debug(
+                    f"[WHISPER] Saga continuation blocked: {e}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                # Fall through to standalone tidbit
 
-            logger.info(
-                "[BEACON] Added standalone tidbit to response",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
+        # Standalone tidbit (from canonical list)
+        tidbit = self._generate_standalone_tidbit()
+        salted = f"{clean_response}\n\n_{tidbit}_"
 
-            return SaltResult(
-                original_response=clean_response,
-                salted_response=salted,
-                tidbit_added=True,
-                tidbit=tidbit,
-            )
+        logger.info(
+            "[BEACON] Added standalone tidbit to response",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return SaltResult(
+            original_response=clean_response,
+            salted_response=salted,
+            tidbit_added=True,
+            tidbit=tidbit,
+        )
 
     # =========================================================================
     # Saga Management
@@ -393,7 +487,9 @@ class BardOfTheBilge(BaseAgent):
         """
         Get the most recent unfinished saga for this Captain.
 
-        A saga is considered active if it has fewer than max_saga_chapters.
+        A saga is considered active if:
+        - It has fewer than max_saga_chapters
+        - It hasn't timed out (inactive for more than saga_timeout_days)
 
         Args:
             trace_id: Optional trace ID for logging.
@@ -402,6 +498,9 @@ class BardOfTheBilge(BaseAgent):
             ActiveSaga if one exists, None otherwise.
         """
         max_chapters = self.bard_config.max_saga_chapters
+        timeout_ms = int(self.bard_config.saga_timeout_days * 24 * 60 * 60 * 1000)
+        now_ms = int(time.time() * 1000)
+        cutoff_ms = now_ms - timeout_ms
 
         query = """
         MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
@@ -426,12 +525,169 @@ class BardOfTheBilge(BaseAgent):
             return None
 
         row = result[0]
+        last_told = row["last_told"]
+
+        # Check if saga has timed out
+        is_timed_out = last_told < cutoff_ms
+
         return ActiveSaga(
             saga_id=row["saga_id"],
             saga_name=row["saga_name"],
             last_chapter=row["last_chapter"],
             last_told=row["last_told"],
+            is_timed_out=is_timed_out,
         )
+
+    async def _get_active_sagas(
+        self,
+        trace_id: str | None = None,
+    ) -> list[ActiveSaga]:
+        """
+        Get all active (unfinished, non-timed-out) sagas for this Captain.
+
+        Used to enforce the max_active_sagas limit.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of ActiveSaga objects that are still continuable.
+        """
+        max_chapters = self.bard_config.max_saga_chapters
+        timeout_ms = int(self.bard_config.saga_timeout_days * 24 * 60 * 60 * 1000)
+        now_ms = int(time.time() * 1000)
+        cutoff_ms = now_ms - timeout_ms
+
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le.saga_id as saga_id, le.saga_name as saga_name,
+             max(le.chapter) as last_chapter, max(le.told_at) as last_told
+        WHERE last_chapter < $max_chapters AND last_told >= $cutoff_ms
+        RETURN saga_id, saga_name, last_chapter, last_told
+        ORDER BY last_told DESC
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {
+                "captain_uuid": self.captain_uuid,
+                "max_chapters": max_chapters,
+                "cutoff_ms": cutoff_ms,
+            },
+            trace_id=trace_id,
+        )
+
+        return [
+            ActiveSaga(
+                saga_id=row["saga_id"],
+                saga_name=row["saga_name"],
+                last_chapter=row["last_chapter"],
+                last_told=row["last_told"],
+            )
+            for row in results
+        ]
+
+    def _can_add_chapter(self, saga: ActiveSaga) -> tuple[bool, float]:
+        """
+        Check if enough time has passed to add a new chapter.
+
+        Args:
+            saga: The saga to check.
+
+        Returns:
+            Tuple of (can_add, hours_remaining). hours_remaining is 0 if can_add is True.
+        """
+        min_interval_ms = int(self.bard_config.min_chapter_interval_hours * 60 * 60 * 1000)
+        now_ms = int(time.time() * 1000)
+        time_since_last = now_ms - saga.last_told
+
+        if time_since_last >= min_interval_ms:
+            return True, 0.0
+
+        remaining_ms = min_interval_ms - time_since_last
+        hours_remaining = remaining_ms / (60 * 60 * 1000)
+        return False, hours_remaining
+
+    async def archive_timed_out_sagas(
+        self,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Mark timed-out sagas as complete by adding a closing chapter.
+
+        This method finds all sagas that have exceeded saga_timeout_days
+        of inactivity and closes them with a special "tale fades" chapter.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of archived saga info dicts.
+        """
+        max_chapters = self.bard_config.max_saga_chapters
+        timeout_ms = int(self.bard_config.saga_timeout_days * 24 * 60 * 60 * 1000)
+        now_ms = int(time.time() * 1000)
+        cutoff_ms = now_ms - timeout_ms
+
+        # Find timed-out sagas that aren't already complete
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le.saga_id as saga_id, le.saga_name as saga_name,
+             max(le.chapter) as last_chapter, max(le.told_at) as last_told
+        WHERE last_chapter < $max_chapters AND last_told < $cutoff_ms
+        RETURN saga_id, saga_name, last_chapter, last_told
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {
+                "captain_uuid": self.captain_uuid,
+                "max_chapters": max_chapters,
+                "cutoff_ms": cutoff_ms,
+            },
+            trace_id=trace_id,
+        )
+
+        archived = []
+        for row in results:
+            saga_id = row["saga_id"]
+            saga_name = row["saga_name"]
+            last_chapter = row["last_chapter"]
+            last_told = row["last_told"]
+
+            days_inactive = int((now_ms - last_told) / (24 * 60 * 60 * 1000))
+
+            # Add a closing chapter to mark the saga as archived
+            closing_content = (
+                f"And so the tale of {saga_name} fades into the mists of memory, "
+                f"waiting perhaps for another day to be told..."
+            )
+
+            # Force complete by setting chapter to max_chapters
+            await self._save_episode(
+                saga_id=saga_id,
+                saga_name=saga_name,
+                chapter=max_chapters,  # This marks it as complete
+                content=closing_content,
+                trace_id=trace_id,
+            )
+
+            archived.append(
+                {
+                    "saga_id": saga_id,
+                    "saga_name": saga_name,
+                    "last_chapter": last_chapter,
+                    "days_inactive": days_inactive,
+                    "closing_chapter": max_chapters,
+                }
+            )
+
+            logger.info(
+                f"[CHART] Archived timed-out saga '{saga_name}' after {days_inactive} days",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+        return archived
 
     async def _get_saga_chapters(
         self,
@@ -491,13 +747,42 @@ class BardOfTheBilge(BaseAgent):
         For now, this uses a canonical tidbit as the continuation.
         A full implementation would use LLM to generate contextual content.
 
+        Enforces saga lifecycle rules:
+        - Saga must not have timed out (#120)
+        - Minimum time between chapters must be respected (#121)
+        - Saga must not have reached max chapters (#118)
+
         Args:
             saga: The active saga to continue.
             trace_id: Optional trace ID for logging.
 
         Returns:
             Tuple of (tidbit content, chapter number).
+
+        Raises:
+            SagaTimedOutError: If saga has exceeded timeout period.
+            ChapterTooSoonError: If not enough time has passed since last chapter.
+            SagaCompleteError: If saga has reached max chapters.
         """
+        # Check for timeout (#120)
+        if saga.is_timed_out:
+            now_ms = int(time.time() * 1000)
+            days_inactive = int((now_ms - saga.last_told) / (24 * 60 * 60 * 1000))
+            raise SagaTimedOutError(saga.saga_name, days_inactive)
+
+        # Check for max chapters reached (#118)
+        if saga.last_chapter >= self.bard_config.max_saga_chapters:
+            raise SagaCompleteError(saga.saga_name, self.bard_config.max_saga_chapters)
+
+        # Check minimum chapter interval (#121)
+        can_add, hours_remaining = self._can_add_chapter(saga)
+        if not can_add:
+            raise ChapterTooSoonError(
+                saga.saga_name,
+                hours_remaining,
+                self.bard_config.min_chapter_interval_hours,
+            )
+
         new_chapter = saga.last_chapter + 1
         content = self._generate_standalone_tidbit()
 
@@ -519,12 +804,27 @@ class BardOfTheBilge(BaseAgent):
         """
         Start a new saga with chapter 1.
 
+        Enforces saga lifecycle rules:
+        - Maximum active sagas limit must not be exceeded (#119)
+
         Args:
             trace_id: Optional trace ID for logging.
 
         Returns:
             Tuple of (tidbit content, saga_id, chapter number).
+
+        Raises:
+            SagaLimitReachedError: If max_active_sagas limit is reached.
         """
+        # Check active saga limit (#119)
+        active_sagas = await self._get_active_sagas(trace_id=trace_id)
+        if len(active_sagas) >= self.bard_config.max_active_sagas:
+            active_names = [s.saga_name for s in active_sagas]
+            raise SagaLimitReachedError(
+                self.bard_config.max_active_sagas,
+                active_names,
+            )
+
         saga_id = str(uuid.uuid4())
         saga_name = generate_saga_name()
         content = self._generate_standalone_tidbit()
@@ -763,7 +1063,12 @@ __all__ = [
     "ActiveSaga",
     "BardConfig",
     "BardOfTheBilge",
+    "ChapterTooSoonError",
     "LoreEpisode",
+    "SagaCompleteError",
+    "SagaLifecycleError",
+    "SagaLimitReachedError",
+    "SagaTimedOutError",
     "SaltResult",
     "generate_saga_name",
 ]

@@ -19,7 +19,12 @@ from klabautermann.agents.bard import (
     ActiveSaga,
     BardConfig,
     BardOfTheBilge,
+    ChapterTooSoonError,
     LoreEpisode,
+    SagaCompleteError,
+    SagaLifecycleError,
+    SagaLimitReachedError,
+    SagaTimedOutError,
     SaltResult,
     generate_saga_name,
 )
@@ -52,6 +57,7 @@ def bard(mock_neo4j: MagicMock, captain_uuid: str) -> BardOfTheBilge:
         tidbit_probability=0.5,  # 50% for easier testing
         saga_continuation_probability=0.5,
         max_saga_chapters=5,
+        min_chapter_interval_hours=0,  # Disable interval for basic tests
     )
     return BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
 
@@ -258,14 +264,19 @@ class TestSagaManagement:
     @pytest.mark.asyncio
     async def test_start_new_saga(self, bard: BardOfTheBilge, mock_neo4j: MagicMock) -> None:
         """Should create a new saga with chapter 1."""
-        mock_neo4j.execute_query.return_value = [{"uuid": "episode-new"}]
+        mock_neo4j.execute_query.side_effect = [
+            # First call: _get_active_sagas (returns empty - below limit)
+            [],
+            # Second call: _save_episode
+            [{"uuid": "episode-new"}],
+        ]
 
         content, saga_id, chapter = await bard.start_new_saga(trace_id="test-123")
 
         assert content in CANONICAL_TIDBITS
         assert saga_id is not None
         assert chapter == 1
-        mock_neo4j.execute_query.assert_called_once()
+        assert mock_neo4j.execute_query.call_count == 2
 
     @pytest.mark.asyncio
     async def test_save_episode_creates_node(
@@ -735,7 +746,12 @@ class TestExports:
             "ActiveSaga",
             "BardConfig",
             "BardOfTheBilge",
+            "ChapterTooSoonError",
             "LoreEpisode",
+            "SagaCompleteError",
+            "SagaLifecycleError",
+            "SagaLimitReachedError",
+            "SagaTimedOutError",
             "SaltResult",
             "generate_saga_name",
         ]
@@ -750,3 +766,570 @@ class TestExports:
         assert BardOfTheBilge is not None
         assert BardConfig is not None
         assert LoreEpisode is not None
+
+
+# =============================================================================
+# Saga Lifecycle Exception Tests (#118, #119, #120, #121)
+# =============================================================================
+
+
+class TestSagaLifecycleExceptions:
+    """Tests for saga lifecycle custom exceptions."""
+
+    def test_saga_complete_error(self) -> None:
+        """SagaCompleteError should have correct message."""
+        error = SagaCompleteError("The Tale of Testing", 5)
+
+        assert error.saga_name == "The Tale of Testing"
+        assert error.max_chapters == 5
+        assert "complete" in str(error).lower()
+        assert "5 chapters" in str(error)
+
+    def test_saga_limit_reached_error(self) -> None:
+        """SagaLimitReachedError should list active sagas."""
+        active = ["Saga A", "Saga B", "Saga C"]
+        error = SagaLimitReachedError(3, active)
+
+        assert error.max_active == 3
+        assert error.active_names == active
+        assert "3 active sagas" in str(error)
+        assert "Saga A" in str(error)
+
+    def test_chapter_too_soon_error(self) -> None:
+        """ChapterTooSoonError should show time remaining."""
+        error = ChapterTooSoonError("The Chronicle", 0.5, 1.0)
+
+        assert error.saga_name == "The Chronicle"
+        assert error.hours_remaining == 0.5
+        assert error.min_hours == 1.0
+        assert "0.5" in str(error)
+
+    def test_saga_timed_out_error(self) -> None:
+        """SagaTimedOutError should show days inactive."""
+        error = SagaTimedOutError("The Legend", 45)
+
+        assert error.saga_name == "The Legend"
+        assert error.days_inactive == 45
+        assert "45 days" in str(error)
+        assert "auto-completed" in str(error)
+
+    def test_exception_inheritance(self) -> None:
+        """All saga exceptions should inherit from SagaLifecycleError."""
+        assert issubclass(SagaCompleteError, SagaLifecycleError)
+        assert issubclass(SagaLimitReachedError, SagaLifecycleError)
+        assert issubclass(ChapterTooSoonError, SagaLifecycleError)
+        assert issubclass(SagaTimedOutError, SagaLifecycleError)
+
+
+# =============================================================================
+# Saga Lifecycle Config Tests (#118, #119, #120, #121)
+# =============================================================================
+
+
+class TestSagaLifecycleConfig:
+    """Tests for new saga lifecycle configuration options."""
+
+    def test_default_max_active_sagas(self) -> None:
+        """Default max_active_sagas should be 3."""
+        config = BardConfig()
+        assert config.max_active_sagas == 3
+
+    def test_default_saga_timeout_days(self) -> None:
+        """Default saga_timeout_days should be 30."""
+        config = BardConfig()
+        assert config.saga_timeout_days == 30
+
+    def test_default_min_chapter_interval_hours(self) -> None:
+        """Default min_chapter_interval_hours should be 1.0."""
+        config = BardConfig()
+        assert config.min_chapter_interval_hours == 1.0
+
+    def test_custom_lifecycle_config(self) -> None:
+        """Should accept custom lifecycle values."""
+        config = BardConfig(
+            max_active_sagas=5,
+            saga_timeout_days=60,
+            min_chapter_interval_hours=2.5,
+        )
+
+        assert config.max_active_sagas == 5
+        assert config.saga_timeout_days == 60
+        assert config.min_chapter_interval_hours == 2.5
+
+
+# =============================================================================
+# Max Chapters Enforcement Tests (#118)
+# =============================================================================
+
+
+class TestMaxChaptersEnforcement:
+    """Tests for max chapters per saga (#118)."""
+
+    @pytest.mark.asyncio
+    async def test_continue_saga_at_max_chapters_raises(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should raise SagaCompleteError when saga is at max chapters."""
+        config = BardConfig(max_saga_chapters=5)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="The Complete Tale",
+            last_chapter=5,  # Already at max
+            last_told=now_ms,
+        )
+
+        with pytest.raises(SagaCompleteError) as exc_info:
+            await bard._continue_saga(saga, trace_id="test-123")
+
+        assert exc_info.value.max_chapters == 5
+        assert "Complete Tale" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_continue_saga_below_max_allowed(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should allow continuation when below max chapters."""
+        config = BardConfig(max_saga_chapters=5, min_chapter_interval_hours=0)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+        mock_neo4j.execute_query.return_value = [{"uuid": "ep-new"}]
+
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="The Ongoing Tale",
+            last_chapter=3,
+            last_told=now_ms,
+        )
+
+        content, chapter = await bard._continue_saga(saga, trace_id="test-123")
+
+        assert chapter == 4
+        assert content in CANONICAL_TIDBITS
+
+
+# =============================================================================
+# Max Active Sagas Enforcement Tests (#119)
+# =============================================================================
+
+
+class TestMaxActiveSagasEnforcement:
+    """Tests for max active sagas limit (#119)."""
+
+    @pytest.mark.asyncio
+    async def test_start_saga_at_limit_raises(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should raise SagaLimitReachedError when at max active sagas."""
+        config = BardConfig(max_active_sagas=3, saga_timeout_days=30)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # Mock 3 active sagas already exist
+        mock_neo4j.execute_query.return_value = [
+            {"saga_id": "s1", "saga_name": "Saga One", "last_chapter": 2, "last_told": now_ms},
+            {"saga_id": "s2", "saga_name": "Saga Two", "last_chapter": 1, "last_told": now_ms},
+            {"saga_id": "s3", "saga_name": "Saga Three", "last_chapter": 3, "last_told": now_ms},
+        ]
+
+        with pytest.raises(SagaLimitReachedError) as exc_info:
+            await bard.start_new_saga(trace_id="test-123")
+
+        assert exc_info.value.max_active == 3
+        assert "Saga One" in exc_info.value.active_names
+
+    @pytest.mark.asyncio
+    async def test_start_saga_below_limit_allowed(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should allow new saga when below limit."""
+        config = BardConfig(max_active_sagas=3, saga_timeout_days=30)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        mock_neo4j.execute_query.side_effect = [
+            # First call: _get_active_sagas (only 2 active)
+            [
+                {"saga_id": "s1", "saga_name": "Saga One", "last_chapter": 2, "last_told": now_ms},
+                {"saga_id": "s2", "saga_name": "Saga Two", "last_chapter": 1, "last_told": now_ms},
+            ],
+            # Second call: _save_episode
+            [{"uuid": "ep-new"}],
+        ]
+
+        content, saga_id, chapter = await bard.start_new_saga(trace_id="test-123")
+
+        assert chapter == 1
+        assert saga_id is not None
+
+
+# =============================================================================
+# Saga Timeout Enforcement Tests (#120)
+# =============================================================================
+
+
+class TestSagaTimeoutEnforcement:
+    """Tests for saga timeout auto-completion (#120)."""
+
+    @pytest.mark.asyncio
+    async def test_get_active_saga_marks_timed_out(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should mark saga as timed_out when exceeded timeout."""
+        config = BardConfig(saga_timeout_days=30)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 45 days ago in ms
+        old_time = int((time.time() - 45 * 24 * 60 * 60) * 1000)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-old",
+                "saga_name": "The Ancient Tale",
+                "last_chapter": 2,
+                "last_told": old_time,
+            }
+        ]
+
+        saga = await bard._get_active_saga(trace_id="test-123")
+
+        assert saga is not None
+        assert saga.is_timed_out is True
+
+    @pytest.mark.asyncio
+    async def test_get_active_saga_not_timed_out(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should not mark saga as timed_out when within timeout."""
+        config = BardConfig(saga_timeout_days=30)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-recent",
+                "saga_name": "The Recent Tale",
+                "last_chapter": 2,
+                "last_told": now_ms - 1000,  # Very recent
+            }
+        ]
+
+        saga = await bard._get_active_saga(trace_id="test-123")
+
+        assert saga is not None
+        assert saga.is_timed_out is False
+
+    @pytest.mark.asyncio
+    async def test_continue_timed_out_saga_raises(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should raise SagaTimedOutError when continuing timed-out saga."""
+        config = BardConfig(saga_timeout_days=30)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        old_time = int((time.time() - 45 * 24 * 60 * 60) * 1000)
+        saga = ActiveSaga(
+            saga_id="saga-old",
+            saga_name="The Ancient Tale",
+            last_chapter=2,
+            last_told=old_time,
+            is_timed_out=True,
+        )
+
+        with pytest.raises(SagaTimedOutError) as exc_info:
+            await bard._continue_saga(saga, trace_id="test-123")
+
+        assert "Ancient Tale" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_archive_timed_out_sagas(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """Should archive timed-out sagas with closing chapter."""
+        config = BardConfig(saga_timeout_days=30, max_saga_chapters=5)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        old_time = int((time.time() - 45 * 24 * 60 * 60) * 1000)
+
+        mock_neo4j.execute_query.side_effect = [
+            # First call: find timed-out sagas
+            [
+                {
+                    "saga_id": "saga-old",
+                    "saga_name": "The Ancient Tale",
+                    "last_chapter": 2,
+                    "last_told": old_time,
+                }
+            ],
+            # Second call: _save_episode for closing chapter
+            [{"uuid": "ep-closing"}],
+        ]
+
+        archived = await bard.archive_timed_out_sagas(trace_id="test-123")
+
+        assert len(archived) == 1
+        assert archived[0]["saga_name"] == "The Ancient Tale"
+        assert archived[0]["closing_chapter"] == 5  # max_saga_chapters
+
+
+# =============================================================================
+# Min Chapter Interval Enforcement Tests (#121)
+# =============================================================================
+
+
+class TestMinChapterIntervalEnforcement:
+    """Tests for minimum time between chapters (#121)."""
+
+    def test_can_add_chapter_after_interval(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should allow chapter when interval has passed."""
+        config = BardConfig(min_chapter_interval_hours=1.0)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 2 hours ago
+        old_time = now_ms - int(2 * 60 * 60 * 1000)
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="Test Saga",
+            last_chapter=2,
+            last_told=old_time,
+        )
+
+        can_add, hours_remaining = bard._can_add_chapter(saga)
+
+        assert can_add is True
+        assert hours_remaining == 0.0
+
+    def test_cannot_add_chapter_before_interval(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should block chapter when interval hasn't passed."""
+        config = BardConfig(min_chapter_interval_hours=1.0)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 30 minutes ago
+        recent_time = now_ms - int(0.5 * 60 * 60 * 1000)
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="Test Saga",
+            last_chapter=2,
+            last_told=recent_time,
+        )
+
+        can_add, hours_remaining = bard._can_add_chapter(saga)
+
+        assert can_add is False
+        assert 0.4 < hours_remaining < 0.6  # Approximately 0.5 hours
+
+    @pytest.mark.asyncio
+    async def test_continue_saga_too_soon_raises(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should raise ChapterTooSoonError when interval not met."""
+        config = BardConfig(min_chapter_interval_hours=1.0)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 15 minutes ago
+        recent_time = now_ms - int(0.25 * 60 * 60 * 1000)
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="The Impatient Tale",
+            last_chapter=2,
+            last_told=recent_time,
+        )
+
+        with pytest.raises(ChapterTooSoonError) as exc_info:
+            await bard._continue_saga(saga, trace_id="test-123")
+
+        assert exc_info.value.min_hours == 1.0
+        assert exc_info.value.hours_remaining > 0
+
+
+# =============================================================================
+# Salt Response Lifecycle Integration Tests
+# =============================================================================
+
+
+class TestSaltResponseLifecycleIntegration:
+    """Tests for salt_response handling lifecycle errors gracefully."""
+
+    @pytest.mark.asyncio
+    async def test_salt_response_falls_back_on_too_soon(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should fall back to standalone tidbit when chapter too soon."""
+        config = BardConfig(
+            tidbit_probability=1.0,  # Always add tidbit
+            saga_continuation_probability=1.0,  # Always try to continue
+            min_chapter_interval_hours=1.0,
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 10 minutes ago - too soon
+        recent_time = now_ms - int(0.17 * 60 * 60 * 1000)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-123",
+                "saga_name": "The Impatient Tale",
+                "last_chapter": 2,
+                "last_told": recent_time,
+            }
+        ]
+
+        result = await bard.salt_response("Hello", trace_id="test-123")
+
+        # Should have added standalone tidbit instead
+        assert result.tidbit_added is True
+        assert result.is_continuation is False
+        assert result.tidbit in CANONICAL_TIDBITS
+
+    @pytest.mark.asyncio
+    async def test_salt_response_falls_back_on_timed_out(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should fall back to standalone tidbit when saga timed out."""
+        config = BardConfig(
+            tidbit_probability=1.0,
+            saga_continuation_probability=1.0,
+            saga_timeout_days=30,
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # 45 days ago - timed out
+        old_time = int((time.time() - 45 * 24 * 60 * 60) * 1000)
+
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-old",
+                "saga_name": "The Ancient Tale",
+                "last_chapter": 2,
+                "last_told": old_time,
+            }
+        ]
+
+        result = await bard.salt_response("Hello", trace_id="test-123")
+
+        # Should have added standalone tidbit instead
+        assert result.tidbit_added is True
+        assert result.is_continuation is False
+
+
+# =============================================================================
+# Process Message Lifecycle Operations Tests
+# =============================================================================
+
+
+class TestProcessMessageLifecycleOperations:
+    """Tests for new process_message operations."""
+
+    @pytest.mark.asyncio
+    async def test_process_archive_timed_out_operation(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should handle archive_timed_out operation."""
+        config = BardConfig(saga_timeout_days=30, max_saga_chapters=5)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        old_time = int((time.time() - 45 * 24 * 60 * 60) * 1000)
+
+        mock_neo4j.execute_query.side_effect = [
+            # Find timed-out sagas
+            [{"saga_id": "s1", "saga_name": "Old Saga", "last_chapter": 2, "last_told": old_time}],
+            # Save closing chapter
+            [{"uuid": "ep-close"}],
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="maintenance",
+            payload={"operation": "archive_timed_out"},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert response.payload["archived"][0]["saga_name"] == "Old Saga"
+
+    @pytest.mark.asyncio
+    async def test_process_get_active_sagas_operation(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should handle get_active_sagas operation."""
+        config = BardConfig(max_active_sagas=3)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        mock_neo4j.execute_query.return_value = [
+            {"saga_id": "s1", "saga_name": "Active One", "last_chapter": 2, "last_told": now_ms},
+            {"saga_id": "s2", "saga_name": "Active Two", "last_chapter": 1, "last_told": now_ms},
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_active_sagas"},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 2
+        assert response.payload["max_active"] == 3
+        assert len(response.payload["active_sagas"]) == 2
+
+
+# =============================================================================
+# ActiveSaga Model Extension Tests
+# =============================================================================
+
+
+class TestActiveSagaTimedOutFlag:
+    """Tests for ActiveSaga is_timed_out flag."""
+
+    def test_active_saga_default_not_timed_out(self, now_ms: int) -> None:
+        """ActiveSaga should default to not timed out."""
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="Test Saga",
+            last_chapter=2,
+            last_told=now_ms,
+        )
+
+        assert saga.is_timed_out is False
+
+    def test_active_saga_timed_out_flag(self, now_ms: int) -> None:
+        """ActiveSaga should accept is_timed_out flag."""
+        saga = ActiveSaga(
+            saga_id="saga-123",
+            saga_name="Test Saga",
+            last_chapter=2,
+            last_told=now_ms,
+            is_timed_out=True,
+        )
+
+        assert saga.is_timed_out is True
+
+
+# =============================================================================
+# Export Tests for Lifecycle Exceptions
+# =============================================================================
+
+
+class TestLifecycleExceptionExports:
+    """Tests for lifecycle exception exports."""
+
+    def test_lifecycle_exceptions_exported(self) -> None:
+        """All lifecycle exceptions should be in __all__."""
+        from klabautermann.agents.bard import __all__
+
+        expected = [
+            "SagaLifecycleError",
+            "SagaCompleteError",
+            "SagaLimitReachedError",
+            "ChapterTooSoonError",
+            "SagaTimedOutError",
+        ]
+
+        for item in expected:
+            assert item in __all__
