@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Calendar event update with PATCH semantics for partial updates (#209)
+- Calendar event delete functionality (#210)
+- `update_event()` and `delete_event()` methods in GoogleWorkspaceBridge
+- `CALENDAR_UPDATE` and `CALENDAR_DELETE` action types in Executor
+- `UpdateEventResult` and `DeleteEventResult` response models
+- 10 new unit tests for calendar update/delete operations
 - Parallel test execution with pytest-xdist (#317)
 - JUnit XML test results artifact for CI (#317)
 - Unit tests for email list formatting with `total_available` parameter (#316)
