@@ -17,9 +17,11 @@ from klabautermann.core.models import ActionType, AgentMessage
 from klabautermann.mcp.google_workspace import (
     CalendarEvent,
     CreateEventResult,
+    DeleteEventResult,
     EmailMessage,
     GoogleWorkspaceBridge,
     SendEmailResult,
+    UpdateEventResult,
 )
 
 
@@ -35,6 +37,8 @@ def mock_google_bridge():
     bridge.send_email = AsyncMock()
     bridge.get_recent_emails = AsyncMock()
     bridge.create_event = AsyncMock()
+    bridge.update_event = AsyncMock()
+    bridge.delete_event = AsyncMock()
     bridge.get_todays_events = AsyncMock()
     return bridge
 
@@ -471,6 +475,151 @@ class TestCalendarExecution:
 
         assert result.success is True
         assert "No events scheduled" in result.message
+
+
+class TestCalendarUpdateDelete:
+    """Test calendar update and delete action execution."""
+
+    @pytest.mark.asyncio
+    async def test_update_event_success(self, executor, mock_google_bridge):
+        """Test successful event update."""
+        from klabautermann.core.models import ActionRequest
+
+        mock_google_bridge.update_event.return_value = UpdateEventResult(
+            success=True,
+            event_id="event-123",
+            event_link="https://calendar.google.com/event/123",
+        )
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_UPDATE,
+            target="event-123",
+            start_time="2026-01-15T15:00:00",
+            end_time="2026-01-15T16:00:00",
+        )
+
+        context = {"event_title": "Updated Meeting Title"}
+        result = await executor._execute_action(request, context, "trace-123")
+
+        assert result.success is True
+        assert "updated" in result.message.lower()
+        assert result.details["event_id"] == "event-123"
+        mock_google_bridge.update_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_event_failure(self, executor, mock_google_bridge):
+        """Test event update failure."""
+        from klabautermann.core.models import ActionRequest
+
+        mock_google_bridge.update_event.return_value = UpdateEventResult(
+            success=False, event_id="event-123", error="Event not found"
+        )
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_UPDATE,
+            target="event-123",
+        )
+
+        result = await executor._execute_action(request, {}, "trace-123")
+
+        assert result.success is False
+        assert "Event not found" in result.message
+
+    @pytest.mark.asyncio
+    async def test_update_event_missing_id(self, executor, mock_google_bridge):
+        """Test event update without event ID."""
+        from klabautermann.core.models import ActionRequest
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_UPDATE,
+            target=None,  # Missing event ID
+        )
+
+        result = await executor._execute_action(request, {}, "trace-123")
+
+        assert result.success is False
+        assert "event id" in result.message.lower()
+        mock_google_bridge.update_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_event_success(self, executor, mock_google_bridge):
+        """Test successful event deletion."""
+        from klabautermann.core.models import ActionRequest
+
+        mock_google_bridge.delete_event.return_value = DeleteEventResult(
+            success=True, event_id="event-456"
+        )
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_DELETE,
+            target="event-456",
+        )
+
+        result = await executor._execute_action(request, {}, "trace-123")
+
+        assert result.success is True
+        assert "deleted" in result.message.lower()
+        assert result.details["event_id"] == "event-456"
+        mock_google_bridge.delete_event.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_event_failure(self, executor, mock_google_bridge):
+        """Test event deletion failure."""
+        from klabautermann.core.models import ActionRequest
+
+        mock_google_bridge.delete_event.return_value = DeleteEventResult(
+            success=False, event_id="event-456", error="Permission denied"
+        )
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_DELETE,
+            target="event-456",
+        )
+
+        result = await executor._execute_action(request, {}, "trace-123")
+
+        assert result.success is False
+        assert "Permission denied" in result.message
+
+    @pytest.mark.asyncio
+    async def test_delete_event_missing_id(self, executor, mock_google_bridge):
+        """Test event deletion without event ID."""
+        from klabautermann.core.models import ActionRequest
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_DELETE,
+            target=None,  # Missing event ID
+        )
+
+        result = await executor._execute_action(request, {}, "trace-123")
+
+        assert result.success is False
+        assert "event id" in result.message.lower()
+        mock_google_bridge.delete_event.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_parse_calendar_update(self, executor):
+        """Test parsing calendar_update action_type."""
+        result = await executor._parse_action(
+            "Update the meeting",
+            {"action_type": "calendar_update", "event_id": "event-123"},
+            "trace-123",
+        )
+
+        assert result.type == ActionType.CALENDAR_UPDATE
+        assert result.target == "event-123"
+
+    @pytest.mark.asyncio
+    async def test_parse_calendar_delete(self, executor):
+        """Test parsing calendar_delete action_type."""
+        result = await executor._parse_action(
+            "Delete the meeting",
+            {"action_type": "calendar_delete", "event_id": "event-456"},
+            "trace-123",
+        )
+
+        assert result.type == ActionType.CALENDAR_DELETE
+        assert result.target == "event-456"
 
 
 # ===========================================================================

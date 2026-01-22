@@ -9,6 +9,7 @@ Reference: specs/architecture/AGENTS.md Section 1.4
 
 from __future__ import annotations
 
+import contextlib
 import re
 from datetime import datetime
 from typing import Any
@@ -225,6 +226,18 @@ ERROR HANDLING:
         elif action_type == "calendar_create":
             return ActionRequest(type=ActionType.CALENDAR_CREATE)
 
+        elif action_type == "calendar_update":
+            return ActionRequest(
+                type=ActionType.CALENDAR_UPDATE,
+                target=context.get("event_id"),
+            )
+
+        elif action_type == "calendar_delete":
+            return ActionRequest(
+                type=ActionType.CALENDAR_DELETE,
+                target=context.get("event_id"),
+            )
+
         # Fallback: If no action_type provided, default to email search with inbox
         # This handles legacy payloads or when LLM doesn't follow the schema
         logger.warning(
@@ -280,6 +293,40 @@ ERROR HANDLING:
                     message="The time format is invalid. Please specify times in ISO format (e.g., 2026-01-15T14:00:00).",
                 )
 
+        elif request.type == ActionType.CALENDAR_UPDATE:
+            # Must have event ID
+            if not request.target:
+                return ActionResult(
+                    success=False,
+                    message="I need the event ID to update. Which event should I modify?",
+                )
+
+            # Validate time format if times are provided
+            if request.start_time:
+                try:
+                    datetime.fromisoformat(request.start_time.replace("Z", ""))
+                except (ValueError, AttributeError):
+                    return ActionResult(
+                        success=False,
+                        message="The start time format is invalid. Please use ISO format (e.g., 2026-01-15T14:00:00).",
+                    )
+            if request.end_time:
+                try:
+                    datetime.fromisoformat(request.end_time.replace("Z", ""))
+                except (ValueError, AttributeError):
+                    return ActionResult(
+                        success=False,
+                        message="The end time format is invalid. Please use ISO format (e.g., 2026-01-15T14:00:00).",
+                    )
+
+        elif request.type == ActionType.CALENDAR_DELETE:
+            # Must have event ID
+            if not request.target:
+                return ActionResult(
+                    success=False,
+                    message="I need the event ID to delete. Which event should I remove?",
+                )
+
         return ActionResult(success=True, message="Validation passed")
 
     async def _execute_action(
@@ -325,6 +372,12 @@ ERROR HANDLING:
 
             elif request.type == ActionType.CALENDAR_LIST:
                 return await self._handle_calendar_list(request, trace_id, ctx)
+
+            elif request.type == ActionType.CALENDAR_UPDATE:
+                return await self._handle_calendar_update(request, context, trace_id, ctx)
+
+            elif request.type == ActionType.CALENDAR_DELETE:
+                return await self._handle_calendar_delete(request, context, trace_id, ctx)
 
             return ActionResult(success=False, message="Unknown action type.")
 
@@ -726,6 +779,147 @@ ERROR HANDLING:
             return ActionResult(
                 success=False,
                 message=f"Failed to list events: {e!s}",
+            )
+
+    async def _handle_calendar_update(
+        self,
+        request: ActionRequest,
+        context: dict[str, Any],
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle calendar event update.
+
+        Uses PATCH semantics - only provided fields are updated.
+
+        Args:
+            request: Update request with event_id in target
+            context: Context containing update fields (title, start_time, end_time, etc.)
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with update status
+        """
+        event_id = request.target
+        if not event_id:
+            return ActionResult(
+                success=False,
+                message="I need the event ID to update. Which event should I modify?",
+            )
+
+        # Extract update fields from context
+        title = context.get("event_title") or context.get("title")
+        description = context.get("event_description") or context.get("description")
+        location = context.get("event_location") or context.get("location")
+
+        # Parse times if provided
+        start_time = None
+        end_time = None
+        if request.start_time:
+            with contextlib.suppress(ValueError):
+                start_time = datetime.fromisoformat(request.start_time.replace("Z", ""))
+        if request.end_time:
+            with contextlib.suppress(ValueError):
+                end_time = datetime.fromisoformat(request.end_time.replace("Z", ""))
+
+        try:
+            result = await self.google.update_event(
+                event_id=event_id,
+                title=title,
+                start=start_time,
+                end=end_time,
+                description=description,
+                location=location,
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Calendar event updated: {event_id[:8]}...",
+                    extra={"trace_id": trace_id, "event_id": event_id},
+                )
+                event_link = result.event_link or ""
+                return ActionResult(
+                    success=True,
+                    message=f"Event updated successfully. {event_link}",
+                    details={"event_id": result.event_id, "event_link": event_link},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to update event: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Calendar update failed: {e}",
+                extra={"trace_id": trace_id, "event_id": event_id},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to update event: {e!s}",
+            )
+
+    async def _handle_calendar_delete(
+        self,
+        request: ActionRequest,
+        _context: dict[str, Any],
+        trace_id: str,
+        invocation_ctx: ToolInvocationContext,
+    ) -> ActionResult:
+        """
+        Handle calendar event deletion.
+
+        Args:
+            request: Delete request with event_id in target
+            context: Context (unused)
+            trace_id: Request trace ID
+            invocation_ctx: MCP tool invocation context
+
+        Returns:
+            ActionResult with deletion status
+        """
+        event_id = request.target
+        if not event_id:
+            return ActionResult(
+                success=False,
+                message="I need the event ID to delete. Which event should I remove?",
+            )
+
+        try:
+            result = await self.google.delete_event(
+                event_id=event_id,
+                context=invocation_ctx,
+            )
+
+            if result.success:
+                logger.info(
+                    f"[BEACON] Calendar event deleted: {event_id[:8]}...",
+                    extra={"trace_id": trace_id, "event_id": event_id},
+                )
+                return ActionResult(
+                    success=True,
+                    message="Event deleted successfully.",
+                    details={"event_id": event_id},
+                )
+            else:
+                return ActionResult(
+                    success=False,
+                    message=f"Failed to delete event: {result.error}",
+                )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Calendar delete failed: {e}",
+                extra={"trace_id": trace_id, "event_id": event_id},
+                exc_info=True,
+            )
+            return ActionResult(
+                success=False,
+                message=f"Failed to delete event: {e!s}",
             )
 
     # ===========================================================================

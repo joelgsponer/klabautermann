@@ -765,6 +765,8 @@ class ActionType(str, Enum):
     EMAIL_UNLABEL = "email_unlabel"
     LABEL_LIST = "label_list"
     CALENDAR_CREATE = "calendar_create"
+    CALENDAR_UPDATE = "calendar_update"
+    CALENDAR_DELETE = "calendar_delete"
     CALENDAR_LIST = "calendar_list"
 
 
