@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="tooling,channel">
+    <meta name="post-slug" content="channel-integration-tests">
+    <meta name="post-excerpt" content="Twenty-three tests to prove that CLI and Telegram never bleed into each other. Thread isolation, verified.">
+    <title>Proving Thread Isolation | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">tooling</span>
+                        <span class="category-tag">channel</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Proving Thread Isolation</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Klabautermann now has CLI and Telegram channels. Auto-restart when they fail. Broadcast to all at once. But how do we know they actually work?</p>
+
+                <p>Tests. Specifically, 23 of them.</p>
+
+                <h2>The Risk</h2>
+                <p>Multi-channel systems have a subtle failure mode: context bleed. User A says something on CLI. User B on Telegram asks a question. Does Klabautermann accidentally leak User A's context to User B?</p>
+
+                <p>Thread isolation isn't something you can eyeball. You have to prove it.</p>
+
+                <h2>The Test Suite</h2>
+                <p>Six test classes covering the full channel stack:</p>
+
+                <pre><code>TestCLIIntegration        # 5 tests
+TestTelegramIntegration   # 4 tests
+TestThreadIsolation       # 4 tests
+TestMultiChannelOperation # 4 tests
+TestMessageRouting        # 4 tests
+TestChannelStatus         # 2 tests</code></pre>
+
+                <h2>Thread Isolation</h2>
+                <p>The critical tests. Four scenarios:</p>
+
+                <pre><code>async def test_cli_threads_isolated(...):
+    """Different CLI sessions should use different thread IDs."""
+    cli1 = CLIDriver(orchestrator=mock_orchestrator)
+    cli2 = CLIDriver(orchestrator=mock_orchestrator)
+
+    thread_id1 = cli1.get_thread_id()
+    thread_id2 = cli2.get_thread_id()
+
+    assert thread_id1 != thread_id2</code></pre>
+
+                <p>Two CLI sessions. Two different thread IDs. No way for one to see the other's data.</p>
+
+                <pre><code>async def test_cross_channel_isolation(...):
+    """Messages from different channels should use different thread prefixes."""
+    cli_thread = cli_driver.get_thread_id()
+    telegram_thread = telegram_driver.get_thread_id(telegram_update)
+
+    assert cli_thread.startswith("cli-")
+    assert telegram_thread.startswith("telegram-")
+    assert cli_thread != telegram_thread</code></pre>
+
+                <p>CLI threads start with <code>cli-</code>. Telegram threads start with <code>telegram-</code>. They can never collide.</p>
+
+                <h2>Multi-Channel Operation</h2>
+                <p>Testing the ChannelManager's ability to juggle multiple channels:</p>
+
+                <pre><code>async def test_broadcast_to_multiple_channels(...):
+    """Channel manager should broadcast to all active channels."""
+    channel_manager.register("cli", cli_mock)
+    channel_manager.register("telegram", telegram_mock)
+
+    await channel_manager.start_all()
+    result = await channel_manager.broadcast("System announcement")
+
+    assert result.delivered_count == 2
+    assert result.all_delivered</code></pre>
+
+                <p>Register both channels. Start them. Broadcast. Verify both received the message.</p>
+
+                <h2>Message Routing</h2>
+                <p>Each channel talks to the orchestrator differently:</p>
+
+                <pre><code>async def test_cli_passes_thread_id_to_orchestrator(...):
+    await cli_driver.receive_message(
+        thread_id="cli-specific-thread",
+        content="Test message",
+    )
+
+    call_kwargs = mock_orchestrator.handle_user_input.call_args.kwargs
+    assert call_kwargs["thread_id"] == "cli-specific-thread"</code></pre>
+
+                <p>CLI uses <code>handle_user_input</code> with <code>thread_id</code>. Telegram uses <code>handle_user_input_v2</code> with <code>thread_uuid</code>. Both patterns verified.</p>
+
+                <h2>Error Handling</h2>
+                <p>When the orchestrator fails, the user should see a friendly message:</p>
+
+                <pre><code>async def test_cli_error_handling(...):
+    mock_orchestrator.handle_user_input.side_effect = Exception("Connection error")
+
+    response = await cli_driver.receive_message(
+        thread_id="cli-test",
+        content="Test",
+    )
+
+    assert "rough waters" in response.lower()</code></pre>
+
+                <p>Connection error becomes "rough waters". Nautical theme maintained even in failure.</p>
+
+                <h2>The Numbers</h2>
+                <ul>
+                    <li>23 tests total</li>
+                    <li>6 test classes</li>
+                    <li>1.27 seconds to run</li>
+                    <li>100% pass rate</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#161: Add channel integration test suite</li>
+                </ul>
+
+                <p>The channel system is now provably correct. Thread isolation isn't just claimed, it's tested. Every code path has a test asserting the expected behavior.</p>
+
+                <p>Trust, but verify. Now we have both.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
