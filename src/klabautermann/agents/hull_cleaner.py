@@ -20,6 +20,11 @@ from typing import TYPE_CHECKING, Any
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
+from klabautermann.memory.orphan_cleanup import (
+    OrphanMessage,
+    delete_orphan_messages,
+    find_orphan_messages,
+)
 from klabautermann.memory.weight_decay import (
     RelationshipWeight,
     get_low_weight_relationships,
@@ -64,6 +69,10 @@ class HullCleanerConfig:
     prune_weak_relationships: bool = True
     weak_relationship_threshold: float = 0.2
     weak_relationship_age_days: int = 90
+
+    # Orphan cleanup settings
+    remove_orphan_messages: bool = True
+    orphan_batch_size: int = 50
 
     # Run limits
     max_deletions_per_run: int = 1000
@@ -208,6 +217,22 @@ class HullCleaner(BaseAgent):
         elif operation == "prune_weak_relationships":
             result = await self.prune_weak_relationships(dry_run=dry_run, trace_id=trace_id)
             result_payload = result.to_dict()
+        elif operation == "find_orphan_messages":
+            orphans = await self.find_orphan_messages(trace_id=trace_id)
+            result_payload = {
+                "orphan_messages": [
+                    {
+                        "uuid": o.uuid,
+                        "content": o.content[:100] if o.content else None,
+                        "role": o.role,
+                    }
+                    for o in orphans
+                ],
+                "count": len(orphans),
+            }
+        elif operation == "remove_orphan_messages":
+            result = await self.remove_orphan_messages(dry_run=dry_run, trace_id=trace_id)
+            result_payload = result.to_dict()
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -271,8 +296,24 @@ class HullCleaner(BaseAgent):
                 )
                 errors.append(error_msg)
 
+        # 2. Remove orphan messages
+        if self.hull_config.remove_orphan_messages:
+            try:
+                orphan_result = await self.remove_orphan_messages(
+                    dry_run=dry_run, trace_id=trace_id
+                )
+                total_nodes_found += orphan_result.nodes_found
+                total_nodes_removed += orphan_result.nodes_removed
+                self._audit_log.extend(orphan_result.audit_entries)
+            except Exception as e:
+                error_msg = f"Orphan message removal failed: {e}"
+                logger.error(
+                    f"[STORM] {error_msg}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                errors.append(error_msg)
+
         # Future: Add more pruning operations here
-        # - Orphan message removal
         # - Duplicate entity detection
         # - Transitive path reduction
 
@@ -292,8 +333,8 @@ class HullCleaner(BaseAgent):
 
         logger.info(
             f"[BEACON] Barnacle scraping complete: "
-            f"found {total_rels_found} weak relationships, "
-            f"pruned {total_rels_pruned} "
+            f"found {total_rels_found} weak relationships (pruned {total_rels_pruned}), "
+            f"found {total_nodes_found} orphan messages (removed {total_nodes_removed}) "
             f"({'preview' if dry_run else 'actual'})",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
@@ -497,6 +538,130 @@ class HullCleaner(BaseAgent):
         )
 
         return deleted > 0
+
+    # =========================================================================
+    # Orphan Message Operations
+    # =========================================================================
+
+    async def find_orphan_messages(
+        self,
+        limit: int | None = None,
+        trace_id: str | None = None,
+    ) -> list[OrphanMessage]:
+        """
+        Find messages not linked to any thread.
+
+        These are candidates for cleanup - messages that were created but
+        never properly linked due to failed transactions or bugs.
+
+        Args:
+            limit: Maximum orphans to return (default from config).
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of OrphanMessage objects representing orphan messages.
+        """
+        limit = limit or self.hull_config.max_deletions_per_run
+
+        logger.debug(
+            f"[WHISPER] Finding orphan messages (limit={limit})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Use existing orphan_cleanup infrastructure
+        orphans = await find_orphan_messages(
+            neo4j=self.neo4j,
+            limit=limit,
+            trace_id=trace_id,
+        )
+
+        logger.debug(
+            f"[WHISPER] Found {len(orphans)} orphan messages",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return orphans
+
+    async def remove_orphan_messages(
+        self,
+        dry_run: bool = True,
+        trace_id: str | None = None,
+    ) -> PruningResult:
+        """
+        Delete orphan messages from the graph.
+
+        Args:
+            dry_run: If True, only preview changes without deleting.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            PruningResult with operation statistics.
+        """
+        start_time = time.time()
+
+        logger.info(
+            f"[CHART] Removing orphan messages (dry_run={dry_run})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Find orphans first
+        orphans = await self.find_orphan_messages(trace_id=trace_id)
+
+        audit_entries: list[AuditEntry] = []
+        removed_count = 0
+        errors: list[str] = []
+
+        for orphan in orphans:
+            # Create audit entry
+            entry = AuditEntry(
+                timestamp=datetime.now(),
+                action=PruningAction.PREVIEW if dry_run else PruningAction.DELETE_NODE,
+                entity_type="message",
+                entity_id=orphan.uuid,
+                reason="Message not linked to any thread",
+                metadata={
+                    "role": orphan.role,
+                    "content_preview": orphan.content[:50] if orphan.content else None,
+                },
+            )
+            audit_entries.append(entry)
+
+        if not dry_run:
+            # Use existing delete_orphan_messages for actual deletion
+            cleanup_result = await delete_orphan_messages(
+                neo4j=self.neo4j,
+                batch_size=self.hull_config.orphan_batch_size,
+                dry_run=False,
+                trace_id=trace_id,
+            )
+            removed_count = cleanup_result.deleted_count
+            if cleanup_result.failed_count > 0:
+                errors.append(f"Failed to delete {cleanup_result.failed_count} orphan batches")
+        else:
+            removed_count = len(orphans)  # Count as "would be removed" in dry run
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        result = PruningResult(
+            operation="remove_orphan_messages",
+            dry_run=dry_run,
+            relationships_found=0,
+            relationships_pruned=0,
+            nodes_found=len(orphans),
+            nodes_removed=removed_count,
+            errors=errors,
+            duration_ms=duration_ms,
+            audit_entries=audit_entries,
+        )
+
+        logger.info(
+            f"[BEACON] Orphan message removal complete: "
+            f"found {len(orphans)}, removed {removed_count} "
+            f"({'preview' if dry_run else 'actual'})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return result
 
     # =========================================================================
     # Statistics

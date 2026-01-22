@@ -541,6 +541,234 @@ class TestAuditLog:
 
 
 # =============================================================================
+# Orphan Message Tests
+# =============================================================================
+
+
+class TestFindOrphanMessages:
+    """Tests for find_orphan_messages method."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock()
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_find_orphans_empty(self, cleaner, mock_neo4j):
+        """Test finding orphans when none exist."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        result = await cleaner.find_orphan_messages()
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_find_orphans_with_results(self, cleaner, mock_neo4j):
+        """Test finding orphan messages."""
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "orphan-1",
+                    "content": "Orphaned message content",
+                    "timestamp": 1234567890.0,
+                    "role": "user",
+                },
+                {
+                    "uuid": "orphan-2",
+                    "content": "Another orphan",
+                    "timestamp": 1234567891.0,
+                    "role": "assistant",
+                },
+            ]
+        )
+
+        result = await cleaner.find_orphan_messages()
+
+        assert len(result) == 2
+        assert result[0].uuid == "orphan-1"
+        assert result[1].role == "assistant"
+
+
+class TestRemoveOrphanMessages:
+    """Tests for remove_orphan_messages method."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock()
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_remove_orphans_dry_run(self, cleaner, mock_neo4j):
+        """Test removing orphans in dry run mode."""
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "orphan-1",
+                    "content": "Test content",
+                    "timestamp": 1234567890.0,
+                    "role": "user",
+                },
+            ]
+        )
+
+        result = await cleaner.remove_orphan_messages(dry_run=True)
+
+        assert result.dry_run is True
+        assert result.nodes_found == 1
+        assert result.nodes_removed == 1  # Would be removed
+        assert len(result.audit_entries) == 1
+        assert result.audit_entries[0].action == PruningAction.PREVIEW
+
+    @pytest.mark.asyncio
+    async def test_remove_orphans_actual(self, cleaner, mock_neo4j):
+        """Test actual orphan removal."""
+        # First call returns orphans, second call is the count, third is delete
+        mock_neo4j.execute_query = AsyncMock(
+            side_effect=[
+                # find_orphan_messages
+                [
+                    {
+                        "uuid": "orphan-1",
+                        "content": "Test",
+                        "timestamp": 1234567890.0,
+                        "role": "user",
+                    },
+                ],
+                # count_orphan_messages (inside delete_orphan_messages)
+                [{"count": 1}],
+                # actual delete batch
+                [{"deleted": 1}],
+                # next delete batch (returns 0 to stop)
+                [{"deleted": 0}],
+            ]
+        )
+
+        result = await cleaner.remove_orphan_messages(dry_run=False)
+
+        assert result.dry_run is False
+        assert result.nodes_found == 1
+        assert result.nodes_removed == 1
+        assert result.audit_entries[0].action == PruningAction.DELETE_NODE
+
+
+class TestScrapeBarnaclesWithOrphans:
+    """Tests for scrape_barnacles with orphan cleanup enabled."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_scrape_includes_orphans(self, cleaner):
+        """Test that scrape_barnacles includes orphan cleanup."""
+        result = await cleaner.scrape_barnacles(dry_run=True)
+
+        # Should have processed both weak rels and orphans
+        assert result.operation == "scrape_barnacles"
+        # Both operations should complete without errors
+        assert result.errors == []
+
+    @pytest.mark.asyncio
+    async def test_scrape_with_orphans_disabled(self, mock_neo4j):
+        """Test scrape with orphan cleanup disabled."""
+        config = HullCleanerConfig(
+            prune_weak_relationships=False,
+            remove_orphan_messages=False,
+        )
+        cleaner = HullCleaner(neo4j_client=mock_neo4j, config=config)
+
+        result = await cleaner.scrape_barnacles(dry_run=True)
+
+        # No operations should be processed
+        assert result.relationships_found == 0
+        assert result.nodes_found == 0
+
+
+class TestProcessMessageOrphanOperations:
+    """Tests for process_message with orphan operations."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_process_find_orphan_messages(self, cleaner, mock_neo4j):
+        """Test processing find_orphan_messages operation."""
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "uuid": "orphan-1",
+                    "content": "Test content",
+                    "timestamp": 1234567890.0,
+                    "role": "user",
+                },
+            ]
+        )
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="hull_cleaner",
+            intent="maintenance",
+            payload={"operation": "find_orphan_messages"},
+            trace_id="test-trace",
+        )
+
+        response = await cleaner.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert len(response.payload["orphan_messages"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_remove_orphan_messages(self, cleaner, mock_neo4j):
+        """Test processing remove_orphan_messages operation."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="hull_cleaner",
+            intent="maintenance",
+            payload={"operation": "remove_orphan_messages", "dry_run": True},
+            trace_id="test-trace",
+        )
+
+        response = await cleaner.process_message(msg)
+
+        assert response is not None
+        assert response.payload["operation"] == "remove_orphan_messages"
+
+
+# =============================================================================
 # Module Export Tests
 # =============================================================================
 
