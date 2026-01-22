@@ -6,6 +6,8 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Calendar Search**: Find events by searching titles and descriptions ("find my meetings with Sarah", "show standup meetings next week")
+- **Meeting Time Finder**: Find available meeting slots across your calendars ("when am I free for a 30-minute call?", "find open slots this week")
 - **Email Attachments**: View, download, and save email attachments ("download that PDF from Sarah's email", "save the spreadsheet to my downloads folder")
 - **File Operations**: Read and write local files via secure sandboxed access for attachment storage and file-based workflows
 - **Recurring Calendar Events**: Create recurring meetings and appointments ("schedule daily standup at 9am", "add weekly team meeting every Tuesday")

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Calendar event search with `search_events()` method (#220)
+- Calendar free slot finder with `find_free_slots()` method using FreeBusy API (#218)
+- `FreeSlot` model with duration helpers and display formatting
+- 14 new unit tests for calendar search and free slots
 - Email attachment support: parsing, download, and save to local storage (#208)
 - `EmailAttachment` model with attachment metadata (id, filename, mime_type, size)
 - `has_attachments` property and `attachments` list on `EmailMessage`
