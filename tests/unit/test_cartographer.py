@@ -36,6 +36,7 @@ def mock_neo4j() -> MagicMock:
     """Create a mock Neo4j client."""
     mock = MagicMock()
     mock.execute_query = AsyncMock(return_value=[])
+    mock.execute_write = AsyncMock(return_value=[])
     return mock
 
 
@@ -696,6 +697,141 @@ class TestCartographerConfig:
         assert config.projection_name == "custom"
         assert config.min_community_size == 10
         assert len(config.node_labels) == 2
+
+
+# =============================================================================
+# Summary Generation Tests (#75)
+# =============================================================================
+
+
+class TestSummaryGeneration:
+    """Tests for community summary generation (#75)."""
+
+    @pytest.mark.asyncio
+    async def test_generate_summaries_finds_communities_without_summaries(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Should find communities that need summaries."""
+        # Mock finding communities without summaries
+        mock_neo4j.execute_query.side_effect = [
+            # First call: find communities needing summaries
+            [{"uuid": "comm-1", "name": "Work Island", "theme": "professional"}],
+            # Second call: get community members
+            [
+                {
+                    "uuid": "node-1",
+                    "labels": ["Person"],
+                    "name": "John",
+                    "weight": 1.0,
+                    "detected_at": 0,
+                },
+                {
+                    "uuid": "node-2",
+                    "labels": ["Organization"],
+                    "name": "Acme",
+                    "weight": 1.0,
+                    "detected_at": 0,
+                },
+            ],
+        ]
+        mock_neo4j.execute_write.return_value = []
+
+        result = await cartographer.generate_summaries()
+
+        assert result["summaries_generated"] == 1
+        assert result["errors"] == []
+
+    @pytest.mark.asyncio
+    async def test_generate_summaries_with_force_regenerate(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Should regenerate all summaries when force=True."""
+        mock_neo4j.execute_query.side_effect = [
+            [{"uuid": "comm-1", "name": "Work Island", "theme": "professional"}],
+            [
+                {
+                    "uuid": "node-1",
+                    "labels": ["Person"],
+                    "name": "John",
+                    "weight": 1.0,
+                    "detected_at": 0,
+                }
+            ],
+        ]
+        mock_neo4j.execute_write.return_value = []
+
+        await cartographer.generate_summaries(force_regenerate=True)
+
+        # Verify query doesn't filter by last_updated
+        first_call = mock_neo4j.execute_query.call_args_list[0]
+        query = first_call[0][0]
+        assert "last_updated" not in query
+
+    @pytest.mark.asyncio
+    async def test_generate_summaries_no_communities_needed(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Should handle case with no communities needing summaries."""
+        mock_neo4j.execute_query.return_value = []
+
+        result = await cartographer.generate_summaries()
+
+        assert result["summaries_generated"] == 0
+        assert result["errors"] == []
+
+    @pytest.mark.asyncio
+    async def test_generate_summary_includes_member_composition(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Generated summary should describe member composition."""
+        members = [
+            CommunityMember(uuid="1", labels=["Person"], name="Alice"),
+            CommunityMember(uuid="2", labels=["Person"], name="Bob"),
+            CommunityMember(uuid="3", labels=["Organization"], name="Acme"),
+        ]
+
+        summary = await cartographer._generate_summary(
+            community_name="Work Island",
+            community_theme="professional",
+            members=members,
+        )
+
+        assert "professional" in summary.lower() or "work" in summary.lower()
+        assert "Person" in summary
+        assert "3" in summary  # total count
+
+    @pytest.mark.asyncio
+    async def test_generate_summary_empty_members(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Should handle community with no members."""
+        summary = await cartographer._generate_summary(
+            community_name="Empty Island",
+            community_theme="unknown",
+            members=[],
+        )
+
+        assert "0 members" in summary or "unknown" in summary
+
+    @pytest.mark.asyncio
+    async def test_process_message_generate_summaries_operation(
+        self, mock_neo4j: MagicMock, cartographer: Cartographer
+    ) -> None:
+        """Process message should handle generate_summaries operation."""
+        mock_neo4j.execute_query.return_value = []  # No communities need summaries
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="cartographer",
+            intent="cartographer_request",
+            payload={"operation": "generate_summaries"},
+            trace_id="test-trace",
+        )
+
+        response = await cartographer.process_message(msg)
+
+        assert response is not None
+        assert response.payload["summaries_generated"] == 0
 
 
 # =============================================================================
