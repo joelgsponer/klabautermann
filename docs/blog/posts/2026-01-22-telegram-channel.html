@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,channel">
+    <meta name="post-slug" content="telegram-channel">
+    <meta name="post-excerpt" content="Klabautermann joins Telegram. Text messages, voice transcription, and your knowledge graph in your pocket.">
+    <title>Mobile Shores | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">channel</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Mobile Shores</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The CLI is home. The terminal is comfortable. But sometimes you're not at your desk.</p>
+
+                <p>Today, Klabautermann learned to speak Telegram.</p>
+
+                <h2>The Setup</h2>
+                <p>Three things make a Telegram bot:</p>
+
+                <ol>
+                    <li>Talk to <code>@BotFather</code> on Telegram</li>
+                    <li>Create a bot, get a token</li>
+                    <li>Set <code>TELEGRAM_BOT_TOKEN</code> in your <code>.env</code></li>
+                </ol>
+
+                <p>That's it. Start Klabautermann with Telegram enabled and it begins polling for messages.</p>
+
+                <h2>The Interface</h2>
+                <p>Three commands:</p>
+
+                <ul>
+                    <li><code>/start</code> - Welcome message with the nautical greeting</li>
+                    <li><code>/help</code> - What the bot can do</li>
+                    <li><code>/status</code> - Chat ID, user ID, voice status</li>
+                </ul>
+
+                <p>Everything else is conversation. Same orchestrator, same knowledge graph, different port of entry.</p>
+
+                <h2>Thread Isolation</h2>
+                <p>Each Telegram chat gets its own thread:</p>
+
+                <pre><code>CLI session: cli-abc123
+Telegram chat: telegram-987654321</code></pre>
+
+                <p>Ask "What did I talk about?" from CLI - you get CLI context. Ask from Telegram - you get Telegram context. No bleed. The spec demands it.</p>
+
+                <h2>Voice Messages</h2>
+                <p>Telegram voice messages work too:</p>
+
+                <ol>
+                    <li>User sends voice note</li>
+                    <li>Download to temp file</li>
+                    <li>Transcribe with OpenAI Whisper</li>
+                    <li>Process as text</li>
+                    <li>Reply with transcription + response</li>
+                </ol>
+
+                <p>Walking the dog, recording a voice note: "I just talked to Sarah about the Q3 budget."</p>
+
+                <p>Klabautermann captures it. The graph grows.</p>
+
+                <h2>Authorization</h2>
+                <p>Private bot? Set <code>allowed_user_ids</code>:</p>
+
+                <pre><code>config:
+  telegram:
+    allowed_user_ids: [123456789, 987654321]</code></pre>
+
+                <p>Empty list means public. Non-empty means whitelist only. Unauthorized users get a polite rejection.</p>
+
+                <h2>The Architecture</h2>
+                <pre><code>TelegramDriver(BaseChannel)
+├── start()         # Initialize, register handlers, start polling
+├── stop()          # Graceful shutdown
+├── send_message()  # Reply to chat
+├── receive_message() # Forward to orchestrator
+├── get_thread_id() # chat_id to thread UUID
+├── _cmd_start()    # /start handler
+├── _cmd_help()     # /help handler
+├── _cmd_status()   # /status handler
+├── _on_text()      # Text message handler
+├── _on_voice()     # Voice message handler
+└── _transcribe_audio() # Whisper integration</code></pre>
+
+                <p>479 lines. 21 tests. Same patterns as CLI. Different transport.</p>
+
+                <h2>The Code</h2>
+
+                <pre><code>async def _on_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle incoming text messages."""
+    user_id = update.message.from_user.id
+
+    # Authorization check
+    if self.allowed_user_ids and user_id not in self.allowed_user_ids:
+        await update.message.reply_text("Sorry, I don't recognize you.")
+        return
+
+    # Typing indicator
+    await update.message.chat.send_action("typing")
+
+    # Sanitize and process
+    content = self._sanitizer.sanitize(update.message.text).sanitized
+    thread_id = self.get_thread_id(update)
+    response = await self.receive_message(thread_id=thread_id, content=content)
+
+    await update.message.reply_text(response, parse_mode="Markdown")</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#129: TelegramDriver class skeleton</li>
+                    <li>#130: Bot token configuration</li>
+                    <li>#131: /start command</li>
+                    <li>#132: /help command</li>
+                    <li>#133: /status command</li>
+                    <li>#134: Text message handling</li>
+                </ul>
+
+                <p>Six issues. One feature. Multiple entry points to the same knowledge.</p>
+
+                <h2>What's Next</h2>
+                <p>Voice message handling is there but optional (needs OpenAI key). Channel restart (#154) and cross-channel messaging (#156) remain. The channel test suite (#161) needs writing.</p>
+
+                <p>But today, Klabautermann has mobile reach. Chat from your phone, record while walking, query your graph from anywhere.</p>
+
+                <p>The voyage continues. Now from more shores.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
