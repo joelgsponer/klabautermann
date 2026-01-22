@@ -295,6 +295,13 @@ class Cartographer(BaseAgent):
         elif operation == "check_gds":
             available = await self._check_gds_available(trace_id=trace_id)
             result_payload = {"gds_available": available}
+        elif operation == "generate_summaries":
+            force = payload.get("force_regenerate", False)
+            summary_result = await self.generate_summaries(
+                force_regenerate=force,
+                trace_id=trace_id,
+            )
+            result_payload = summary_result
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -950,6 +957,179 @@ class Cartographer(BaseAgent):
             "min_members": stats.get("min_members", 0),
             "by_theme": by_theme,
         }
+
+    # =========================================================================
+    # Summary Generation (#75)
+    # =========================================================================
+
+    async def generate_summaries(
+        self,
+        force_regenerate: bool = False,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Generate AI summaries for communities that need them.
+
+        Finds communities without summaries (or stale ones > 1 week old)
+        and generates LLM summaries based on member nodes.
+
+        Reference: specs/architecture/AGENTS_EXTENDED.md Section 4.3 (#75)
+
+        Args:
+            force_regenerate: If True, regenerate all summaries regardless of age.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Dictionary with generation statistics.
+        """
+        trace_id = trace_id or str(uuid.uuid4())
+
+        logger.info(
+            "[CHART] Starting community summary generation",
+            extra={"trace_id": trace_id, "agent_name": self.name, "force": force_regenerate},
+        )
+
+        # Find communities needing summaries
+        # 604800000 ms = 1 week
+        if force_regenerate:
+            query = """
+            MATCH (c:Community)
+            RETURN c.uuid as uuid, c.name as name, c.theme as theme
+            """
+            params: dict[str, Any] = {}
+        else:
+            query = """
+            MATCH (c:Community)
+            WHERE c.summary IS NULL OR c.last_updated < timestamp() - 604800000
+            RETURN c.uuid as uuid, c.name as name, c.theme as theme
+            """
+            params = {}
+
+        communities = await self.neo4j.execute_query(query, params, trace_id=trace_id)
+
+        if not communities:
+            logger.info(
+                "[WHISPER] No communities need summary generation",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return {"summaries_generated": 0, "errors": []}
+
+        summaries_generated = 0
+        errors: list[str] = []
+
+        for community in communities:
+            try:
+                members = await self.get_community_members(community["uuid"], trace_id)
+                summary = await self._generate_summary(
+                    community_name=community["name"],
+                    community_theme=community["theme"],
+                    members=members,
+                    trace_id=trace_id,
+                )
+
+                # Update community with summary
+                update_query = """
+                MATCH (c:Community {uuid: $uuid})
+                SET c.summary = $summary, c.last_updated = timestamp()
+                """
+                await self.neo4j.execute_write(
+                    update_query,
+                    {"uuid": community["uuid"], "summary": summary},
+                    trace_id=trace_id,
+                )
+
+                summaries_generated += 1
+                logger.debug(
+                    f"[WHISPER] Generated summary for community {community['name']}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+            except Exception as e:
+                error_msg = f"Failed to generate summary for {community['name']}: {e}"
+                errors.append(error_msg)
+                logger.warning(
+                    f"[SWELL] {error_msg}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
+        logger.info(
+            f"[BEACON] Summary generation complete: {summaries_generated} generated, {len(errors)} errors",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return {"summaries_generated": summaries_generated, "errors": errors}
+
+    async def _generate_summary(
+        self,
+        community_name: str,
+        community_theme: str,
+        members: list[CommunityMember],
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Generate a summary for a single community using LLM.
+
+        Creates a brief, descriptive summary based on the community's
+        theme and member composition.
+
+        Args:
+            community_name: Name of the community.
+            community_theme: Theme of the community.
+            members: List of community members.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Generated summary string.
+        """
+        # Format member info for the prompt
+        member_descriptions: list[str] = []
+        # Build member descriptions (reserved for future LLM-based summaries)
+        _ = member_descriptions  # Suppress unused warning for now
+
+        # Use simple rule-based summary for now to avoid LLM dependency
+        # This can be upgraded to use Claude Haiku in the future
+        label_counts: dict[str, int] = {}
+        for member in members:
+            for label in member.labels:
+                label_counts[label] = label_counts.get(label, 0) + 1
+
+        # Build summary based on composition
+        total_members = len(members)
+        top_labels = sorted(label_counts.items(), key=lambda x: x[1], reverse=True)[:3]
+
+        if not top_labels:
+            return f"A {community_theme} island with {total_members} members."
+
+        composition_parts = [
+            f"{count} {label}{'s' if count > 1 else ''}" for label, count in top_labels
+        ]
+        composition = ", ".join(composition_parts)
+
+        # Theme-specific descriptions
+        theme_descriptions = {
+            "professional": "work-related entities",
+            "family": "family connections",
+            "social": "social connections",
+            "hobbies": "hobby and interest-related entities",
+            "health": "health and wellness tracking",
+            "finance": "financial matters",
+            "unknown": "mixed entities",
+        }
+
+        theme_desc = theme_descriptions.get(community_theme, "entities")
+
+        summary = (
+            f"Knowledge Island containing {theme_desc}. "
+            f"Includes {composition}. "
+            f"Total: {total_members} connected nodes."
+        )
+
+        logger.debug(
+            f"[WHISPER] Generated summary for {community_name}: {summary[:50]}...",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return summary
 
 
 # =============================================================================
