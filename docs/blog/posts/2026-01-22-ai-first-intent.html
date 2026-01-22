@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="refactor,deep-dive">
+    <meta name="post-slug" content="ai-first-intent">
+    <meta name="post-excerpt" content="Removing keyword-based intent classification and embracing pure LLM semantic understanding. When 'send email' should be understood, not pattern-matched.">
+    <title>No More Keywords | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">refactor</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">No More Keywords</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>There's something satisfying about deleting code. Today we removed 50 lines of keyword-based intent classification and replaced them with... nothing. Well, almost nothing.</p>
+
+                <h2>The Old Way</h2>
+                <p>When Claude's API call failed, Klabautermann had a fallback. It would look at your message and match keywords:</p>
+
+                <pre><code># The old fallback logic
+action_starts = ("send", "email", "schedule", "create", "draft", "book")
+if any(text_lower.startswith(kw) for kw in action_starts):
+    return IntentClassification(type=IntentType.ACTION, confidence=0.6)
+
+ingest_starts = ("i met", "i talked", "i spoke", "i learned", "i just")
+if any(text_lower.startswith(kw) for kw in ingest_starts):
+    return IntentClassification(type=IntentType.INGESTION, confidence=0.6)</code></pre>
+
+                <p>Simple. Predictable. And fundamentally at odds with what we're building.</p>
+
+                <h2>The Problem with Keywords</h2>
+                <p>Keywords work until they don't. "Send my regards to John" isn't an email action. "I just checked my calendar" isn't new information to store. And "What did I learn from Sarah?" is a search, not ingestion.</p>
+
+                <p>The AI-first principle in Klabautermann is clear: <em>use pure LLM semantic understanding</em>. No keyword matching. No regex patterns. If we're building a system that understands you, it should <em>understand</em> you - not pattern match.</p>
+
+                <h2>The Issue</h2>
+                <p>Issue #2 (AGT-P-001) was our P0 critical: "Remove keyword-based intent classification - use pure LLM." It had been sitting in the backlog since the gap analysis, flagged as violating the AI-first requirement.</p>
+
+                <p>The interesting part: the main classification path already used LLM. Claude Haiku analyzes your message and returns structured JSON:</p>
+
+                <pre><code>{
+    "intent_type": "search",
+    "confidence": 0.9,
+    "reasoning": "User is asking about a person they know",
+    "extracted_query": "Who is Sarah?"
+}</code></pre>
+
+                <p>The keywords were only a fallback for when that LLM call failed. Network timeout? API error? Fall back to pattern matching.</p>
+
+                <h2>The Fix</h2>
+                <p>We could have made the fallback smarter. A smaller local model. More sophisticated heuristics. But that's still fighting the philosophy.</p>
+
+                <p>Instead, we chose graceful degradation:</p>
+
+                <pre><code>except Exception as e:
+    # AI-First: No keyword fallback
+    # Return CONVERSATION with low confidence
+    logger.warning(f"[SWELL] LLM classification failed: {e}")
+    return IntentClassification(
+        type=IntentType.CONVERSATION,
+        confidence=0.3,  # Signals uncertainty
+    )</code></pre>
+
+                <p>When classification fails, we don't guess based on surface patterns. We return <code>CONVERSATION</code> with a low confidence score. The system knows it doesn't know. That's honest.</p>
+
+                <h2>But Wait - V2 Doesn't Use This At All</h2>
+                <p>Here's the twist: the v2 workflow (Think-Dispatch-Synthesize) doesn't use intent classification. It's all task planning now. Claude Opus analyzes your message and identifies <em>all</em> tasks that need to happen:</p>
+
+                <ul>
+                    <li>"I met Sarah from Acme. What's her email?" becomes:
+                        <ul>
+                            <li>Ingest task: "Sarah works at Acme"</li>
+                            <li>Research task: "Find Sarah's email"</li>
+                        </ul>
+                    </li>
+                </ul>
+
+                <p>Multi-intent. Parallel execution. No classification needed.</p>
+
+                <p>So why fix the v1 fallback? Because it's still in the codebase. Because someone might enable it. Because having keyword matching anywhere is a statement about what kind of system this is. And this is an AI-first system.</p>
+
+                <h2>The Spec Update</h2>
+                <p>While we were at it, we updated <code>specs/architecture/AGENTS.md</code>. The config example still showed the old keyword lists:</p>
+
+                <pre><code>intent_classification:
+  search_keywords:
+    - "who"
+    - "what"
+    - "when"</code></pre>
+
+                <p>Now it reflects reality:</p>
+
+                <pre><code>intent_classification:
+  model: claude-3-5-haiku-20241022
+  timeout: 5.0  # Seconds before graceful degradation</code></pre>
+
+                <p>Specs should document what the system <em>is</em>, not what it used to be.</p>
+
+                <h2>The Test</h2>
+                <p>We added one new test:</p>
+
+                <pre><code>async def test_llm_failure_returns_conversation(self, orchestrator):
+    """When LLM fails, return CONVERSATION with low confidence."""
+    with patch.object(orchestrator, "_call_classification_model") as mock:
+        mock.side_effect = Exception("API timeout")
+        intent = await orchestrator._classify_intent(
+            "Send an email to John", None, "test-trace"
+        )
+        # Should NOT use keyword matching
+        assert intent.type == IntentType.CONVERSATION
+        assert intent.confidence == 0.3</code></pre>
+
+                <p>Before this change, "Send an email to John" would have been classified as <code>ACTION</code> by the keyword fallback. Now it's <code>CONVERSATION</code> with low confidence - honest about its uncertainty.</p>
+
+                <h2>Lines Changed</h2>
+                <p>The diff is satisfying:</p>
+
+                <pre><code> 4 files changed, 41 insertions(+), 75 deletions(-)</code></pre>
+
+                <p>More deletions than insertions. Simpler. Cleaner. More aligned with what we're building.</p>
+
+                <h2>The Bigger Picture</h2>
+                <p>This was a P0 issue - critical priority. Not because the system was broken, but because it was philosophically inconsistent. An AI-first knowledge management system shouldn't have hardcoded keyword lists.</p>
+
+                <p>There's still one more AI-first violation in the backlog: <code>AGT-P-018</code> - zoom level detection in the Researcher uses keyword matching. That's next.</p>
+
+                <p>One hardcoded list at a time, we're making this system what it claims to be.</p>
+
+                <p>The winds are fair.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
