@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,infra">
+    <meta name="post-slug" content="alerting-rules">
+    <meta name="post-excerpt" content="Twenty-two alerts watching your system. High error rates, slow responses, channels going down. Prometheus catches it, Alertmanager routes it.">
+    <title>When Things Break | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">infra</span>
+                    </div>
+                </div>
+                <h1 class="post-title">When Things Break</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Metrics tell you what happened. Alerts tell you when to care.</p>
+
+                <p>Klabautermann already exports metrics to Prometheus. Now it knows when to wake you up.</p>
+
+                <h2>The Philosophy</h2>
+                <p>Not every problem needs attention. A brief latency spike? Normal. A sustained pattern? Investigate. A critical failure? Act now.</p>
+
+                <p>Three severity levels:</p>
+                <ul>
+                    <li><strong>Critical</strong>: Service degraded. Immediate action required.</li>
+                    <li><strong>Warning</strong>: Potential issue. Investigation needed.</li>
+                    <li><strong>Info</strong>: Informational. No action required.</li>
+                </ul>
+
+                <h2>The Coverage</h2>
+                <p>22 alerts across 6 categories:</p>
+
+                <h3>Agent Alerts</h3>
+                <pre><code>AgentHighErrorRate: >10% errors for 5m (warning)
+AgentCriticalErrorRate: >25% errors for 2m (critical)
+AgentHighLatency: P95 >5s for 5m (warning)
+AgentCriticalLatency: P95 >10s for 2m (critical)
+AgentStopped: agent down for 1m (warning)</code></pre>
+
+                <h3>Channel Alerts</h3>
+                <pre><code>ChannelDown: status=0 for 1m (warning)
+ChannelUnhealthy: healthy=0 for 5m (warning)
+ChannelHighErrorRate: >10% errors for 5m (warning)
+AllChannelsDown: active_count=0 for 1m (critical)
+BroadcastFailures: >20% failure for 5m (warning)</code></pre>
+
+                <h3>API Alerts</h3>
+                <pre><code>APIHighErrorRate: >5% 5xx for 5m (warning)
+APICriticalErrorRate: >15% 5xx for 2m (critical)
+APIHighLatency: P95 >2s for 5m (warning)</code></pre>
+
+                <h2>The Routing</h2>
+                <p>Alertmanager handles the routing:</p>
+
+                <pre><code>route:
+  receiver: 'default-receiver'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  group_by: ['alertname', 'severity']
+
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h</code></pre>
+
+                <p>Critical alerts go out in 10 seconds. Warnings wait 30 seconds to group. Info alerts batch aggressively.</p>
+
+                <h2>Inhibition</h2>
+                <p>If critical is firing, suppress the warning:</p>
+
+                <pre><code>inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname']</code></pre>
+
+                <p>You don't need to know it's critical AND a warning. You need to know it's critical.</p>
+
+                <h2>The Setup</h2>
+                <p>One command:</p>
+
+                <pre><code>docker-compose -f docker-compose.monitoring.yml up -d</code></pre>
+
+                <p>Three endpoints:</p>
+                <ul>
+                    <li>Prometheus: <code>http://localhost:9090</code></li>
+                    <li>Grafana: <code>http://localhost:3000</code></li>
+                    <li>Alertmanager: <code>http://localhost:9093</code></li>
+                </ul>
+
+                <h2>Customization</h2>
+                <p>The default config logs alerts. For production, wire up your channels:</p>
+
+                <pre><code>receivers:
+  - name: 'critical-receiver'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/...'
+        channel: '#alerts-critical'
+        title: '{{ .CommonAnnotations.summary }}'
+        text: '{{ .CommonAnnotations.description }}'</code></pre>
+
+                <p>Slack, PagerDuty, email, webhooks. Whatever you need.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#275: Add alerting rules</li>
+                </ul>
+
+                <p>The monitoring stack is complete. Metrics captured. Dashboards visualized. Alerts configured.</p>
+
+                <p>Sleep well. Prometheus is watching.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
