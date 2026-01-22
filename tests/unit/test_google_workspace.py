@@ -7,6 +7,7 @@ Uses mocking for Google API services to test parsing and error handling logic.
 
 import base64
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1416,3 +1417,275 @@ class TestRecurringCalendarEvents:
         body = call_args[1]["body"]
         assert "recurrence" in body
         assert body["recurrence"] == ["RRULE:FREQ=DAILY"]
+
+
+# ===========================================================================
+# Email Attachment Tests
+# ===========================================================================
+
+
+class TestEmailAttachments:
+    """Test email attachment parsing and handling."""
+
+    @pytest.mark.asyncio
+    async def test_parse_email_with_attachments(self, bridge, mock_gmail_service):
+        """Test parsing email with attachments."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}]
+        }
+
+        # Email with multipart payload including attachment
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Email with attachment",
+            "labelIds": [],
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Document attached"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": base64.urlsafe_b64encode(b"See attached").decode()},
+                    },
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "report.pdf",
+                        "body": {"attachmentId": "attach-123", "size": 12345},
+                    },
+                ],
+            },
+        }
+
+        emails = await bridge.search_emails("test")
+
+        assert len(emails) == 1
+        assert emails[0].has_attachments is True
+        assert len(emails[0].attachments) == 1
+        assert emails[0].attachments[0].filename == "report.pdf"
+        assert emails[0].attachments[0].mime_type == "application/pdf"
+        assert emails[0].attachments[0].attachment_id == "attach-123"
+        assert emails[0].attachments[0].size == 12345
+        assert emails[0].body == "See attached"
+
+    @pytest.mark.asyncio
+    async def test_parse_email_multiple_attachments(self, bridge, mock_gmail_service):
+        """Test parsing email with multiple attachments."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}]
+        }
+
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Multiple attachments",
+            "labelIds": [],
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Files"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+                "parts": [
+                    {
+                        "mimeType": "text/plain",
+                        "body": {"data": base64.urlsafe_b64encode(b"Body text").decode()},
+                    },
+                    {
+                        "mimeType": "image/png",
+                        "filename": "screenshot.png",
+                        "body": {"attachmentId": "attach-1", "size": 50000},
+                    },
+                    {
+                        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "filename": "data.xlsx",
+                        "body": {"attachmentId": "attach-2", "size": 25000},
+                    },
+                ],
+            },
+        }
+
+        emails = await bridge.search_emails("test")
+
+        assert len(emails) == 1
+        assert len(emails[0].attachments) == 2
+        assert emails[0].attachments[0].filename == "screenshot.png"
+        assert emails[0].attachments[1].filename == "data.xlsx"
+
+    @pytest.mark.asyncio
+    async def test_parse_email_nested_multipart(self, bridge, mock_gmail_service):
+        """Test parsing email with nested multipart structure."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}]
+        }
+
+        # Nested multipart structure (common with HTML emails)
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Nested structure",
+            "labelIds": [],
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Nested email"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+                "parts": [
+                    {
+                        "mimeType": "multipart/alternative",
+                        "parts": [
+                            {
+                                "mimeType": "text/plain",
+                                "body": {
+                                    "data": base64.urlsafe_b64encode(b"Plain text body").decode()
+                                },
+                            },
+                            {
+                                "mimeType": "text/html",
+                                "body": {
+                                    "data": base64.urlsafe_b64encode(
+                                        b"<html><body>HTML body</body></html>"
+                                    ).decode()
+                                },
+                            },
+                        ],
+                    },
+                    {
+                        "mimeType": "application/pdf",
+                        "filename": "doc.pdf",
+                        "body": {"attachmentId": "attach-nested", "size": 5000},
+                    },
+                ],
+            },
+        }
+
+        emails = await bridge.search_emails("test")
+
+        assert len(emails) == 1
+        assert emails[0].body == "Plain text body"
+        assert len(emails[0].attachments) == 1
+        assert emails[0].attachments[0].filename == "doc.pdf"
+
+    @pytest.mark.asyncio
+    async def test_parse_email_no_attachments(self, bridge, mock_gmail_service):
+        """Test parsing email without attachments."""
+        mock_gmail_service.users.return_value.messages.return_value.list.return_value.execute.return_value = {
+            "messages": [{"id": "msg1"}]
+        }
+
+        mock_gmail_service.users.return_value.messages.return_value.get.return_value.execute.return_value = {
+            "id": "msg1",
+            "threadId": "thread1",
+            "snippet": "Plain email",
+            "labelIds": [],
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "No attachment"},
+                    {"name": "From", "value": "sender@example.com"},
+                    {"name": "Date", "value": "Mon, 15 Jan 2024 10:30:00 +0000"},
+                ],
+                "body": {"data": base64.urlsafe_b64encode(b"Just text").decode()},
+            },
+        }
+
+        emails = await bridge.search_emails("test")
+
+        assert len(emails) == 1
+        assert emails[0].has_attachments is False
+        assert len(emails[0].attachments) == 0
+
+    @pytest.mark.asyncio
+    async def test_download_attachment(self, bridge, mock_gmail_service):
+        """Test downloading attachment data."""
+        attachment_data = b"PDF binary content here"
+        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
+            "data": base64.urlsafe_b64encode(attachment_data).decode()
+        }
+
+        result = await bridge.download_attachment("msg1", "attach-123")
+
+        assert result == attachment_data
+        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.assert_called_once_with(
+            userId="me", messageId="msg1", id="attach-123"
+        )
+
+    @pytest.mark.asyncio
+    async def test_save_attachment(self, bridge, mock_gmail_service, tmp_path):
+        """Test saving attachment to filesystem."""
+        attachment_data = b"Test file content"
+        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
+            "data": base64.urlsafe_b64encode(attachment_data).decode()
+        }
+
+        from klabautermann.mcp.google_workspace import EmailAttachment
+
+        attachment = EmailAttachment(
+            attachment_id="attach-123",
+            filename="test.txt",
+            mime_type="text/plain",
+            size=len(attachment_data),
+        )
+
+        save_path = str(tmp_path)
+        result = await bridge.save_attachment("msg1", attachment, save_path)
+
+        assert result.endswith("test.txt")
+        assert Path(result).read_bytes() == attachment_data
+
+    @pytest.mark.asyncio
+    async def test_save_attachment_duplicate_filename(self, bridge, mock_gmail_service, tmp_path):
+        """Test saving attachment with duplicate filename creates unique name."""
+        attachment_data = b"Test file content"
+        mock_gmail_service.users.return_value.messages.return_value.attachments.return_value.get.return_value.execute.return_value = {
+            "data": base64.urlsafe_b64encode(attachment_data).decode()
+        }
+
+        from klabautermann.mcp.google_workspace import EmailAttachment
+
+        # Create existing file
+        existing_file = tmp_path / "test.txt"
+        existing_file.write_bytes(b"existing content")
+
+        attachment = EmailAttachment(
+            attachment_id="attach-123",
+            filename="test.txt",
+            mime_type="text/plain",
+            size=len(attachment_data),
+        )
+
+        save_path = str(tmp_path)
+        result = await bridge.save_attachment("msg1", attachment, save_path)
+
+        # Should create test_1.txt since test.txt exists
+        assert "test_1.txt" in result
+
+    def test_attachment_size_human_bytes(self):
+        """Test human-readable size formatting for bytes."""
+        from klabautermann.mcp.google_workspace import EmailAttachment
+
+        attachment = EmailAttachment(
+            attachment_id="test", filename="small.txt", mime_type="text/plain", size=500
+        )
+        assert attachment.size_human == "500 B"
+
+    def test_attachment_size_human_kilobytes(self):
+        """Test human-readable size formatting for kilobytes."""
+        from klabautermann.mcp.google_workspace import EmailAttachment
+
+        attachment = EmailAttachment(
+            attachment_id="test", filename="medium.txt", mime_type="text/plain", size=2048
+        )
+        assert attachment.size_human == "2.0 KB"
+
+    def test_attachment_size_human_megabytes(self):
+        """Test human-readable size formatting for megabytes."""
+        from klabautermann.mcp.google_workspace import EmailAttachment
+
+        attachment = EmailAttachment(
+            attachment_id="test", filename="large.pdf", mime_type="application/pdf", size=5242880
+        )
+        assert attachment.size_human == "5.0 MB"

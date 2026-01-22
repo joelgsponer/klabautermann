@@ -41,6 +41,25 @@ T = TypeVar("T")
 # ===========================================================================
 
 
+class EmailAttachment(BaseModel):
+    """Email attachment metadata from Gmail."""
+
+    attachment_id: str  # Gmail's internal attachment ID for downloading
+    filename: str
+    mime_type: str
+    size: int  # Size in bytes
+
+    @property
+    def size_human(self) -> str:
+        """Human-readable file size."""
+        if self.size < 1024:
+            return f"{self.size} B"
+        elif self.size < 1024 * 1024:
+            return f"{self.size / 1024:.1f} KB"
+        else:
+            return f"{self.size / (1024 * 1024):.1f} MB"
+
+
 class EmailMessage(BaseModel):
     """Parsed email message from Gmail."""
 
@@ -53,6 +72,12 @@ class EmailMessage(BaseModel):
     snippet: str
     body: str | None = None
     is_unread: bool = False
+    attachments: list[EmailAttachment] = Field(default_factory=list)
+
+    @property
+    def has_attachments(self) -> bool:
+        """Check if email has attachments."""
+        return len(self.attachments) > 0
 
 
 class CalendarEvent(BaseModel):
@@ -912,6 +937,111 @@ class GoogleWorkspaceBridge:
         query = f"newer_than:{hours}h"
         return await self.search_emails(query, max_results=50)
 
+    async def download_attachment(
+        self,
+        message_id: str,
+        attachment_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> bytes:
+        """
+        Download an email attachment's raw bytes.
+
+        Args:
+            message_id: Gmail message ID containing the attachment
+            attachment_id: Attachment ID from EmailAttachment.attachment_id
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Raw attachment bytes
+
+        Raises:
+            ExternalServiceError: If download fails
+        """
+        await self.start()
+
+        def do_download() -> bytes:
+            attachment = (
+                self._gmail_service.users()
+                .messages()
+                .attachments()
+                .get(userId="me", messageId=message_id, id=attachment_id)
+                .execute()
+            )
+            data = attachment.get("data", "")
+            return base64.urlsafe_b64decode(data)
+
+        try:
+            return await self._rate_limited_call("gmail", do_download)
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Attachment download failed: {e}",
+                extra={"message_id": message_id, "attachment_id": attachment_id},
+            )
+            raise ExternalServiceError("gmail", f"Attachment download failed: {e}") from e
+
+    async def save_attachment(
+        self,
+        message_id: str,
+        attachment: EmailAttachment,
+        save_path: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> str:
+        """
+        Download and save an attachment to the local filesystem.
+
+        Args:
+            message_id: Gmail message ID containing the attachment
+            attachment: EmailAttachment object with attachment metadata
+            save_path: Directory path where the attachment should be saved
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            Full path to the saved file
+
+        Raises:
+            ExternalServiceError: If download or save fails
+        """
+        from pathlib import Path as FilePath
+
+        # Download attachment bytes
+        data = await self.download_attachment(message_id, attachment.attachment_id)
+
+        # Ensure save directory exists
+        save_dir = FilePath(save_path)
+        save_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build full file path
+        file_path = save_dir / attachment.filename
+
+        # Handle duplicate filenames
+        if file_path.exists():
+            base = FilePath(attachment.filename).stem
+            ext = FilePath(attachment.filename).suffix
+            counter = 1
+            while file_path.exists():
+                file_path = save_dir / f"{base}_{counter}{ext}"
+                counter += 1
+
+        # Save to filesystem
+        try:
+            file_path.write_bytes(data)
+
+            logger.info(
+                f"[BEACON] Attachment saved: {file_path}",
+                extra={
+                    "message_id": message_id,
+                    "attachment_filename": attachment.filename,
+                    "attachment_size": len(data),
+                },
+            )
+            return str(file_path)
+        except OSError as e:
+            logger.error(
+                f"[STORM] Failed to save attachment: {e}",
+                extra={"file_path": str(file_path)},
+            )
+            raise ExternalServiceError("filesystem", f"Failed to save attachment: {e}") from e
+
     # ===========================================================================
     # Email Management Operations
     # ===========================================================================
@@ -1574,18 +1704,15 @@ class GoogleWorkspaceBridge:
                 except Exception:
                     date = datetime.now()
 
-                # Extract body
+                # Extract body and attachments
                 body = None
+                attachments: list[EmailAttachment] = []
                 payload = msg.get("payload", {})
+
                 if "body" in payload and payload["body"].get("data"):
                     body = base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8")
                 elif "parts" in payload:
-                    for part in payload["parts"]:
-                        if part.get("mimeType") == "text/plain" and part.get("body", {}).get(
-                            "data"
-                        ):
-                            body = base64.urlsafe_b64decode(part["body"]["data"]).decode("utf-8")
-                            break
+                    body, attachments = self._extract_parts(payload["parts"])
 
                 email = EmailMessage(
                     id=msg.get("id", ""),
@@ -1597,6 +1724,7 @@ class GoogleWorkspaceBridge:
                     snippet=msg.get("snippet", ""),
                     body=body,
                     is_unread="UNREAD" in msg.get("labelIds", []),
+                    attachments=attachments,
                 )
                 parsed.append(email)
 
@@ -1608,6 +1736,50 @@ class GoogleWorkspaceBridge:
                 continue
 
         return parsed
+
+    def _extract_parts(
+        self, parts: list[dict[str, Any]]
+    ) -> tuple[str | None, list[EmailAttachment]]:
+        """
+        Recursively extract body text and attachments from email parts.
+
+        Args:
+            parts: List of MIME parts from Gmail API
+
+        Returns:
+            Tuple of (body_text, attachments_list)
+        """
+        body = None
+        attachments: list[EmailAttachment] = []
+
+        for part in parts:
+            mime_type = part.get("mimeType", "")
+            filename = part.get("filename", "")
+            part_body = part.get("body", {})
+
+            # Check for nested multipart
+            if "parts" in part:
+                nested_body, nested_attachments = self._extract_parts(part["parts"])
+                if nested_body and not body:
+                    body = nested_body
+                attachments.extend(nested_attachments)
+
+            # Check for text body
+            elif mime_type == "text/plain" and part_body.get("data") and not filename:
+                if not body:  # Only take first text/plain
+                    body = base64.urlsafe_b64decode(part_body["data"]).decode("utf-8")
+
+            # Check for attachments (has filename and attachmentId)
+            elif filename and part_body.get("attachmentId"):
+                attachment = EmailAttachment(
+                    attachment_id=part_body["attachmentId"],
+                    filename=filename,
+                    mime_type=mime_type,
+                    size=part_body.get("size", 0),
+                )
+                attachments.append(attachment)
+
+        return body, attachments
 
     def _parse_calendar_events(
         self,
@@ -1680,6 +1852,7 @@ class GoogleWorkspaceBridge:
 __all__ = [
     "CalendarEvent",
     "CreateEventResult",
+    "EmailAttachment",
     "EmailMessage",
     "GoogleWorkspaceBridge",
     "RecurrenceBuilder",
