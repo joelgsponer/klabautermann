@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- HullCleaner agent for graph maintenance (#79, #80, #81, #88)
+  - `HullCleaner` agent skeleton extending `BaseAgent`
+  - `HullCleanerConfig` for configurable pruning behavior (threshold, age_days, dry_run)
+  - `PruningAction` enum for tracking operation types (DELETE_RELATIONSHIP, PREVIEW, etc.)
+  - `AuditEntry` and `PruningResult` dataclasses for audit trail
+  - `find_weak_relationships()` for detecting pruning candidates by weight and age
+  - `prune_weak_relationships()` with dry-run support and audit logging
+  - `scrape_barnacles()` main maintenance routine
+  - `get_pruning_statistics()` for graph health metrics
+  - `process_message()` support for inter-agent communication
+  - 25 new unit tests for comprehensive coverage
 - Optimized relationship traversal utilities (#201)
   - `TraversalDirection` enum for directional traversal control (outgoing, incoming, both)
   - `TraversalConfig` for configurable traversal parameters (max_depth, direction, relationship_types, include_expired, limit)
