@@ -95,6 +95,74 @@ AGENT_INBOX_SIZE = Gauge(
 
 
 # ===========================================================================
+# Channel Metrics
+# ===========================================================================
+
+# Messages processed per channel
+CHANNEL_MESSAGES_TOTAL = Counter(
+    "klabautermann_channel_messages_total",
+    "Total messages processed by channel",
+    ["channel_name"],
+    registry=REGISTRY,
+)
+
+# Channel response latency (in milliseconds)
+CHANNEL_RESPONSE_LATENCY_MS = Histogram(
+    "klabautermann_channel_response_latency_ms",
+    "Response latency in milliseconds by channel",
+    ["channel_name"],
+    buckets=[10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+    registry=REGISTRY,
+)
+
+# Channel errors
+CHANNEL_ERRORS_TOTAL = Counter(
+    "klabautermann_channel_errors_total",
+    "Total errors by channel",
+    ["channel_name", "error_type"],
+    registry=REGISTRY,
+)
+
+# Channel status (1=running, 0=stopped)
+CHANNEL_STATUS = Gauge(
+    "klabautermann_channel_status",
+    "Channel status (1=running, 0=stopped)",
+    ["channel_name"],
+    registry=REGISTRY,
+)
+
+# Channel health (1=healthy, 0=unhealthy)
+CHANNEL_HEALTHY = Gauge(
+    "klabautermann_channel_healthy",
+    "Channel health status (1=healthy, 0=unhealthy)",
+    ["channel_name"],
+    registry=REGISTRY,
+)
+
+# Broadcast messages
+CHANNEL_BROADCASTS_TOTAL = Counter(
+    "klabautermann_channel_broadcasts_total",
+    "Total broadcast messages sent",
+    registry=REGISTRY,
+)
+
+# Broadcast delivery success/failure
+CHANNEL_BROADCAST_DELIVERIES_TOTAL = Counter(
+    "klabautermann_channel_broadcast_deliveries_total",
+    "Broadcast delivery results",
+    ["channel_name", "status"],  # status: success/failure
+    registry=REGISTRY,
+)
+
+# Active channels gauge
+CHANNEL_ACTIVE_COUNT = Gauge(
+    "klabautermann_channel_active_count",
+    "Number of active channels",
+    registry=REGISTRY,
+)
+
+
+# ===========================================================================
 # API Metrics
 # ===========================================================================
 
@@ -220,6 +288,47 @@ def set_agent_inbox_size(agent_name: str, size: int) -> None:
     AGENT_INBOX_SIZE.labels(agent_name=agent_name).set(size)
 
 
+def record_channel_message(channel_name: str) -> None:
+    """Record a channel message."""
+    CHANNEL_MESSAGES_TOTAL.labels(channel_name=channel_name).inc()
+
+
+def record_channel_latency(channel_name: str, latency_ms: float) -> None:
+    """Record channel response latency in milliseconds."""
+    CHANNEL_RESPONSE_LATENCY_MS.labels(channel_name=channel_name).observe(latency_ms)
+
+
+def record_channel_error(channel_name: str, error_type: str) -> None:
+    """Record a channel error."""
+    CHANNEL_ERRORS_TOTAL.labels(channel_name=channel_name, error_type=error_type).inc()
+
+
+def set_channel_status(channel_name: str, running: bool) -> None:
+    """Set channel running status."""
+    CHANNEL_STATUS.labels(channel_name=channel_name).set(1 if running else 0)
+
+
+def set_channel_healthy(channel_name: str, healthy: bool) -> None:
+    """Set channel health status."""
+    CHANNEL_HEALTHY.labels(channel_name=channel_name).set(1 if healthy else 0)
+
+
+def record_channel_broadcast() -> None:
+    """Record a broadcast message."""
+    CHANNEL_BROADCASTS_TOTAL.inc()
+
+
+def record_channel_broadcast_delivery(channel_name: str, success: bool) -> None:
+    """Record broadcast delivery result."""
+    status = "success" if success else "failure"
+    CHANNEL_BROADCAST_DELIVERIES_TOTAL.labels(channel_name=channel_name, status=status).inc()
+
+
+def set_channel_active_count(count: int) -> None:
+    """Set the number of active channels."""
+    CHANNEL_ACTIVE_COUNT.set(count)
+
+
 def record_api_request(method: str, endpoint: str, status_code: int) -> None:
     """Record an API request."""
     API_REQUESTS_TOTAL.labels(method=method, endpoint=endpoint, status_code=str(status_code)).inc()
@@ -318,9 +427,9 @@ def timed_operation(metric_func: Callable[[str, float], None], label: str) -> Ca
 # ===========================================================================
 
 __all__ = [
+    # Agent metrics
     "AGENT_ERRORS_TOTAL",
     "AGENT_INBOX_SIZE",
-    # Agent metrics
     "AGENT_REQUESTS_TOTAL",
     "AGENT_REQUEST_LATENCY_MS",
     "AGENT_RUNNING",
@@ -329,6 +438,15 @@ __all__ = [
     "API_REQUESTS_TOTAL",
     "API_REQUEST_LATENCY_SECONDS",
     "API_WEBSOCKET_CONNECTIONS",
+    # Channel metrics
+    "CHANNEL_ACTIVE_COUNT",
+    "CHANNEL_BROADCASTS_TOTAL",
+    "CHANNEL_BROADCAST_DELIVERIES_TOTAL",
+    "CHANNEL_ERRORS_TOTAL",
+    "CHANNEL_HEALTHY",
+    "CHANNEL_MESSAGES_TOTAL",
+    "CHANNEL_RESPONSE_LATENCY_MS",
+    "CHANNEL_STATUS",
     # Graph metrics
     "GRAPH_OPERATIONS_TOTAL",
     "GRAPH_OPERATION_LATENCY_SECONDS",
@@ -341,19 +459,31 @@ __all__ = [
     "decrement_websocket_connections",
     "get_metrics",
     "increment_websocket_connections",
+    # Agent helpers
     "record_agent_error",
     "record_agent_latency",
-    # Agent helpers
     "record_agent_request",
     "record_agent_success",
-    "record_api_latency",
     # API helpers
+    "record_api_latency",
     "record_api_request",
+    # Channel helpers
+    "record_channel_broadcast",
+    "record_channel_broadcast_delivery",
+    "record_channel_error",
+    "record_channel_latency",
+    "record_channel_message",
+    "set_channel_active_count",
+    "set_channel_healthy",
+    "set_channel_status",
+    # Graph helpers
     "record_graph_latency",
     "record_graph_operation",
+    # LLM helpers
     "record_llm_call",
     "record_llm_latency",
     "record_llm_tokens",
+    # Agent state
     "set_agent_inbox_size",
     "set_agent_running",
     "set_websocket_connections",
