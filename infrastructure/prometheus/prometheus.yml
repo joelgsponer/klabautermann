@@ -1,0 +1,29 @@
+# Prometheus Configuration for Klabautermann
+#
+# Scrapes metrics from the Klabautermann application.
+# Configure KLABAUTERMANN_HOST environment variable or edit targets below.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Klabautermann application metrics
+  - job_name: 'klabautermann'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['host.docker.internal:8000']
+        labels:
+          service: 'klabautermann'
+          environment: 'development'
+    # Alternatively, use DNS service discovery in Docker networks:
+    # dns_sd_configs:
+    #   - names:
+    #       - 'klabautermann-app'
+    #     type: 'A'
+    #     port: 8000
