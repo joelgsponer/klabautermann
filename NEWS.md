@@ -7,6 +7,7 @@ User-visible changes to Klabautermann.
 ### Added
 
 - **Channel Auto-Recovery**: Channels now automatically restart when they fail. If Telegram drops, it restarts with exponential backoff. After 3 failed attempts, it stops retrying and notifies you. Broadcast messages to all channels at once with `broadcast()`.
+- **Channel Metrics**: Monitor your channels with Prometheus metrics. Track message counts, response latencies, error rates, and health status per channel. See which channels are active, healthy, and how many broadcasts succeeded or failed.
 - **Smart Duplicate Detection**: Klabautermann now detects and merges duplicate entities using fuzzy matching. High-confidence duplicates (like "John Doe" and "John D." with matching emails) are auto-merged. Medium-confidence matches are flagged for your review - you can merge them with a simple confirm or dismiss if they're actually different people.
 - **Telegram Bot Support**: Access Klabautermann from your phone via Telegram. Create a bot with @BotFather, set `TELEGRAM_BOT_TOKEN`, and chat with your knowledge assistant from anywhere. Supports text messages and voice transcription with commands `/start`, `/help`, `/status`.
 - **Grafana Dashboard**: Pre-built dashboard for visualizing Klabautermann metrics. Monitor agent performance, API latency, error rates, LLM usage, and graph operations. Start with `docker-compose -f docker-compose.monitoring.yml up -d` and visit http://localhost:3000.

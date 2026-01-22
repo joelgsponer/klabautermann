@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Message routing and response formatting (4 tests)
   - Channel status and health reporting (2 tests)
   - 23 new integration tests total
+- Channel metrics collection via Prometheus (#159)
+  - `klabautermann_channel_messages_total`: Messages processed per channel
+  - `klabautermann_channel_response_latency_ms`: Response latency histogram
+  - `klabautermann_channel_errors_total`: Errors by channel and error type
+  - `klabautermann_channel_status`: Channel running status gauge
+  - `klabautermann_channel_healthy`: Channel health status gauge
+  - `klabautermann_channel_broadcasts_total`: Broadcast message count
+  - `klabautermann_channel_broadcast_deliveries_total`: Delivery results by status
+  - `klabautermann_channel_active_count`: Active channel count gauge
+  - Helper functions: `record_channel_message()`, `record_channel_latency()`, etc.
+  - 13 new unit tests for channel metrics
 - Fuzzy entity deduplication with user review workflow (#35)
   - Wire `deduplication.py` module to Archivist (replaces simple `entity_merge.py`)
   - Use `rapidfuzz` for fuzzy name similarity scoring
