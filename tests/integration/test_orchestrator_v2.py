@@ -538,10 +538,11 @@ async def test_context_building_from_all_memory_layers(
     )
     mock_thread_manager.get_context_window.return_value = mock_thread_context
 
-    # Mock Neo4j context queries
+    # Mock Neo4j context queries - patch in the module where they're used
     with (
         patch(
-            "klabautermann.agents.orchestrator.get_recent_summaries",
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_summaries",
+            new_callable=AsyncMock,
             return_value=[
                 ThreadSummary(
                     summary="Old discussion",
@@ -549,11 +550,13 @@ async def test_context_building_from_all_memory_layers(
             ],
         ) as mock_summaries,
         patch(
-            "klabautermann.agents.orchestrator.get_pending_tasks",
+            "klabautermann.agents.orchestrator._orchestrator.get_pending_tasks",
+            new_callable=AsyncMock,
             return_value=[TaskNode(action="Test task", status=TaskStatus.TODO, priority="normal")],
         ) as mock_tasks,
         patch(
-            "klabautermann.agents.orchestrator.get_recent_entities",
+            "klabautermann.agents.orchestrator._orchestrator.get_recent_entities",
+            new_callable=AsyncMock,
             return_value=[
                 EntityReference(
                     uuid="test-entity-uuid",
@@ -564,7 +567,8 @@ async def test_context_building_from_all_memory_layers(
             ],
         ) as mock_entities,
         patch(
-            "klabautermann.agents.orchestrator.get_relevant_islands",
+            "klabautermann.agents.orchestrator._orchestrator.get_relevant_islands",
+            new_callable=AsyncMock,
             return_value=[
                 CommunityContext(
                     name="Test Island",
