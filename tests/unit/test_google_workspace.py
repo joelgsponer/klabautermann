@@ -2031,3 +2031,429 @@ class TestFreeSlotModel:
         assert "09:00 AM" in display
         assert "10:00 AM" in display
         assert "1 hr" in display
+
+
+# ===========================================================================
+# Draft Management Tests (Issue #219)
+# ===========================================================================
+
+
+class TestDraftManagement:
+    """Test Gmail draft management operations."""
+
+    @pytest.mark.asyncio
+    async def test_list_drafts(self, bridge, mock_gmail_service):
+        """Test listing drafts."""
+        # Setup mock response for list
+        mock_gmail_service.users().drafts().list().execute.return_value = {
+            "drafts": [
+                {"id": "draft1"},
+                {"id": "draft2"},
+            ]
+        }
+
+        # Setup mock response for individual draft details
+        def get_draft_details(*args, **kwargs):
+            draft_id = kwargs.get("id", "draft1")
+            return {
+                "id": draft_id,
+                "message": {
+                    "id": f"msg_{draft_id}",
+                    "threadId": f"thread_{draft_id}",
+                    "snippet": "Test snippet",
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": f"Subject {draft_id}"},
+                            {"name": "To", "value": "test@example.com"},
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"Test body").decode()},
+                    },
+                },
+            }
+
+        mock_gmail_service.users().drafts().get().execute.side_effect = get_draft_details
+
+        drafts = await bridge.list_drafts(max_results=10)
+
+        assert len(drafts) == 2
+        mock_gmail_service.users().drafts().list.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_get_draft(self, bridge, mock_gmail_service):
+        """Test getting a specific draft."""
+        mock_gmail_service.users().drafts().get().execute.return_value = {
+            "id": "draft123",
+            "message": {
+                "id": "msg123",
+                "threadId": "thread123",
+                "snippet": "Test snippet",
+                "payload": {
+                    "headers": [
+                        {"name": "Subject", "value": "Test Subject"},
+                        {"name": "To", "value": "recipient@example.com"},
+                        {"name": "Cc", "value": "cc@example.com"},
+                    ],
+                    "body": {"data": base64.urlsafe_b64encode(b"Draft body content").decode()},
+                },
+            },
+        }
+
+        draft = await bridge.get_draft("draft123")
+
+        assert draft is not None
+        assert draft.id == "draft123"
+        assert draft.message_id == "msg123"
+        assert draft.thread_id == "thread123"
+        assert draft.subject == "Test Subject"
+        assert draft.to == "recipient@example.com"
+        assert draft.cc == "cc@example.com"
+        assert draft.body == "Draft body content"
+
+    @pytest.mark.asyncio
+    async def test_get_draft_not_found(self, bridge, mock_gmail_service):
+        """Test getting a non-existent draft."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().drafts().get().execute.side_effect = HttpError(
+            error_resp, b"Draft not found"
+        )
+
+        draft = await bridge.get_draft("nonexistent")
+
+        assert draft is None
+
+    @pytest.mark.asyncio
+    async def test_update_draft(self, bridge, mock_gmail_service):
+        """Test updating a draft."""
+        # Mock get_draft for existing draft
+        mock_gmail_service.users().drafts().get().execute.return_value = {
+            "id": "draft123",
+            "message": {
+                "id": "msg123",
+                "threadId": "thread123",
+                "snippet": "Old snippet",
+                "payload": {
+                    "headers": [
+                        {"name": "Subject", "value": "Old Subject"},
+                        {"name": "To", "value": "old@example.com"},
+                    ],
+                    "body": {"data": base64.urlsafe_b64encode(b"Old body").decode()},
+                },
+            },
+        }
+
+        # Mock update
+        mock_gmail_service.users().drafts().update().execute.return_value = {
+            "id": "draft123",
+            "message": {"id": "msg123_updated"},
+        }
+
+        result = await bridge.update_draft(
+            draft_id="draft123",
+            subject="New Subject",
+            body="New body content",
+        )
+
+        assert result.success is True
+        assert result.draft_id == "draft123"
+        assert result.operation == "update"
+        mock_gmail_service.users().drafts().update.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_update_draft_not_found(self, bridge, mock_gmail_service):
+        """Test updating a non-existent draft."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().drafts().get().execute.side_effect = HttpError(
+            error_resp, b"Draft not found"
+        )
+
+        result = await bridge.update_draft(
+            draft_id="nonexistent",
+            subject="New Subject",
+        )
+
+        assert result.success is False
+        assert "not found" in result.error.lower()
+
+    @pytest.mark.asyncio
+    async def test_send_draft(self, bridge, mock_gmail_service):
+        """Test sending a draft."""
+        mock_gmail_service.users().drafts().send().execute.return_value = {
+            "id": "sent_msg_id",
+            "threadId": "thread123",
+        }
+
+        result = await bridge.send_draft("draft123")
+
+        assert result.success is True
+        assert result.draft_id == "draft123"
+        assert result.message_id == "sent_msg_id"
+        assert result.operation == "send"
+        mock_gmail_service.users().drafts().send.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_send_draft_error(self, bridge, mock_gmail_service):
+        """Test sending a draft that fails."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 400
+        mock_gmail_service.users().drafts().send().execute.side_effect = HttpError(
+            error_resp, b"Send failed"
+        )
+
+        result = await bridge.send_draft("draft123")
+
+        assert result.success is False
+        assert result.operation == "send"
+        assert result.error is not None
+
+    @pytest.mark.asyncio
+    async def test_delete_draft(self, bridge, mock_gmail_service):
+        """Test deleting a draft."""
+        mock_gmail_service.users().drafts().delete().execute.return_value = None
+
+        result = await bridge.delete_draft("draft123")
+
+        assert result.success is True
+        assert result.draft_id == "draft123"
+        assert result.operation == "delete"
+        mock_gmail_service.users().drafts().delete.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_draft_error(self, bridge, mock_gmail_service):
+        """Test deleting a draft that fails."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().drafts().delete().execute.side_effect = HttpError(
+            error_resp, b"Draft not found"
+        )
+
+        result = await bridge.delete_draft("nonexistent")
+
+        assert result.success is False
+        assert result.operation == "delete"
+
+
+class TestDraftModel:
+    """Test EmailDraft Pydantic model."""
+
+    def test_draft_model_creation(self):
+        """Test creating an EmailDraft model."""
+        from klabautermann.mcp.google_workspace import EmailDraft
+
+        draft = EmailDraft(
+            id="draft123",
+            message_id="msg123",
+            thread_id="thread123",
+            subject="Test Subject",
+            to="recipient@example.com",
+            cc="cc@example.com",
+            body="Test body",
+            snippet="Test snippet",
+        )
+
+        assert draft.id == "draft123"
+        assert draft.message_id == "msg123"
+        assert draft.thread_id == "thread123"
+        assert draft.subject == "Test Subject"
+        assert draft.to == "recipient@example.com"
+        assert draft.cc == "cc@example.com"
+        assert draft.body == "Test body"
+        assert draft.snippet == "Test snippet"
+
+    def test_draft_model_optional_fields(self):
+        """Test EmailDraft with optional fields."""
+        from klabautermann.mcp.google_workspace import EmailDraft
+
+        draft = EmailDraft(
+            id="draft123",
+            message_id="msg123",
+            subject="Test Subject",
+        )
+
+        assert draft.id == "draft123"
+        assert draft.thread_id is None
+        assert draft.to is None
+        assert draft.cc is None
+        assert draft.body is None
+        assert draft.snippet == ""
+
+
+class TestDraftOperationResult:
+    """Test DraftOperationResult Pydantic model."""
+
+    def test_draft_operation_success(self):
+        """Test successful draft operation result."""
+        from klabautermann.mcp.google_workspace import DraftOperationResult
+
+        result = DraftOperationResult(
+            success=True,
+            draft_id="draft123",
+            message_id="msg123",
+            operation="send",
+        )
+
+        assert result.success is True
+        assert result.draft_id == "draft123"
+        assert result.message_id == "msg123"
+        assert result.operation == "send"
+        assert result.error is None
+
+    def test_draft_operation_failure(self):
+        """Test failed draft operation result."""
+        from klabautermann.mcp.google_workspace import DraftOperationResult
+
+        result = DraftOperationResult(
+            success=False,
+            draft_id="draft123",
+            operation="update",
+            error="Draft not found",
+        )
+
+        assert result.success is False
+        assert result.error == "Draft not found"
+
+
+# ===========================================================================
+# Label Management Tests (Issue #217)
+# ===========================================================================
+
+
+class TestLabelManagement:
+    """Test Gmail label management operations."""
+
+    @pytest.mark.asyncio
+    async def test_create_label(self, bridge, mock_gmail_service):
+        """Test creating a custom label."""
+        mock_gmail_service.users().labels().create().execute.return_value = {
+            "id": "Label_123",
+            "name": "Projects/Work",
+            "type": "user",
+        }
+
+        label = await bridge.create_label("Projects/Work")
+
+        assert label.id == "Label_123"
+        assert label.name == "Projects/Work"
+        assert label.type == "user"
+        mock_gmail_service.users().labels().create.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_create_label_with_visibility(self, bridge, mock_gmail_service):
+        """Test creating a label with custom visibility settings."""
+        mock_gmail_service.users().labels().create().execute.return_value = {
+            "id": "Label_456",
+            "name": "Archive",
+            "type": "user",
+        }
+
+        label = await bridge.create_label(
+            name="Archive",
+            label_list_visibility="labelHide",
+            message_list_visibility="hide",
+        )
+
+        assert label.id == "Label_456"
+        assert label.name == "Archive"
+        # Verify the call was made with correct visibility settings
+        call_args = mock_gmail_service.users().labels().create.call_args
+        assert call_args is not None
+
+    @pytest.mark.asyncio
+    async def test_create_label_already_exists(self, bridge, mock_gmail_service):
+        """Test creating a label that already exists."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 409
+        mock_gmail_service.users().labels().create().execute.side_effect = HttpError(
+            error_resp, b"Label already exists"
+        )
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            await bridge.create_label("Existing Label")
+
+        assert "Create label failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_delete_label(self, bridge, mock_gmail_service):
+        """Test deleting a custom label."""
+        mock_gmail_service.users().labels().delete().execute.return_value = None
+
+        result = await bridge.delete_label("Label_123")
+
+        assert result is True
+        mock_gmail_service.users().labels().delete.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_label_not_found(self, bridge, mock_gmail_service):
+        """Test deleting a non-existent label."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().labels().delete().execute.side_effect = HttpError(
+            error_resp, b"Label not found"
+        )
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            await bridge.delete_label("nonexistent")
+
+        assert "Delete label failed" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_update_label_name(self, bridge, mock_gmail_service):
+        """Test updating a label name."""
+        mock_gmail_service.users().labels().patch().execute.return_value = {
+            "id": "Label_123",
+            "name": "New Name",
+            "type": "user",
+        }
+
+        label = await bridge.update_label("Label_123", name="New Name")
+
+        assert label.id == "Label_123"
+        assert label.name == "New Name"
+        mock_gmail_service.users().labels().patch.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_update_label_visibility(self, bridge, mock_gmail_service):
+        """Test updating label visibility settings."""
+        mock_gmail_service.users().labels().patch().execute.return_value = {
+            "id": "Label_123",
+            "name": "Projects",
+            "type": "user",
+        }
+
+        label = await bridge.update_label(
+            "Label_123",
+            label_list_visibility="labelHide",
+            message_list_visibility="hide",
+        )
+
+        assert label.id == "Label_123"
+        mock_gmail_service.users().labels().patch.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_update_label_error(self, bridge, mock_gmail_service):
+        """Test updating a label that fails."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 400
+        mock_gmail_service.users().labels().patch().execute.side_effect = HttpError(
+            error_resp, b"Update failed"
+        )
+
+        with pytest.raises(ExternalServiceError) as exc_info:
+            await bridge.update_label("Label_123", name="New Name")
+
+        assert "Update label failed" in str(exc_info.value)
