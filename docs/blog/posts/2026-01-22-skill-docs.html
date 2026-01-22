@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,tooling">
+    <meta name="post-slug" content="skill-docs">
+    <meta name="post-excerpt" content="Automatic documentation generation for skills. Markdown, HTML, and index pages with zero manual effort.">
+    <title>Self-Documenting Skills | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">tooling</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Self-Documenting Skills</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Skills have metadata. That metadata is documentation waiting to happen. Today we added a generator that turns YAML frontmatter into proper documentation with zero manual effort.</p>
+
+                <h2>The Problem</h2>
+                <p>A skill definition contains everything you need to understand it:</p>
+
+                <pre><code>---
+name: summarize-thread
+description: |
+  Summarize any conversation or email thread.
+  Use when user asks "summarize this thread", "TLDR", "what was discussed?"
+model: haiku
+allowed_tools:
+  - Read
+  - Grep
+klabautermann-task-type: research
+klabautermann-agent: researcher
+---</code></pre>
+
+                <p>But when someone asks "what skills do we have?", nobody wants to read YAML files. They want a list, a description, maybe some examples. The information exists - it just needs transformation.</p>
+
+                <h2>The Generator</h2>
+                <p><code>SkillDocsGenerator</code> turns loaded skills into structured documentation:</p>
+
+                <pre><code>class SkillDocsGenerator:
+    """
+    Generates documentation from skill definitions.
+
+    Takes LoadedSkill objects and produces SkillDoc objects
+    with extracted metadata, parameters, and trigger phrases.
+    """
+
+    def generate(self, skill: LoadedSkill) -> SkillDoc:
+        """Generate documentation for a single skill."""
+
+    def generate_all(self) -> dict[str, SkillDoc]:
+        """Generate documentation for all loaded skills."""
+
+    def generate_index(self, docs: dict[str, SkillDoc] | None = None) -> str:
+        """Generate an index page listing all skills."""</code></pre>
+
+                <h2>Extracting What Matters</h2>
+                <p>The generator doesn't just copy fields - it extracts semantic information:</p>
+
+                <h3>Trigger Phrases</h3>
+                <pre><code>def _extract_trigger_phrases(self, description: str) -> list[str]:
+    """Extract trigger phrases from description text."""
+    patterns = [
+        r'"([^"]+)"',                    # "phrase in quotes"
+        r"'([^']+)'",                    # 'phrase in quotes'
+        r"(?:say|ask|type)\s+([^,.]+)",  # say X, ask X
+    ]
+    phrases = []
+    for pattern in patterns:
+        matches = re.findall(pattern, description, re.IGNORECASE)
+        phrases.extend(matches)
+    return phrases</code></pre>
+
+                <p>From "Use when user asks 'summarize this thread', 'TLDR', or 'what was discussed?'" it extracts: <code>["summarize this thread", "TLDR", "what was discussed?"]</code></p>
+
+                <h3>Parameters</h3>
+                <pre><code>def _extract_parameters(self, skill: LoadedSkill) -> list[SkillParameter]:
+    """Extract parameter documentation from payload schema."""
+    schema = skill.klabautermann.payload_schema
+    if not schema:
+        return []
+
+    params = []
+    properties = schema.get("properties", {})
+    required = set(schema.get("required", []))
+
+    for name, prop in properties.items():
+        params.append(SkillParameter(
+            name=name,
+            type=prop.get("type", "any"),
+            required=name in required,
+            default=prop.get("default"),
+            description=prop.get("description"),
+        ))
+    return params</code></pre>
+
+                <p>Payload schemas become documented parameters with types, defaults, and required markers.</p>
+
+                <h2>Output Formats</h2>
+                <p>Documentation can be rendered as markdown or HTML:</p>
+
+                <h3>Markdown</h3>
+                <pre><code>def to_markdown(self) -> str:
+    lines = [f"# {self.name}", "", self.description, ""]
+
+    if self.trigger_phrases:
+        lines.append("## Trigger Phrases")
+        for phrase in self.trigger_phrases:
+            lines.append(f'- "{phrase}"')
+        lines.append("")
+
+    if self.parameters:
+        lines.append("## Parameters")
+        lines.append("| Name | Type | Required | Default | Description |")
+        lines.append("|------|------|----------|---------|-------------|")
+        for p in self.parameters:
+            lines.append(p.format_table_row())
+        lines.append("")
+
+    return "\n".join(lines)</code></pre>
+
+                <h3>HTML</h3>
+                <pre><code>def to_html(self) -> str:
+    html = [f"<h1>{self.name}</h1>", f"<p>{self.description}</p>"]
+
+    if self.trigger_phrases:
+        html.append("<h2>Trigger Phrases</h2><ul>")
+        for phrase in self.trigger_phrases:
+            html.append(f"<li><code>{phrase}</code></li>")
+        html.append("</ul>")
+
+    if self.parameters:
+        html.append("<h2>Parameters</h2>")
+        html.append("<table><thead><tr>")
+        html.append("<th>Name</th><th>Type</th><th>Required</th>")
+        html.append("<th>Default</th><th>Description</th>")
+        html.append("</tr></thead><tbody>")
+        for p in self.parameters:
+            html.append(p.format_html_row())
+        html.append("</tbody></table>")
+
+    return "\n".join(html)</code></pre>
+
+                <h2>Index Generation</h2>
+                <p>For skill catalogs, the generator creates an index page:</p>
+
+                <pre><code>def generate_index(self, docs: dict[str, SkillDoc] | None = None) -> str:
+    """Generate an index page listing all skills."""
+    if docs is None:
+        docs = self.generate_all()
+
+    lines = ["# Skills Index", "", f"Found {len(docs)} skills.", ""]
+
+    for name, doc in sorted(docs.items()):
+        summary = doc.description.split("\n")[0][:100]
+        lines.append(f"## [{name}]({name}.md)")
+        lines.append(f"{summary}")
+        lines.append("")
+
+    return "\n".join(lines)</code></pre>
+
+                <p>One command generates a navigable skills reference.</p>
+
+                <h2>Convenience Functions</h2>
+                <pre><code># Generate docs for one skill
+doc = generate_skill_doc(skill)
+print(doc.to_markdown())
+
+# Generate docs for all skills
+docs = generate_skill_docs(loader)
+for name, doc in docs.items():
+    Path(f"docs/skills/{name}.md").write_text(doc.to_markdown())
+
+# Generate with index
+generator = SkillDocsGenerator(loader)
+index = generator.generate_index()
+Path("docs/skills/README.md").write_text(index)</code></pre>
+
+                <h2>The Data Classes</h2>
+                <pre><code>@dataclass
+class SkillParameter:
+    """Documentation for a single skill parameter."""
+    name: str
+    type: str
+    required: bool
+    default: str | None
+    description: str | None
+
+    def format_table_row(self) -> str:
+        required_str = "Yes" if self.required else "No"
+        default_str = str(self.default) if self.default else "-"
+        desc_str = self.description or "-"
+        return f"| {self.name} | {self.type} | {required_str} | {default_str} | {desc_str} |"
+
+@dataclass
+class SkillDoc:
+    """Generated documentation for a single skill."""
+    name: str
+    description: str
+    model: str | None = None
+    allowed_tools: list[str] = field(default_factory=list)
+    user_invocable: bool = True
+    task_type: str | None = None
+    agent: str | None = None
+    blocking: bool = True
+    parameters: list[SkillParameter] = field(default_factory=list)
+    trigger_phrases: list[str] = field(default_factory=list)
+    body_sections: dict[str, str] = field(default_factory=dict)
+    path: Path | None = None</code></pre>
+
+                <h2>The Tests</h2>
+                <p>11 tests verify the generator:</p>
+
+                <ul>
+                    <li><strong>test_generate_skill_doc</strong>: Basic generation works</li>
+                    <li><strong>test_generate_doc_with_parameters</strong>: Parameters extracted from schema</li>
+                    <li><strong>test_generate_doc_with_trigger_phrases</strong>: Trigger phrase extraction</li>
+                    <li><strong>test_generate_doc_with_body_sections</strong>: Body content parsed</li>
+                    <li><strong>test_skill_doc_to_markdown</strong>: Markdown output format</li>
+                    <li><strong>test_skill_doc_to_html</strong>: HTML output format</li>
+                    <li><strong>test_skill_parameter_format</strong>: Parameter table formatting</li>
+                    <li><strong>test_generate_all</strong>: Batch generation works</li>
+                    <li><strong>test_generate_index</strong>: Index page generation</li>
+                    <li><strong>test_generate_to_files</strong>: File output integration</li>
+                    <li><strong>test_real_skill_doc</strong>: Integration with real skills</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>1 new module: <code>src/klabautermann/skills/docs.py</code></li>
+                    <li>3 new types: <code>SkillDocsGenerator</code>, <code>SkillDoc</code>, <code>SkillParameter</code></li>
+                    <li>2 convenience functions exported</li>
+                    <li>Markdown and HTML output support</li>
+                    <li>11 new unit tests</li>
+                    <li>All 69 skills tests pass</li>
+                </ul>
+
+                <p>Issue #298, closed. Skills now document themselves.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
