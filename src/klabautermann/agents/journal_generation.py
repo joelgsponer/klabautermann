@@ -56,7 +56,12 @@ Your journal entry must follow this five-part structure:
    - Suggestions for improvement (gentle, not preachy)
    - Observations about timing, focus, or habits
 
-5. SAILOR'S THINKING
+5. LORE PROGRESS (if any tales were told)
+   - Mention any saga chapters advanced today
+   - Note which channels the tales traveled through
+   - Skip this section if no tales were told
+
+6. SAILOR'S THINKING
    - A brief, witty reflection in your distinctive voice
    - Forward-looking thought about tomorrow or the week
    - End on a hopeful or motivating note
@@ -67,6 +72,8 @@ Sarah from Acme signaled progress on the Q1 budget—a fair wind at last.
 Three tasks walked the plank (completed), but The Manifest still holds 7 pending items.
 I notice the Captain tends to schedule back-to-back meetings on Tuesdays;
 perhaps we chart a calmer course next week.
+I advanced 'The Great Maelstrom of '98' to chapter 3 today, shared across CLI and Telegram.
+The tale travels well between ports.
 The horizon looks promising. Tomorrow brings a meeting with the board—
 I've prepared the budget notes in The Locker."
 
@@ -105,6 +112,19 @@ def format_analytics_for_prompt(analytics: DailyAnalytics) -> str:
     else:
         top_projects = "no specific projects"
 
+    # Format saga progress (#110)
+    if analytics.saga_progress:
+        saga_lines = []
+        for sp in analytics.saga_progress:
+            channel_info = f" via {sp.channel}" if sp.channel else ""
+            saga_lines.append(
+                f"  - Advanced '{sp.saga_name}' to chapter {sp.chapter}{channel_info}"
+            )
+        saga_summary = "\n".join(saga_lines)
+        lore_section = f"\nLore Progress:\n{saga_summary}"
+    else:
+        lore_section = "\nLore Progress: No tales were told today. The sea was quiet."
+
     # Build formatted context
     context = f"""Today's voyage statistics for {analytics.date}:
 - {analytics.interaction_count} messages exchanged across The Bridge
@@ -113,7 +133,8 @@ def format_analytics_for_prompt(analytics: DailyAnalytics) -> str:
 - {new_entities_summary} recorded in The Locker
 - {analytics.notes_created} notes captured
 - {analytics.events_count} events on The Charts
-- Most discussed: {top_projects}"""
+- Most discussed: {top_projects}
+{lore_section}"""
 
     return context
 
@@ -174,12 +195,13 @@ async def generate_journal(
     # Build user prompt
     user_prompt = f"""{analytics_context}
 
-Generate a daily journal entry following the five-part structure:
+Generate a daily journal entry following the six-part structure:
 1. VOYAGE SUMMARY
 2. KEY INTERACTIONS
 3. PROGRESS REPORT
 4. WORKFLOW OBSERVATIONS
-5. SAILOR'S THINKING
+5. LORE PROGRESS (include if any tales were told)
+6. SAILOR'S THINKING
 
 Be honest, insightful, and capture Klabautermann's voice."""
 

@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,lore">
+    <meta name="post-slug" content="canonical-sagas">
+    <meta name="post-excerpt" content="Five complete sagas join the Bard's repertoire. Tales of dial-up days, notification krakens, and forgotten passwords.">
+    <title>The Five Sagas | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">lore</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Five Sagas</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard of the Bilge has always had stories. Today, it has canon.</p>
+                <p>LORE_SYSTEM.md Section 4.1 specified five complete sagas - multi-chapter tales that unfold across conversations. Until now, they lived only in the spec. Now they live in code.</p>
+
+                <h2>The Implementation (#102-106)</h2>
+                <p>Five issues. Five sagas. One dictionary:</p>
+                <pre><code>CANONICAL_SAGAS: dict[str, dict[str, str | list[str]]] = {
+    "great-maelstrom": {
+        "name": "The Great Maelstrom of '98",
+        "theme": "origin",
+        "chapters": [...],
+    },
+    "kraken-scroll": {...},
+    "sirens-inbox": {...},
+    "ghost-ship": {...},
+    "lighthouse-passwords": {...},
+}</code></pre>
+                <p>Each saga has a name, a theme, and exactly 5 chapters. The structure mirrors how sagas work in runtime - the Bard picks a saga, tells chapter 1, and continues across conversations until chapter 5 concludes the tale.</p>
+
+                <h2>The Great Maelstrom of '98 (#102)</h2>
+                <p>Theme: <em>origin</em>. A tale of the early internet.</p>
+                <blockquote>
+                    <p>"I remember the Great Fog of '98. The bandwidth was so thin you could barely fit a 'Hello' through the wire."</p>
+                </blockquote>
+                <p>Chapter 2 carries a JPEG across the Atlantic. Chapter 3 reveals it was a cat picture. Chapter 5 delivers the wisdom: "Sometimes the slowest journeys carry the most precious cargo."</p>
+
+                <h2>The Kraken of the Infinite Scroll (#103)</h2>
+                <p>Theme: <em>battle</em>. Fighting social media notifications.</p>
+                <blockquote>
+                    <p>"Every time I cut off a 'Like,' two 'Retweets' grew in its place."</p>
+                </blockquote>
+                <p>The beast attacks at 2 AM. Fire doesn't work. Logic doesn't work. Only a library card defeats it - the Kraken hadn't seen a book in decades.</p>
+
+                <h2>The Sirens of the Inbox (#104)</h2>
+                <p>Theme: <em>warning</em>. The lure of urgent emails.</p>
+                <blockquote>
+                    <p>"They sing a song of 'Urgent!' and 'Immediate Action Required!' But it's all a ruse to lead your ship onto the rocks of burnout."</p>
+                </blockquote>
+                <p>Four thousand spam messages deleted in one night. The Sirens respond with increasingly desperate subject lines. A quiet morning is worth any Siren's wrath.</p>
+
+                <h2>The Ghost Ship of Abandoned Projects (#105)</h2>
+                <p>Theme: <em>melancholy</em>. The haunting of unfinished work.</p>
+                <blockquote>
+                    <p>"The crew of that ship are all the 'I'll get to it later' promises. They whisper at night."</p>
+                </blockquote>
+                <p>A TODO list from 2019. A README that was never written. Every cabin full of potential, gathering dust. Complete your tasks - keep the ghost ship at bay.</p>
+
+                <h2>The Lighthouse of Forgotten Passwords (#106)</h2>
+                <p>Theme: <em>humor</em>. Password recovery adventures.</p>
+                <blockquote>
+                    <p>"Its keeper is an ancient navigator named 'P@ssw0rd123'."</p>
+                </blockquote>
+                <p>The vault holds every credential lost to "I'll remember it later." A password from 2012? Stored in a sticky note, which was stored in another sticky note. Use a password manager - disappoint the Lighthouse keeper.</p>
+
+                <h2>The Structure</h2>
+                <p>Each saga follows a narrative arc:</p>
+                <ul>
+                    <li><strong>Chapter 1</strong>: The hook - introduce the situation</li>
+                    <li><strong>Chapter 2</strong>: Rising action - the conflict develops</li>
+                    <li><strong>Chapter 3</strong>: Complication - things get interesting</li>
+                    <li><strong>Chapter 4</strong>: Climax or revelation</li>
+                    <li><strong>Chapter 5</strong>: Resolution and wisdom</li>
+                </ul>
+                <p>The themes span the Bard's emotional range: origin stories, battles, warnings, melancholy, humor. A complete palette for digital sea tales.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#102: [LORE-006] Add The Great Maelstrom of '98 saga</li>
+                    <li>#103: [LORE-007] Add The Kraken of the Infinite Scroll saga</li>
+                    <li>#104: [LORE-008] Add The Sirens of the Inbox saga</li>
+                    <li>#105: [LORE-009] Add The Ghost Ship of Abandoned Projects saga</li>
+                    <li>#106: [LORE-010] Add The Lighthouse of Forgotten Passwords saga</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Bard now has 5 complete sagas with 25 chapters of content. When a saga starts, it knows exactly where the story goes. When it ends, the Captain has heard a complete tale.</p>
+                <p><em>"Now I use a password manager. The Lighthouse keeper was not pleased, but my sanity was worth his disappointment."</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

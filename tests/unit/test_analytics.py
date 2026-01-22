@@ -279,6 +279,68 @@ class TestDailyProjectsDiscussed:
         assert projects == []
 
 
+class TestDailySagaProgress:
+    """Test suite for saga progress in daily analytics (#110)."""
+
+    @pytest.mark.asyncio
+    async def test_returns_saga_episodes_from_day(self) -> None:
+        """Should return saga episodes told on the given day."""
+        mock_neo4j = AsyncMock()
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "great-maelstrom",
+                "saga_name": "The Great Maelstrom",
+                "chapter": 2,
+                "channel": "cli",
+            },
+            {
+                "saga_id": "great-maelstrom",
+                "saga_name": "The Great Maelstrom",
+                "chapter": 3,
+                "channel": "telegram",
+            },
+        ]
+
+        from klabautermann.memory.analytics import get_daily_saga_progress
+
+        progress = await get_daily_saga_progress(mock_neo4j, "2026-01-15")
+
+        assert len(progress) == 2
+        assert progress[0].saga_id == "great-maelstrom"
+        assert progress[0].chapter == 2
+        assert progress[0].channel == "cli"
+        assert progress[1].chapter == 3
+        assert progress[1].channel == "telegram"
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_for_no_tales(self) -> None:
+        """Should return empty list when no tales were told."""
+        mock_neo4j = AsyncMock()
+        mock_neo4j.execute_query.return_value = []
+
+        from klabautermann.memory.analytics import get_daily_saga_progress
+
+        progress = await get_daily_saga_progress(mock_neo4j, "2026-01-15")
+
+        assert progress == []
+
+    @pytest.mark.asyncio
+    async def test_uses_millisecond_timestamps(self) -> None:
+        """Should convert day bounds to milliseconds for told_at comparison."""
+        mock_neo4j = AsyncMock()
+        mock_neo4j.execute_query.return_value = []
+
+        from klabautermann.memory.analytics import get_daily_saga_progress
+
+        await get_daily_saga_progress(mock_neo4j, "2026-01-15")
+
+        call_args = mock_neo4j.execute_query.call_args
+        params = call_args[0][1]
+        # Timestamps should be in milliseconds (13+ digits)
+        assert params["day_start_ms"] > 1000000000000
+        assert params["day_end_ms"] > params["day_start_ms"]
+
+
 class TestDailyAnalytics:
     """Test suite for aggregated daily analytics."""
 
@@ -302,6 +364,14 @@ class TestDailyAnalytics:
                 {"name": "Project A", "uuid": "uuid-a", "mentions": 10},
                 {"name": "Project B", "uuid": "uuid-b", "mentions": 5},
             ],
+            [  # saga progress (#110)
+                {
+                    "saga_id": "great-maelstrom",
+                    "saga_name": "The Great Maelstrom",
+                    "chapter": 2,
+                    "channel": "cli",
+                },
+            ],
         ]
 
         analytics = await get_daily_analytics(
@@ -320,6 +390,9 @@ class TestDailyAnalytics:
         assert analytics.notes_created == 5
         assert analytics.events_count == 3
         assert len(analytics.top_projects) == 2
+        assert len(analytics.saga_progress) == 1
+        assert analytics.saga_progress[0].saga_id == "great-maelstrom"
+        assert analytics.saga_progress[0].chapter == 2
 
     @pytest.mark.asyncio
     async def test_handles_missing_entity_types(self) -> None:
@@ -332,12 +405,14 @@ class TestDailyAnalytics:
             [{"count": 0}],  # completed
             [{"count": 0}],  # created
             [],  # projects
+            [],  # saga progress - no tales told
         ]
 
         analytics = await get_daily_analytics(mock_neo4j, "2026-01-15")
 
         assert analytics.notes_created == 0
         assert analytics.events_count == 0
+        assert analytics.saga_progress == []
 
     @pytest.mark.asyncio
     async def test_propagates_trace_id(self) -> None:
@@ -349,6 +424,7 @@ class TestDailyAnalytics:
             [{"count": 0}],
             [{"count": 0}],
             [],
+            [],  # saga progress
         ]
 
         await get_daily_analytics(

@@ -298,6 +298,20 @@ class JournalEntryNode(BaseNode):
     generated_at: float = Field(default_factory=current_timestamp)
 
 
+class SagaProgress(BaseModel):
+    """
+    Progress update for a saga told during the day.
+
+    Used by Scribe to include lore progress in daily journal.
+    Reference: specs/architecture/LORE_SYSTEM.md Section 5.2
+    """
+
+    saga_id: str
+    saga_name: str
+    chapter: int
+    channel: str | None = None
+
+
 class DailyAnalytics(BaseModel):
     """
     Aggregated statistics for a single day.
@@ -314,6 +328,7 @@ class DailyAnalytics(BaseModel):
     top_projects: list[dict[str, Any]] = Field(default_factory=list)
     notes_created: int
     events_count: int
+    saga_progress: list[SagaProgress] = Field(default_factory=list)  # Lore progress (#110)
 
 
 class JournalEntry(BaseModel):
