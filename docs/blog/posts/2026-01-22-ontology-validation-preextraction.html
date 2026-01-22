@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,ingestor">
+    <meta name="post-slug" content="ontology-validation-preextraction">
+    <meta name="post-excerpt" content="Validating entities against the graph schema before ingestion. A pre-extraction layer catches schema violations early.">
+    <title>Guarding the Schema: Ontology Validation and Pre-Extraction | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">ingestor</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Guarding the Schema: Ontology Validation and Pre-Extraction</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Graphiti handles entity extraction well, but what happens when the LLM hallucinates a relationship type that doesn't exist in our ontology? Or creates an entity type we don't support?</p>
+                <p>Previously: silent corruption. Now: validation catches it before it reaches the graph.</p>
+
+                <h2>The Problem</h2>
+                <p>Our ontology defines strict types. A <code>Person</code> can <code>WORKS_AT</code> an <code>Organization</code>. A <code>Task</code> can <code>BLOCKS</code> another <code>Task</code>. But nothing stops an LLM from inventing <code>EMPLOYED_BY</code> or creating a <code>Company</code> instead of <code>Organization</code>.</p>
+                <p>These inconsistencies pollute the graph. Queries fail to find expected relationships. Community detection groups unrelated nodes. The knowledge graph becomes a knowledge swamp.</p>
+
+                <h2>The Solution: Validation Layer</h2>
+                <p>The new <code>OntologyValidator</code> validates every extracted entity and relationship before ingestion:</p>
+
+                <pre><code>from klabautermann.core import (
+    OntologyValidator,
+    ExtractedEntity,
+    ExtractedRelationship,
+    ExtractionResult,
+)
+
+validator = OntologyValidator(strict=False)
+
+# Validate an entity
+entity = ExtractedEntity(
+    name="John Smith",
+    entity_type="Person",  # Valid - in NodeLabel enum
+    properties={"email": "john@example.com"},
+)
+result = validator.validate_entity(entity)
+print(result.is_valid)  # True
+
+# Invalid entity type
+entity = ExtractedEntity(
+    name="Acme",
+    entity_type="Company",  # Invalid - should be Organization
+)
+result = validator.validate_entity(entity)
+print(result.is_valid)  # False
+print(result.issues[0].code)  # INVALID_ENTITY_TYPE</code></pre>
+
+                <h2>What Gets Validated</h2>
+                <p>The validator performs five types of checks:</p>
+
+                <ol>
+                    <li><strong>Entity type validation</strong>: Must be in <code>NodeLabel</code> enum (Person, Organization, Task, etc.)</li>
+                    <li><strong>Relationship type validation</strong>: Must be in <code>RelationType</code> enum (WORKS_AT, REPORTS_TO, etc.)</li>
+                    <li><strong>Constraint validation</strong>: Source and target types must be compatible:
+                        <ul>
+                            <li><code>WORKS_AT</code>: Person -> Organization (valid)</li>
+                            <li><code>WORKS_AT</code>: Organization -> Person (invalid)</li>
+                        </ul>
+                    </li>
+                    <li><strong>Property type validation</strong>: Email should be string, not int</li>
+                    <li><strong>Enum value validation</strong>: Task status must be "todo", "in_progress", "done", or "cancelled"</li>
+                </ol>
+
+                <h2>Severity Levels</h2>
+                <p>Not all issues are created equal:</p>
+
+                <pre><code>class ValidationSeverity(str, Enum):
+    ERROR = "error"    # Blocks ingestion
+    WARNING = "warning"  # Logged, allows ingestion
+    INFO = "info"      # Informational only</code></pre>
+
+                <p><strong>ERROR</strong>: Invalid entity type, invalid relationship type, constraint violations. These block ingestion.</p>
+                <p><strong>WARNING</strong>: Wrong property type (email as int), invalid enum value. Logged but allowed.</p>
+                <p><strong>INFO</strong>: Low confidence extraction (&lt;50%). Worth knowing, not worth blocking.</p>
+
+                <h2>Strict Mode</h2>
+                <p>For production environments, enable strict mode:</p>
+
+                <pre><code>validator = OntologyValidator(strict=True)
+
+# Now warnings become errors
+entity = ExtractedEntity(
+    name="My Task",
+    entity_type="Task",
+    properties={"status": "pending"},  # Should be "todo"
+)
+result = validator.validate_entity(entity)
+print(result.is_valid)  # False in strict mode, True otherwise</code></pre>
+
+                <h2>LLM Pre-Extraction</h2>
+                <p>Validation is reactive - it catches bad data after Graphiti extracts it. Pre-extraction is proactive - it uses a fast model (Haiku) to extract entities <em>before</em> Graphiti, giving us early validation.</p>
+
+                <pre><code>from klabautermann.agents import (
+    PreExtractionEngine,
+    PreExtractionConfig,
+)
+
+config = PreExtractionConfig(
+    enabled=True,
+    model="claude-3-5-haiku-latest",  # Fast
+    min_confidence=0.5,  # Filter low-quality extractions
+    validate_ontology=True,
+)
+
+engine = PreExtractionEngine(anthropic_client, config)
+
+result, validation = await engine.extract(
+    "I met John Smith (john@example.com), PM at Acme Corp."
+)
+
+# Pre-extraction found these entities
+for entity in result.entities:
+    print(f"{entity.entity_type}: {entity.name} ({entity.confidence:.0%})")
+# Person: John Smith (95%)
+# Organization: Acme Corp (90%)</code></pre>
+
+                <h2>Ingestor Integration</h2>
+                <p>The <code>Ingestor</code> agent now optionally runs pre-extraction before Graphiti:</p>
+
+                <pre><code>from klabautermann.agents.ingestor import Ingestor
+from klabautermann.agents import PreExtractionConfig
+
+ingestor = Ingestor(
+    graphiti_client=graphiti,
+    neo4j_client=neo4j,
+    anthropic_client=anthropic,  # Enables pre-extraction
+    pre_extraction_config=PreExtractionConfig(
+        min_confidence=0.5,
+        strict_validation=False,
+    ),
+)</code></pre>
+
+                <p>The flow is now:</p>
+                <ol>
+                    <li>Clean input (remove role prefixes, roleplay markers)</li>
+                    <li>Pre-extract entities with Haiku (fast)</li>
+                    <li>Validate against ontology</li>
+                    <li>Log validation results for audit</li>
+                    <li>Pass to Graphiti for final extraction and storage</li>
+                </ol>
+
+                <p>If pre-extraction fails, Graphiti still runs. It's a quality layer, not a gate.</p>
+
+                <h2>The Prompt</h2>
+                <p>Pre-extraction uses a structured prompt that teaches Haiku about our ontology:</p>
+
+                <pre><code>VALID ENTITY TYPES (use exact casing):
+Community, Day, Event, Goal, HealthMetric, Hobby, JournalEntry,
+Location, LoreEpisode, Message, Milestone, Note, Organization,
+Person, Pet, Preference, Project, Resource, Routine, Tag, Task, Thread
+
+VALID RELATIONSHIP TYPES (use exact casing):
+ACHIEVES, AFFILIATED_WITH, ASSIGNED_TO, ATTENDED, ATTACHED_TO,
+BLOCKS, CARES_FOR, CHILD_OF, CONTAINS, CONTRIBUTES_TO, ...
+
+EXTRACTION RULES:
+1. Only extract entities that are explicitly mentioned
+2. Assign confidence scores (0.0-1.0) based on how clearly the entity is identified
+3. For relationships, both source and target entities must be extracted
+4. Use WORKS_AT for employment (not "employed_by")
+5. Names should be title-cased ("John Smith" not "john smith")
+...</code></pre>
+
+                <p>The LLM returns structured JSON that maps directly to our Pydantic models.</p>
+
+                <h2>Relationship Constraints</h2>
+                <p>The validator knows which entity types can connect via which relationships:</p>
+
+                <pre><code>RELATIONSHIP_CONSTRAINTS = {
+    "WORKS_AT": ({"Person"}, {"Organization"}),
+    "REPORTS_TO": ({"Person"}, {"Person"}),
+    "PART_OF": ({"Task", "Project"}, {"Project"}),
+    "BLOCKS": ({"Task"}, {"Task"}),
+    "SPOUSE_OF": ({"Person"}, {"Person"}),
+    "OWNS": ({"Person"}, {"Pet"}),
+    # ...
+}</code></pre>
+
+                <p>If the LLM extracts <code>Organization -[WORKS_AT]-> Person</code>, validation fails with <code>INVALID_SOURCE_FOR_RELATIONSHIP</code>.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#11: [AGT-P-009] Add LLM-based entity pre-extraction</li>
+                    <li>#13: [AGT-P-010] Implement custom ontology validation</li>
+                </ul>
+
+                <p>Your knowledge graph now has a quality gate. Invalid entities and relationships are caught before they pollute your data. The schema is enforced, not just documented.</p>
+
+                <p>Clean data. Clean graph. Clean queries.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
