@@ -1,0 +1,280 @@
+# Prometheus Alerting Rules for Klabautermann
+#
+# Reference: specs/infrastructure/DEPLOYMENT.md
+#
+# Alert severity levels:
+#   - critical: Immediate action required, service degraded
+#   - warning: Investigation needed, potential issue
+#   - info: Informational, no action required
+
+groups:
+  # ===========================================================================
+  # Agent Alerts
+  # ===========================================================================
+  - name: agent_alerts
+    rules:
+      - alert: AgentHighErrorRate
+        expr: |
+          (
+            sum(rate(klabautermann_agent_errors_total[5m])) by (agent_name)
+            /
+            sum(rate(klabautermann_agent_requests_total[5m])) by (agent_name)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} has error rate > 10% for 5 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: AgentCriticalErrorRate
+        expr: |
+          (
+            sum(rate(klabautermann_agent_errors_total[5m])) by (agent_name)
+            /
+            sum(rate(klabautermann_agent_requests_total[5m])) by (agent_name)
+          ) > 0.25
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical error rate for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} has error rate > 25% for 2 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: AgentHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_agent_request_latency_ms_bucket[5m])) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} P95 latency > 5 seconds for 5 minutes. Current P95: {{ $value | humanizeDuration }}"
+
+      - alert: AgentCriticalLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_agent_request_latency_ms_bucket[5m])) > 10000
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical latency for agent {{ $labels.agent_name }}"
+          description: "Agent {{ $labels.agent_name }} P95 latency > 10 seconds for 2 minutes. Current P95: {{ $value | humanizeDuration }}"
+
+      - alert: AgentStopped
+        expr: klabautermann_agent_running == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent {{ $labels.agent_name }} is stopped"
+          description: "Agent {{ $labels.agent_name }} has been stopped for 1 minute."
+
+  # ===========================================================================
+  # API Alerts
+  # ===========================================================================
+  - name: api_alerts
+    rules:
+      - alert: APIHighErrorRate
+        expr: |
+          (
+            sum(rate(klabautermann_api_requests_total{status_code=~"5.."}[5m]))
+            /
+            sum(rate(klabautermann_api_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API error rate (5xx responses)"
+          description: "API 5xx error rate > 5% for 5 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: APICriticalErrorRate
+        expr: |
+          (
+            sum(rate(klabautermann_api_requests_total{status_code=~"5.."}[5m]))
+            /
+            sum(rate(klabautermann_api_requests_total[5m]))
+          ) > 0.15
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical API error rate (5xx responses)"
+          description: "API 5xx error rate > 15% for 2 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: APIHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_api_request_latency_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency on {{ $labels.endpoint }}"
+          description: "API endpoint {{ $labels.endpoint }} P95 latency > 2 seconds for 5 minutes. Current P95: {{ $value | humanizeDuration }}"
+
+  # ===========================================================================
+  # Channel Alerts
+  # ===========================================================================
+  - name: channel_alerts
+    rules:
+      - alert: ChannelDown
+        expr: klabautermann_channel_status == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Channel {{ $labels.channel_name }} is down"
+          description: "Channel {{ $labels.channel_name }} has been down for 1 minute."
+
+      - alert: ChannelUnhealthy
+        expr: klabautermann_channel_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Channel {{ $labels.channel_name }} is unhealthy"
+          description: "Channel {{ $labels.channel_name }} has been unhealthy for 5 minutes."
+
+      - alert: ChannelHighErrorRate
+        expr: |
+          (
+            sum(rate(klabautermann_channel_errors_total[5m])) by (channel_name)
+            /
+            sum(rate(klabautermann_channel_messages_total[5m])) by (channel_name)
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate for channel {{ $labels.channel_name }}"
+          description: "Channel {{ $labels.channel_name }} has error rate > 10% for 5 minutes. Current value: {{ $value | humanizePercentage }}"
+
+      - alert: ChannelHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_channel_response_latency_ms_bucket[5m])) > 3000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High latency for channel {{ $labels.channel_name }}"
+          description: "Channel {{ $labels.channel_name }} P95 latency > 3 seconds for 5 minutes."
+
+      - alert: AllChannelsDown
+        expr: klabautermann_channel_active_count == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "All channels are down"
+          description: "No active channels for 1 minute. The system cannot receive user messages."
+
+      - alert: BroadcastFailures
+        expr: |
+          (
+            sum(rate(klabautermann_channel_broadcast_deliveries_total{status="failure"}[5m]))
+            /
+            sum(rate(klabautermann_channel_broadcast_deliveries_total[5m]))
+          ) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High broadcast failure rate"
+          description: "Broadcast delivery failure rate > 20% for 5 minutes."
+
+  # ===========================================================================
+  # Graph/Memory Alerts
+  # ===========================================================================
+  - name: graph_alerts
+    rules:
+      - alert: GraphHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_graph_operation_latency_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High graph operation latency"
+          description: "Graph {{ $labels.operation_type }} operation P95 latency > 1 second for 5 minutes."
+
+      - alert: GraphCriticalLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_graph_operation_latency_seconds_bucket[5m])) > 5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Critical graph operation latency"
+          description: "Graph {{ $labels.operation_type }} operation P95 latency > 5 seconds for 2 minutes."
+
+  # ===========================================================================
+  # LLM Alerts
+  # ===========================================================================
+  - name: llm_alerts
+    rules:
+      - alert: LLMHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(klabautermann_llm_call_latency_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High LLM latency for {{ $labels.model }}"
+          description: "LLM model {{ $labels.model }} P95 latency > 30 seconds for 5 minutes."
+
+      - alert: LLMHighTokenUsage
+        expr: |
+          sum(rate(klabautermann_llm_tokens_total[1h])) by (model) > 100000
+        for: 1h
+        labels:
+          severity: info
+        annotations:
+          summary: "High token usage for {{ $labels.model }}"
+          description: "LLM model {{ $labels.model }} using > 100k tokens/hour. Consider optimizing prompts."
+
+  # ===========================================================================
+  # WebSocket Alerts
+  # ===========================================================================
+  - name: websocket_alerts
+    rules:
+      - alert: NoWebSocketConnections
+        expr: klabautermann_api_websocket_connections == 0
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "No WebSocket connections"
+          description: "No WebSocket connections for 10 minutes. Is the TUI client running?"
+
+      - alert: HighWebSocketConnections
+        expr: klabautermann_api_websocket_connections > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Unusually high WebSocket connections"
+          description: "{{ $value }} WebSocket connections for 5 minutes. Possible connection leak."
+
+  # ===========================================================================
+  # Prometheus Self-Monitoring
+  # ===========================================================================
+  - name: prometheus_alerts
+    rules:
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: "Target {{ $labels.instance }} in job {{ $labels.job }} has been down for 1 minute."
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus config reload failed"
+          description: "Prometheus configuration reload has failed. Check for syntax errors."

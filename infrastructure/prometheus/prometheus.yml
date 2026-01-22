@@ -7,6 +7,17 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
 
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load alerting rules
+rule_files:
+  - /etc/prometheus/alerts.yml
+
 scrape_configs:
   # Prometheus self-monitoring
   - job_name: 'prometheus'

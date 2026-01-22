@@ -1,6 +1,6 @@
 # Klabautermann Monitoring Stack
 #
-# Prometheus + Grafana for metrics visualization
+# Prometheus + Grafana + Alertmanager for metrics and alerting
 #
 # Usage:
 #   docker-compose -f docker-compose.monitoring.yml up -d
@@ -8,6 +8,7 @@
 # Access:
 #   - Grafana: http://localhost:3000 (admin/admin)
 #   - Prometheus: http://localhost:9090
+#   - Alertmanager: http://localhost:9093
 #
 # The Klabautermann app exposes metrics at /metrics endpoint.
 # Configure KLABAUTERMANN_HOST to point to your app instance.
@@ -24,6 +25,7 @@ services:
       - "9090:9090"
     volumes:
       - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infrastructure/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -36,6 +38,30 @@ services:
       - monitoring-net
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # Alertmanager - Alert Handling
+  # ===========================================================================
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: klabautermann-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./infrastructure/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    networks:
+      - monitoring-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/-/healthy"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -85,3 +111,5 @@ volumes:
     name: klabautermann-prometheus-data
   grafana_data:
     name: klabautermann-grafana-data
+  alertmanager_data:
+    name: klabautermann-alertmanager-data
