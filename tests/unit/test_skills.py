@@ -1006,3 +1006,299 @@ class TestSummarizeThreadSkill:
                 assert skill is not None, f"Expected match for: {user_input}"
                 assert skill.name == "summarize-thread"
             # Note: "should_match=False" cases may or may not match depending on keyword patterns
+
+
+class TestSkillValidation:
+    """Tests for skill validation module."""
+
+    @pytest.fixture
+    def valid_skill(self) -> LoadedSkill:
+        """Create a valid skill for testing."""
+        return LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill for validation. Use when user asks to test validation.",
+                **{"allowed-tools": "Read, Grep"},
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{
+                    "klabautermann-task-type": "research",
+                    "klabautermann-agent": "researcher",
+                }
+            ),
+            body="# Test Skill\n\n## Instructions\n\nDo something useful.",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+    def test_validate_valid_skill(self, valid_skill: LoadedSkill) -> None:
+        """Test that a valid skill passes validation."""
+        from klabautermann.skills.validation import validate_skill
+
+        result = validate_skill(valid_skill)
+        assert result.is_valid
+        assert result.skill_name == "test-skill"
+
+    def test_validate_invalid_name_uppercase(self) -> None:
+        """Test validation fails for uppercase name."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="Test-Skill",  # Invalid: uppercase
+                description="A test skill for validation. Use when needed.",
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert not result.is_valid
+        assert any("lowercase" in e.message for e in result.errors)
+
+    def test_validate_invalid_name_too_long(self) -> None:
+        """Test validation fails for name that's too long."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="a" * 100,  # Invalid: too long
+                description="A test skill. Use when needed.",
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert not result.is_valid
+        assert any("too long" in e.message.lower() for e in result.errors)
+
+    def test_validate_short_description(self) -> None:
+        """Test validation fails for too-short description."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="Short",  # Too short
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test instructions here.",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert not result.is_valid
+        assert any("too short" in e.message.lower() for e in result.errors)
+
+    def test_validate_missing_trigger_phrases_warning(self, valid_skill: LoadedSkill) -> None:
+        """Test warning for description without trigger phrases."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="This skill does something but has no trigger hints.",
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        # Should pass but with warning
+        assert result.is_valid
+        assert result.has_warnings
+        assert any("trigger" in w.message.lower() for w in result.warnings)
+
+    def test_validate_orchestrator_config_missing_agent(self) -> None:
+        """Test validation fails when task_type set but agent missing."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill. Use when user asks.",
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{"klabautermann-task-type": "research"}
+                # Missing klabautermann-agent
+            ),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert not result.is_valid
+        assert any("agent" in e.message.lower() for e in result.errors)
+
+    def test_validate_orchestrator_config_missing_task_type(self) -> None:
+        """Test validation fails when agent set but task_type missing."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill. Use when user asks.",
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{"klabautermann-agent": "researcher"}
+                # Missing klabautermann-task-type
+            ),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert not result.is_valid
+        assert any("task-type" in e.message.lower() for e in result.errors)
+
+    def test_validate_unknown_tool_warning(self) -> None:
+        """Test warning for unknown tool in allowed-tools."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill. Use when user asks.",
+                **{"allowed-tools": ["Read", "UnknownTool"]},
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert result.is_valid  # Warnings don't fail validation
+        assert result.has_warnings
+        assert any("UnknownTool" in w.message for w in result.warnings)
+
+    def test_validate_strict_mode(self) -> None:
+        """Test strict mode treats warnings as errors."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="No trigger hints here but otherwise valid.",
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        # Non-strict: passes with warnings
+        result = validate_skill(skill, strict=False)
+        assert result.is_valid
+        assert result.has_warnings
+
+        # Strict: warnings become errors
+        result_strict = validate_skill(skill, strict=True)
+        assert not result_strict.is_valid
+        assert not result_strict.has_warnings  # Warnings converted to errors
+
+    def test_validation_result_format_report(self, valid_skill: LoadedSkill) -> None:
+        """Test ValidationResult.format_report() output."""
+        from klabautermann.skills.validation import validate_skill
+
+        result = validate_skill(valid_skill)
+        report = result.format_report()
+
+        assert "test-skill" in report
+        assert "OK" in report or "No issues" in report
+
+    def test_validate_task_agent_mismatch_warning(self) -> None:
+        """Test warning when task_type and agent don't match convention."""
+        from klabautermann.skills.validation import validate_skill
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill. Use when user asks.",
+            ),
+            klabautermann=KlabautermannSkillConfig(
+                **{
+                    "klabautermann-task-type": "research",
+                    "klabautermann-agent": "executor",  # Mismatch: research usually uses researcher
+                }
+            ),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validate_skill(skill)
+        assert result.is_valid  # Mismatch is a warning, not error
+        assert result.has_warnings
+        assert any("typically" in w.message for w in result.warnings)
+
+    def test_validate_all_skills(self, tmp_path: Path) -> None:
+        """Test validating all skills via validate_all_skills."""
+        from klabautermann.skills.validation import validate_all_skills
+
+        # Create valid skill
+        valid_dir = tmp_path / "valid-skill"
+        valid_dir.mkdir()
+        (valid_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: valid-skill
+            description: A valid skill. Use when user asks to validate.
+            klabautermann-task-type: research
+            klabautermann-agent: researcher
+            ---
+
+            # Valid Skill
+
+            ## Instructions
+
+            Do something.
+        """).strip()
+        )
+
+        # Create invalid skill
+        invalid_dir = tmp_path / "Invalid-Skill"
+        invalid_dir.mkdir()
+        (invalid_dir / "SKILL.md").write_text(
+            dedent("""
+            ---
+            name: Invalid-Skill
+            description: bad
+            ---
+
+            Short.
+        """).strip()
+        )
+
+        loader = SkillLoader(project_skills_dir=tmp_path, personal_skills_dir=tmp_path / "none")
+        results = validate_all_skills(loader)
+
+        # Should have validated both skills
+        assert "valid-skill" in results
+        assert results["valid-skill"].is_valid
+
+        # Invalid skill should be in results if it loaded
+        # (it may fail to load due to uppercase name in directory)
+
+    def test_validator_custom_known_tools(self) -> None:
+        """Test SkillValidator with custom known_tools."""
+        from klabautermann.skills.validation import SkillValidator
+
+        # Validator with custom tools list
+        validator = SkillValidator(known_tools=frozenset({"Read", "CustomTool"}))
+
+        skill = LoadedSkill(
+            metadata=SkillMetadata(
+                name="test-skill",
+                description="A test skill. Use when user asks.",
+                **{"allowed-tools": ["Read", "CustomTool", "Grep"]},
+            ),
+            klabautermann=KlabautermannSkillConfig(),
+            body="# Test\n\n## Instructions",
+            path=Path("/tmp/test-skill/SKILL.md"),
+        )
+
+        result = validator.validate(skill)
+
+        # CustomTool should be OK, but Grep should warn (not in custom list)
+        assert any("Grep" in w.message for w in result.warnings)
