@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Ontology validation and LLM pre-extraction for Ingestor agent (#11, #13)
+  - New `validation.py` module with `OntologyValidator` class
+    - Validates entity types against `NodeLabel` enum
+    - Validates relationship types against `RelationType` enum
+    - Validates source/target type constraints (WORKS_AT: Person -> Organization)
+    - Validates property types and enum values (status, priority, etc.)
+    - `ValidationSeverity` levels: ERROR, WARNING, INFO
+    - Strict mode treats warnings as errors
+  - New `pre_extraction.py` module with `PreExtractionEngine`
+    - Uses Claude Haiku for fast entity/relationship extraction before Graphiti
+    - `PreExtractionConfig` for customization (model, min_confidence, strict_validation)
+    - Confidence filtering (default threshold: 0.5)
+    - Graceful fallback if pre-extraction fails
+  - `ExtractedEntity`, `ExtractedRelationship`, `ExtractionResult` Pydantic models
+  - Integrated into Ingestor agent via optional `anthropic_client` parameter
+  - 56 new unit tests for validation and pre-extraction
 - Structural and temporal query support for Researcher agent (#19, #21)
   - `traverse_reporting_chain()` for REPORTS_TO hierarchy traversal
     - Traverse upward to find managers (OUTGOING) or downward for reports (INCOMING)
