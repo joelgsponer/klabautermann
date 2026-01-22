@@ -53,6 +53,11 @@ from klabautermann.agents.officer import (
     OfficerConfig,
     OfficerOfTheWatch,
 )
+from klabautermann.agents.pre_extraction import (
+    PreExtractionConfig,
+    PreExtractionEngine,
+    pre_extract_entities,
+)
 from klabautermann.agents.purser import (
     EmailManifest,
     Purser,
@@ -91,6 +96,8 @@ __all__ = [
     "MergeResult",
     "OfficerConfig",
     "OfficerOfTheWatch",
+    "PreExtractionConfig",
+    "PreExtractionEngine",
     "PruningAction",
     "PruningResult",
     "PruningRule",
@@ -105,4 +112,5 @@ __all__ = [
     "TheSieve",
     "classify_theme",
     "generate_saga_name",
+    "pre_extract_entities",
 ]

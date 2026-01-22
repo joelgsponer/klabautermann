@@ -4,6 +4,7 @@ Core module - Foundation components for Klabautermann.
 Contains:
 - models: Pydantic data models
 - ontology: Graph schema constants
+- validation: Ontology validation for entity/relationship extraction
 - logger: Nautical logging system
 - exceptions: Custom exception types
 - workflow_inspector: Agent workflow inspection for debugging
@@ -31,6 +32,18 @@ from klabautermann.core.tracing import (
     reset_tracer,
     start_trace,
     trace_span,
+)
+from klabautermann.core.validation import (
+    ExtractedEntity,
+    ExtractedRelationship,
+    ExtractionResult,
+    OntologyValidator,
+    ValidationIssue,
+    ValidationResult,
+    ValidationSeverity,
+    is_valid_entity_type,
+    is_valid_relationship_type,
+    validate_extraction,
 )
 from klabautermann.core.workflow_inspector import (
     WorkflowEntry,
@@ -63,6 +76,17 @@ __all__ = [
     "reset_tracer",
     "start_trace",
     "trace_span",
+    # Ontology Validation
+    "ExtractionResult",
+    "ExtractedEntity",
+    "ExtractedRelationship",
+    "OntologyValidator",
+    "ValidationIssue",
+    "ValidationResult",
+    "ValidationSeverity",
+    "is_valid_entity_type",
+    "is_valid_relationship_type",
+    "validate_extraction",
     # Workflow Inspector
     "WorkflowEntry",
     "WorkflowInspector",
