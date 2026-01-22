@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- `SkillDocsGenerator` class for automatic skill documentation generation (#298)
+- `SkillDoc` and `SkillParameter` dataclasses for structured documentation
+- `generate_skill_docs()` and `generate_skill_doc()` convenience functions
+- Markdown and HTML output support with trigger phrase extraction
+- Index page generation for skill catalogs
+- 11 new unit tests for documentation generation
 - `SkillValidator` class for comprehensive skill definition validation (#297)
 - `ValidationResult` and `ValidationError` types for structured validation reporting
 - `validate_skill()`, `validate_skill_file()`, `validate_all_skills()` functions
