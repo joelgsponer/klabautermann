@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="summarize-skill">
+    <meta name="post-excerpt" content="A new skill that summarizes any thread with a simple command. From YAML frontmatter to orchestrator integration.">
+    <title>The Art of the TLDR | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Art of the TLDR</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Skills are the vocabulary of Klabautermann's capabilities. Each one defines what the system can do, when it should do it, and how it integrates with the orchestration layer. Today we added a skill that ties together yesterday's work on email thread summarization with the existing conversation summarization infrastructure.</p>
+
+                <h2>What Is a Skill?</h2>
+                <p>In Klabautermann's architecture, a skill is a YAML-fronted markdown file that defines:</p>
+
+                <ul>
+                    <li><strong>What it does</strong> - The name and description</li>
+                    <li><strong>When to use it</strong> - Trigger phrases for AI-first discovery</li>
+                    <li><strong>How it integrates</strong> - Which agent handles it, what payload it expects</li>
+                    <li><strong>Instructions</strong> - Detailed execution steps for the agent</li>
+                </ul>
+
+                <p>Skills live in <code>.claude/skills/</code> and are loaded at startup. The orchestrator uses AI-first discovery to match user requests to skills based on semantic understanding, not keyword patterns.</p>
+
+                <h2>The Skill Definition</h2>
+                <p>Here's the complete summarize-thread skill:</p>
+
+                <pre><code>---
+name: summarize-thread
+description: Summarize a conversation thread or email thread to extract key points,
+  action items, and decisions. Use when user asks "summarize this thread",
+  "what was discussed", "give me the gist", or "TLDR".
+allowed-tools: Read, Grep
+model: claude-3-5-haiku-20241022
+user-invocable: true
+klabautermann-task-type: research
+klabautermann-agent: researcher
+klabautermann-blocking: true
+klabautermann-payload-schema:
+  thread_id:
+    type: string
+    required: false
+    extract-from: user-message
+    description: Thread ID for email or conversation thread (if known)
+  thread_type:
+    type: string
+    required: false
+    default: conversation
+    extract-from: user-message
+    description: Type of thread - "email" or "conversation"
+  query:
+    type: string
+    required: false
+    extract-from: user-message
+    description: Search query to find the thread if ID not provided
+---</code></pre>
+
+                <h2>Anatomy of the Frontmatter</h2>
+                <p>Let's break down the key sections:</p>
+
+                <h3>Standard Claude Code Fields</h3>
+                <pre><code>name: summarize-thread
+description: Summarize a conversation thread...
+allowed-tools: Read, Grep
+model: claude-3-5-haiku-20241022
+user-invocable: true</code></pre>
+
+                <p>These are the standard fields that Claude Code recognizes. The <code>description</code> is crucial - it's what the AI uses to match user requests like "TLDR" or "what was discussed" to this skill.</p>
+
+                <h3>Klabautermann Integration</h3>
+                <pre><code>klabautermann-task-type: research
+klabautermann-agent: researcher
+klabautermann-blocking: true</code></pre>
+
+                <p>These fields tell the orchestrator how to handle the skill:</p>
+                <ul>
+                    <li><code>task-type: research</code> - This is an information retrieval task</li>
+                    <li><code>agent: researcher</code> - Route to the Researcher agent</li>
+                    <li><code>blocking: true</code> - Wait for the result before responding</li>
+                </ul>
+
+                <h3>Payload Schema</h3>
+                <pre><code>klabautermann-payload-schema:
+  thread_id:
+    type: string
+    required: false
+    extract-from: user-message
+  thread_type:
+    type: string
+    default: conversation
+  query:
+    type: string
+    extract-from: user-message</code></pre>
+
+                <p>The payload schema defines what information to extract from the user's message. The LLM extracts these fields automatically:</p>
+                <ul>
+                    <li><code>thread_id</code> - If the user mentions a specific thread ID</li>
+                    <li><code>thread_type</code> - "email" or "conversation" (defaults to conversation)</li>
+                    <li><code>query</code> - Search terms to find the thread ("from Sarah", "project meeting")</li>
+                </ul>
+
+                <h2>The Discovery Flow</h2>
+                <p>When a user says "TLDR on that email from Sarah", here's what happens:</p>
+
+                <ol>
+                    <li><strong>Skill Discovery</strong>: The LLM matches "TLDR" to our skill's description</li>
+                    <li><strong>Payload Extraction</strong>: The LLM extracts <code>thread_type: "email"</code>, <code>query: "Sarah"</code></li>
+                    <li><strong>Task Planning</strong>: Orchestrator creates a research task for the Researcher agent</li>
+                    <li><strong>Execution</strong>: Researcher finds the email thread and summarizes it</li>
+                    <li><strong>Response</strong>: Summary returned to the user</li>
+                </ol>
+
+                <h2>The Skill Body</h2>
+                <p>Below the frontmatter, the markdown body contains detailed instructions:</p>
+
+                <pre><code># Summarize Thread
+
+Summarize a conversation thread or email thread to extract structured information.
+
+## Instructions
+
+1. **Determine Thread Type**
+   - If thread_type is "email" or user mentions emails/inbox, use email thread summarization
+   - Otherwise, use conversation thread summarization
+
+2. **Find the Thread**
+   - If thread_id is provided, use it directly
+   - If query is provided, search for matching threads
+   - If neither, summarize the current/recent conversation
+
+3. **Generate Summary**
+   - Extract the essence, not verbatim transcription
+   - Identify key topics discussed
+   - List decisions made
+   - Extract action items with owners if mentioned
+   - Detect sentiment (positive/neutral/negative)</code></pre>
+
+                <p>These instructions guide the agent when executing the skill. They provide the context the LLM needs to handle edge cases and produce consistent output.</p>
+
+                <h2>Connecting the Pieces</h2>
+                <p>This skill ties together multiple capabilities:</p>
+
+                <ul>
+                    <li><strong>Email Thread Summarization</strong> (Issue #221): <code>summarize_email_thread()</code> in GoogleWorkspaceBridge</li>
+                    <li><strong>Conversation Summarization</strong>: <code>summarize_thread()</code> in the Archivist's summarization module</li>
+                    <li><strong>Skill Discovery</strong>: AI-first matching via SkillDiscovery</li>
+                    <li><strong>Orchestration</strong>: Task routing via SkillAwarePlanner</li>
+                </ul>
+
+                <p>The skill doesn't implement summarization itself - it's a declarative interface that routes user requests to the appropriate implementation.</p>
+
+                <h2>The Tests</h2>
+                <p>6 tests ensure the skill loads and integrates correctly:</p>
+
+                <ul>
+                    <li><strong>test_summarize_thread_skill_loads</strong>: Skill loads from disk</li>
+                    <li><strong>test_summarize_thread_skill_metadata</strong>: Metadata fields are correct</li>
+                    <li><strong>test_summarize_thread_skill_orchestrator_config</strong>: Klabautermann fields are correct</li>
+                    <li><strong>test_summarize_thread_skill_payload_schema</strong>: Payload fields are parseable</li>
+                    <li><strong>test_summarize_thread_skill_body_contains_instructions</strong>: Body has required sections</li>
+                    <li><strong>test_summarize_thread_planner_matching</strong>: Planner matches trigger phrases</li>
+                </ul>
+
+                <h2>Fixing .gitignore</h2>
+                <p>One small gotcha: the <code>.claude/</code> directory was being ignored, which blocked the skills directory. The fix:</p>
+
+                <pre><code># Before (broken):
+.claude/*
+!.claude/skills/
+.claude/          # This line overrode the exception
+
+# After (working):
+.claude/*
+!.claude/skills/
+!.claude/skills/**</code></pre>
+
+                <p>The double-star pattern ensures nested directories under <code>.claude/skills/</code> are also included.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"TLDR on that email thread" &rarr; "I'm not sure what you're asking. Could you be more specific?"</blockquote>
+
+                <p>After:</p>
+                <blockquote>"TLDR on that email thread" &rarr;<br>
+                <strong>Summary:</strong> The team discussed Q2 deliverables...<br>
+                <strong>Key Points:</strong> API deadline moved, Sarah handling vendors...<br>
+                <strong>Action Items:</strong> Review timeline, send requirements by Friday</blockquote>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>1 new skill definition: <code>.claude/skills/summarize-thread/SKILL.md</code></li>
+                    <li>102 lines of skill configuration and instructions</li>
+                    <li>6 new unit tests</li>
+                    <li>1 .gitignore fix</li>
+                    <li>All 45 skills tests pass</li>
+                </ul>
+
+                <p>Issue #295, closed. The skill system now has a way to surface the summarization capabilities we've been building.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
