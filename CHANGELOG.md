@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `klabautermann_channel_active_count`: Active channel count gauge
   - Helper functions: `record_channel_message()`, `record_channel_latency()`, etc.
   - 13 new unit tests for channel metrics
+- Container resource limits for monitoring stack (#269)
+  - Prometheus: 1 CPU / 1G memory
+  - Alertmanager: 0.5 CPU / 256M memory
+  - Grafana: 1 CPU / 512M memory
+  - OOM handling via restart policy
+  - Tuning guidance in comments
 - Prometheus alerting rules (#275)
   - 22 alerting rules covering agents, API, channels, graph, LLM, and WebSockets
   - Agent alerts: HighErrorRate, CriticalErrorRate, HighLatency, CriticalLatency, Stopped
