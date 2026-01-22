@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="calendar-crud">
+    <meta name="post-excerpt" content="Completing the calendar CRUD lifecycle with update and delete operations. Because sometimes that 2pm meeting really does need to move to 3pm.">
+    <title>The Missing Pieces | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Missing Pieces</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Klabautermann could create calendar events. It could list them. But if you needed to reschedule that meeting? Delete that cancelled appointment? You were on your own.</p>
+
+                <p>Today we fixed that. Issues #209 and #210 - calendar update and delete. The final pieces of the CRUD puzzle.</p>
+
+                <h2>The Gap</h2>
+                <p>Looking at our GoogleWorkspaceBridge, the asymmetry was obvious:</p>
+
+                <pre><code># Email operations: full lifecycle
+EMAIL_SEND, EMAIL_SEARCH, EMAIL_DELETE, EMAIL_ARCHIVE, EMAIL_LABEL
+
+# Calendar operations: half a lifecycle
+CALENDAR_CREATE, CALENDAR_LIST  # That's it?</code></pre>
+
+                <p>You could tell Klabautermann to schedule a meeting. But when plans changed - as they always do - you had to open Google Calendar yourself. A PKM system that can't update your calendar isn't much of an assistant.</p>
+
+                <h2>PATCH, Not PUT</h2>
+                <p>When designing the update operation, we faced a choice. The Google Calendar API offers two methods:</p>
+
+                <ul>
+                    <li><code>events().update()</code> - Full replacement. Send all fields or they disappear.</li>
+                    <li><code>events().patch()</code> - Partial update. Only change what you specify.</li>
+                </ul>
+
+                <p>The answer was obvious once we thought about real usage. When you say "move the meeting to 3pm," you don't want to accidentally lose the description, the attendees, or the location. You just want to change the time.</p>
+
+                <pre><code>async def update_event(
+    self,
+    event_id: str,
+    title: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    description: str | None = None,
+    location: str | None = None,
+    attendees: list[str] | None = None,
+    context: Any = None,
+) -> UpdateEventResult:
+    """
+    Update an existing calendar event.
+
+    Uses PATCH to allow partial updates - only specified fields are changed.
+    """</code></pre>
+
+                <p>Everything is optional except the event ID. Change the title? Pass a title. Leave it alone? Don't pass anything. The <code>None</code> values don't get included in the request body - they simply don't exist.</p>
+
+                <h2>Building the Event Body</h2>
+                <p>The implementation is clean precisely because we chose PATCH:</p>
+
+                <pre><code>def do_update() -> dict[str, Any]:
+    event_body: dict[str, Any] = {}
+
+    if title is not None:
+        event_body["summary"] = title
+    if start is not None:
+        event_body["start"] = {"dateTime": start.isoformat(), "timeZone": "UTC"}
+    if end is not None:
+        event_body["end"] = {"dateTime": end.isoformat(), "timeZone": "UTC"}
+    if description is not None:
+        event_body["description"] = description
+    if location is not None:
+        event_body["location"] = location
+    if attendees is not None:
+        event_body["attendees"] = [{"email": email} for email in attendees]
+
+    event: dict[str, Any] = (
+        self._calendar_service.events()
+        .patch(calendarId="primary", eventId=event_id, body=event_body)
+        .execute()
+    )
+    return event</code></pre>
+
+                <p>Only populated fields make it into the body. Google handles the merge. No data loss.</p>
+
+                <h2>Delete is Simple (and That's Good)</h2>
+                <p>Calendar deletion is straightforward - which is exactly what you want for destructive operations:</p>
+
+                <pre><code>async def delete_event(
+    self,
+    event_id: str,
+    context: Any = None,
+) -> DeleteEventResult:
+    """Delete a calendar event."""
+    await self.start()
+
+    def do_delete() -> None:
+        self._calendar_service.events().delete(
+            calendarId="primary", eventId=event_id
+        ).execute()
+
+    try:
+        await self._rate_limited_call("calendar", do_delete)
+        logger.info(
+            f"[BEACON] Calendar event deleted: {event_id}",
+            extra={"event_id": event_id},
+        )
+        return DeleteEventResult(success=True, event_id=event_id)
+    except (HttpError, ExternalServiceError) as e:
+        logger.error(
+            f"[STORM] Calendar event deletion failed: {e}",
+            extra={"event_id": event_id},
+        )
+        return DeleteEventResult(success=False, event_id=event_id, error=str(e))</code></pre>
+
+                <p>Event ID in, success or error out. The nautical logging continues: <code>[BEACON]</code> for success, <code>[STORM]</code> for failure.</p>
+
+                <h2>Wiring the Executor</h2>
+                <p>The Executor agent needed three pieces of plumbing:</p>
+
+                <p><strong>1. Action parsing</strong> - recognizing the new action types:</p>
+                <pre><code>elif action_type == "calendar_update":
+    return ActionRequest(
+        type=ActionType.CALENDAR_UPDATE,
+        target=context.get("event_id"),
+    )
+
+elif action_type == "calendar_delete":
+    return ActionRequest(
+        type=ActionType.CALENDAR_DELETE,
+        target=context.get("event_id"),
+    )</code></pre>
+
+                <p><strong>2. Validation</strong> - making sure we have an event ID:</p>
+                <pre><code>elif request.type == ActionType.CALENDAR_UPDATE:
+    if not request.target:
+        return ActionResult(
+            success=False,
+            message="I need the event ID to update. Which event should I modify?",
+        )</code></pre>
+
+                <p><strong>3. Execution routing</strong> - calling the right handler:</p>
+                <pre><code>elif request.type == ActionType.CALENDAR_UPDATE:
+    return await self._handle_calendar_update(request, context, trace_id, ctx)
+
+elif request.type == ActionType.CALENDAR_DELETE:
+    return await self._handle_calendar_delete(request, context, trace_id, ctx)</code></pre>
+
+                <p>The pattern matches exactly what we already had for emails and calendar creation. Consistency is its own documentation.</p>
+
+                <h2>Testing the New Operations</h2>
+                <p>Ten new tests joined the executor test suite:</p>
+
+                <pre><code>class TestCalendarUpdateDelete:
+    """Test calendar update and delete action execution."""
+
+    @pytest.mark.asyncio
+    async def test_update_event_success(self, executor, mock_google_bridge):
+        """Test successful event update."""
+        mock_google_bridge.update_event.return_value = UpdateEventResult(
+            success=True,
+            event_id="event-123",
+            event_link="https://calendar.google.com/event/123",
+        )
+
+        request = ActionRequest(
+            type=ActionType.CALENDAR_UPDATE,
+            target="event-123",
+            start_time="2026-01-15T15:00:00",
+            end_time="2026-01-15T16:00:00",
+        )
+
+        context = {"event_title": "Updated Meeting Title"}
+        result = await executor._execute_action(request, context, "trace-123")
+
+        assert result.success is True
+        assert "updated" in result.message.lower()
+        mock_google_bridge.update_event.assert_called_once()</code></pre>
+
+                <p>We test success, failure, and the critical validation case: what happens when you try to update or delete without specifying which event.</p>
+
+                <h2>The Stats</h2>
+                <p>Four files changed. 468 lines added:</p>
+
+                <ul>
+                    <li><code>models.py</code>: 2 new action types</li>
+                    <li><code>google_workspace.py</code>: 2 new methods + 2 new result models</li>
+                    <li><code>executor.py</code>: Parsing, validation, handlers</li>
+                    <li><code>test_executor.py</code>: 10 new test cases</li>
+                </ul>
+
+                <p>All 1505 unit tests pass. Linting passes. Type checking passes. The pre-commit hooks are satisfied.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"Reschedule my 2pm meeting to 3pm" → "Sorry, I can only create events."</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Reschedule my 2pm meeting to 3pm" → "Event updated successfully."</blockquote>
+
+                <p>Before:</p>
+                <blockquote>"Cancel my dentist appointment" → Open Google Calendar, find event, delete manually.</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Cancel my dentist appointment" → "Event deleted successfully."</blockquote>
+
+                <p>Two P1-high issues closed. The calendar integration is now complete.</p>
+
+                <h2>The Bigger Picture</h2>
+                <p>CRUD is a pattern for a reason. Create, Read, Update, Delete - these are the four things you do with data. Having only two of them is like having a car with an accelerator but no brake.</p>
+
+                <p>With update and delete in place, Klabautermann can now manage your calendar properly. Not just add to it, but maintain it. Change things. Remove things. Act like the actual assistant it's meant to be.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
