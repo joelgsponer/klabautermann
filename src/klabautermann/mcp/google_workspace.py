@@ -302,6 +302,49 @@ class EmailSearchResult(BaseModel):
         return self.next_page_token is not None
 
 
+class EmailThread(BaseModel):
+    """A complete email thread with all messages."""
+
+    id: str  # Thread ID
+    subject: str
+    messages: list[EmailMessage]
+    participant_count: int = 0
+    message_count: int = 0
+
+    @property
+    def participants(self) -> list[str]:
+        """Get unique participants in the thread."""
+        senders = {msg.sender for msg in self.messages}
+        recipients = {msg.recipient for msg in self.messages if msg.recipient}
+        return list(senders | recipients)
+
+    @property
+    def date_range(self) -> str:
+        """Human-readable date range of the thread."""
+        if not self.messages:
+            return "No messages"
+        dates = sorted(msg.date for msg in self.messages)
+        start = dates[0].strftime("%b %d")
+        end = dates[-1].strftime("%b %d, %Y")
+        if start == end.split(",")[0]:
+            return end
+        return f"{start} - {end}"
+
+
+class EmailThreadSummary(BaseModel):
+    """Summary of an email thread."""
+
+    thread_id: str
+    subject: str
+    summary: str  # 2-3 sentence summary of the conversation
+    key_points: list[str] = Field(default_factory=list)  # Main takeaways
+    action_items: list[str] = Field(default_factory=list)  # Action items mentioned
+    participants: list[str] = Field(default_factory=list)  # People in the thread
+    message_count: int = 0
+    date_range: str = ""
+    sentiment: str = "neutral"  # Overall tone: positive, negative, neutral
+
+
 # ===========================================================================
 # Google Workspace Bridge
 # ===========================================================================
@@ -1312,6 +1355,259 @@ class GoogleWorkspaceBridge:
                 operation="delete",
                 error=str(e),
             )
+
+    # ===========================================================================
+    # Email Thread Operations
+    # ===========================================================================
+
+    async def get_thread(
+        self,
+        thread_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailThread | None:
+        """
+        Get all messages in an email thread.
+
+        Args:
+            thread_id: Gmail thread ID
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            EmailThread with all messages, or None if not found
+
+        Reference: Issue #221 (MCP-015)
+        """
+        await self.start()
+
+        def do_get_thread() -> dict[str, Any]:
+            result: dict[str, Any] = (
+                self._gmail_service.users()
+                .threads()
+                .get(userId="me", id=thread_id, format="full")
+                .execute()
+            )
+            return result
+
+        try:
+            raw_thread = await self._rate_limited_call("gmail", do_get_thread)
+            messages = self._parse_gmail_messages(raw_thread.get("messages", []))
+
+            if not messages:
+                return None
+
+            # Get subject from first message
+            subject = messages[0].subject if messages else "(no subject)"
+
+            thread = EmailThread(
+                id=thread_id,
+                subject=subject,
+                messages=messages,
+                participant_count=len(
+                    {m.sender for m in messages} | {m.recipient for m in messages if m.recipient}
+                ),
+                message_count=len(messages),
+            )
+
+            logger.info(
+                f"[BEACON] Fetched thread with {len(messages)} messages",
+                extra={"thread_id": thread_id, "message_count": len(messages)},
+            )
+            return thread
+
+        except HttpError as e:
+            if e.resp.status == 404:
+                return None
+            logger.error(f"[STORM] Get thread failed: {e}")
+            raise ExternalServiceError("gmail", f"Get thread failed: {e}") from e
+
+    async def summarize_email_thread(
+        self,
+        thread_id: str,
+        context: Any = None,  # noqa: ARG002
+    ) -> EmailThreadSummary | None:
+        """
+        Fetch an email thread and generate an AI summary.
+
+        Uses Claude Haiku to analyze the conversation and extract:
+        - A concise 2-3 sentence summary
+        - Key points and takeaways
+        - Action items mentioned
+        - Overall sentiment
+
+        Args:
+            thread_id: Gmail thread ID to summarize
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            EmailThreadSummary with analysis, or None if thread not found
+
+        Raises:
+            ExternalServiceError: If thread fetch or summarization fails
+
+        Reference: Issue #221 (MCP-015)
+        """
+        import os
+
+        import anthropic
+
+        # First fetch the thread
+        thread = await self.get_thread(thread_id)
+        if not thread:
+            return None
+
+        # Format messages for LLM
+        formatted_messages = self._format_thread_for_summary(thread)
+
+        # Call LLM for summarization
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ExternalServiceError(
+                "anthropic", "ANTHROPIC_API_KEY environment variable not set"
+            )
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        system_prompt = """You are an email thread analyzer. Your task is to read email conversations and provide concise, actionable summaries.
+
+SUMMARIZATION RULES:
+1. Write a 2-3 sentence summary capturing the essence of the conversation
+2. Extract 3-5 key points (main topics, decisions, important information)
+3. Identify any action items or to-dos mentioned
+4. Assess the overall sentiment (positive, negative, or neutral)
+
+Be concise and focus on what matters most. Avoid repetition."""
+
+        user_prompt = f"""Analyze this email thread and provide a structured summary.
+
+THREAD SUBJECT: {thread.subject}
+PARTICIPANTS: {", ".join(thread.participants)}
+DATE RANGE: {thread.date_range}
+
+MESSAGES:
+{formatted_messages}
+
+Please analyze this thread using the extract_email_summary tool."""
+
+        try:
+            response = client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=1500,
+                system=system_prompt,
+                tools=[
+                    {
+                        "name": "extract_email_summary",
+                        "description": "Extract structured summary from email thread",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                "summary": {
+                                    "type": "string",
+                                    "description": "2-3 sentence summary of the conversation",
+                                },
+                                "key_points": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "3-5 main takeaways from the thread",
+                                },
+                                "action_items": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": "Action items or to-dos mentioned",
+                                },
+                                "sentiment": {
+                                    "type": "string",
+                                    "enum": ["positive", "negative", "neutral"],
+                                    "description": "Overall tone of the conversation",
+                                },
+                            },
+                            "required": ["summary", "key_points", "sentiment"],
+                        },
+                    }
+                ],
+                tool_choice={"type": "tool", "name": "extract_email_summary"},
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+
+            # Extract tool use block
+            tool_use_block = None
+            for block in response.content:
+                if hasattr(block, "type") and block.type == "tool_use":
+                    tool_use_block = block
+                    break
+
+            if not tool_use_block:
+                logger.warning(
+                    "[SWELL] No tool_use block in LLM response, returning minimal summary"
+                )
+                return EmailThreadSummary(
+                    thread_id=thread_id,
+                    subject=thread.subject,
+                    summary=f"Email thread with {thread.message_count} messages about: {thread.subject}",
+                    participants=thread.participants,
+                    message_count=thread.message_count,
+                    date_range=thread.date_range,
+                )
+
+            # Parse LLM response
+            llm_result = tool_use_block.input
+
+            summary = EmailThreadSummary(
+                thread_id=thread_id,
+                subject=thread.subject,
+                summary=llm_result.get("summary", ""),
+                key_points=llm_result.get("key_points", []),
+                action_items=llm_result.get("action_items", []),
+                participants=thread.participants,
+                message_count=thread.message_count,
+                date_range=thread.date_range,
+                sentiment=llm_result.get("sentiment", "neutral"),
+            )
+
+            logger.info(
+                f"[BEACON] Summarized email thread: {len(summary.key_points)} key points, "
+                f"{len(summary.action_items)} action items",
+                extra={
+                    "thread_id": thread_id,
+                    "key_points": len(summary.key_points),
+                    "action_items": len(summary.action_items),
+                },
+            )
+
+            return summary
+
+        except anthropic.APIError as e:
+            logger.error(f"[STORM] Anthropic API error during summarization: {e}")
+            raise ExternalServiceError("anthropic", f"Summarization failed: {e}") from e
+
+    def _format_thread_for_summary(self, thread: EmailThread) -> str:
+        """
+        Format email thread messages for LLM consumption.
+
+        Args:
+            thread: EmailThread with messages
+
+        Returns:
+            Formatted string suitable for summarization
+        """
+        formatted_lines = []
+
+        for i, msg in enumerate(thread.messages, 1):
+            date_str = msg.date.strftime("%b %d, %Y %I:%M %p")
+            sender = msg.sender
+
+            # Truncate long bodies
+            body = msg.body or msg.snippet
+            if body and len(body) > 1500:
+                body = body[:1500] + "..."
+
+            formatted_lines.append(f"--- Message {i} ---")
+            formatted_lines.append(f"From: {sender}")
+            formatted_lines.append(f"Date: {date_str}")
+            if msg.recipient:
+                formatted_lines.append(f"To: {msg.recipient}")
+            formatted_lines.append(f"\n{body}\n")
+
+        return "\n".join(formatted_lines)
 
     async def get_recent_emails(
         self,

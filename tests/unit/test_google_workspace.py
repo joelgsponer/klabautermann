@@ -2457,3 +2457,287 @@ class TestLabelManagement:
             await bridge.update_label("Label_123", name="New Name")
 
         assert "Update label failed" in str(exc_info.value)
+
+
+# ===========================================================================
+# Email Thread Tests (Issue #221)
+# ===========================================================================
+
+
+class TestEmailThread:
+    """Test email thread fetching and models."""
+
+    @pytest.mark.asyncio
+    async def test_get_thread(self, bridge, mock_gmail_service):
+        """Test fetching an email thread."""
+        mock_gmail_service.users().threads().get().execute.return_value = {
+            "id": "thread123",
+            "messages": [
+                {
+                    "id": "msg1",
+                    "threadId": "thread123",
+                    "snippet": "First message",
+                    "labelIds": [],
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Project Discussion"},
+                            {"name": "From", "value": "alice@example.com"},
+                            {"name": "To", "value": "bob@example.com"},
+                            {"name": "Date", "value": "Mon, 20 Jan 2026 10:00:00 +0000"},
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"Hello Bob").decode()},
+                    },
+                },
+                {
+                    "id": "msg2",
+                    "threadId": "thread123",
+                    "snippet": "Second message",
+                    "labelIds": [],
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Re: Project Discussion"},
+                            {"name": "From", "value": "bob@example.com"},
+                            {"name": "To", "value": "alice@example.com"},
+                            {"name": "Date", "value": "Mon, 20 Jan 2026 11:00:00 +0000"},
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"Hi Alice, thanks!").decode()},
+                    },
+                },
+            ],
+        }
+
+        thread = await bridge.get_thread("thread123")
+
+        assert thread is not None
+        assert thread.id == "thread123"
+        assert thread.subject == "Project Discussion"
+        assert thread.message_count == 2
+        assert len(thread.messages) == 2
+        assert thread.participant_count == 2
+
+    @pytest.mark.asyncio
+    async def test_get_thread_not_found(self, bridge, mock_gmail_service):
+        """Test getting a non-existent thread."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().threads().get().execute.side_effect = HttpError(
+            error_resp, b"Thread not found"
+        )
+
+        thread = await bridge.get_thread("nonexistent")
+
+        assert thread is None
+
+    def test_email_thread_model(self):
+        """Test EmailThread model properties."""
+        from klabautermann.mcp.google_workspace import EmailMessage, EmailThread
+
+        messages = [
+            EmailMessage(
+                id="msg1",
+                thread_id="thread123",
+                subject="Test",
+                sender="alice@example.com",
+                recipient="bob@example.com",
+                date=datetime(2026, 1, 20, 10, 0),
+                snippet="First",
+            ),
+            EmailMessage(
+                id="msg2",
+                thread_id="thread123",
+                subject="Re: Test",
+                sender="bob@example.com",
+                recipient="alice@example.com",
+                date=datetime(2026, 1, 21, 10, 0),
+                snippet="Second",
+            ),
+        ]
+
+        thread = EmailThread(
+            id="thread123",
+            subject="Test",
+            messages=messages,
+            participant_count=2,
+            message_count=2,
+        )
+
+        assert thread.participants == [
+            "alice@example.com",
+            "bob@example.com",
+        ] or thread.participants == ["bob@example.com", "alice@example.com"]
+        assert "Jan 20" in thread.date_range
+        assert "Jan 21" in thread.date_range
+
+    def test_email_thread_summary_model(self):
+        """Test EmailThreadSummary model."""
+        from klabautermann.mcp.google_workspace import EmailThreadSummary
+
+        summary = EmailThreadSummary(
+            thread_id="thread123",
+            subject="Project Discussion",
+            summary="Discussion about the Q1 project timeline.",
+            key_points=["Timeline is aggressive", "Need more resources"],
+            action_items=["Schedule follow-up meeting"],
+            participants=["alice@example.com", "bob@example.com"],
+            message_count=5,
+            date_range="Jan 20 - Jan 22, 2026",
+            sentiment="neutral",
+        )
+
+        assert summary.thread_id == "thread123"
+        assert len(summary.key_points) == 2
+        assert len(summary.action_items) == 1
+        assert summary.sentiment == "neutral"
+
+
+class TestEmailThreadSummarization:
+    """Test email thread summarization with LLM."""
+
+    @pytest.mark.asyncio
+    async def test_summarize_thread_not_found(self, bridge, mock_gmail_service):
+        """Test summarizing a non-existent thread."""
+        from googleapiclient.errors import HttpError
+
+        error_resp = MagicMock()
+        error_resp.status = 404
+        mock_gmail_service.users().threads().get().execute.side_effect = HttpError(
+            error_resp, b"Thread not found"
+        )
+
+        summary = await bridge.summarize_email_thread("nonexistent")
+
+        assert summary is None
+
+    @pytest.mark.asyncio
+    async def test_summarize_thread_success(self, bridge, mock_gmail_service):
+        """Test successful thread summarization with mocked LLM."""
+        # Mock thread fetch
+        mock_gmail_service.users().threads().get().execute.return_value = {
+            "id": "thread123",
+            "messages": [
+                {
+                    "id": "msg1",
+                    "threadId": "thread123",
+                    "snippet": "Meeting tomorrow?",
+                    "labelIds": [],
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Meeting Request"},
+                            {"name": "From", "value": "alice@example.com"},
+                            {"name": "To", "value": "bob@example.com"},
+                            {"name": "Date", "value": "Mon, 20 Jan 2026 10:00:00 +0000"},
+                        ],
+                        "body": {
+                            "data": base64.urlsafe_b64encode(
+                                b"Can we meet tomorrow at 2pm?"
+                            ).decode()
+                        },
+                    },
+                },
+            ],
+        }
+
+        # Mock Anthropic client
+        with (
+            patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test_key"}),
+            patch("anthropic.Anthropic") as mock_anthropic,
+        ):
+            mock_client = MagicMock()
+            mock_anthropic.return_value = mock_client
+
+            # Mock tool_use response
+            mock_tool_block = MagicMock()
+            mock_tool_block.type = "tool_use"
+            mock_tool_block.input = {
+                "summary": "Alice requested a meeting with Bob for tomorrow at 2pm.",
+                "key_points": ["Meeting scheduled for 2pm tomorrow"],
+                "action_items": ["Confirm meeting attendance"],
+                "sentiment": "neutral",
+            }
+
+            mock_response = MagicMock()
+            mock_response.content = [mock_tool_block]
+            mock_client.messages.create.return_value = mock_response
+
+            summary = await bridge.summarize_email_thread("thread123")
+
+        assert summary is not None
+        assert summary.thread_id == "thread123"
+        assert summary.subject == "Meeting Request"
+        assert "meeting" in summary.summary.lower()
+        assert len(summary.key_points) >= 1
+        assert summary.sentiment == "neutral"
+
+    @pytest.mark.asyncio
+    async def test_summarize_thread_no_api_key(self, bridge, mock_gmail_service):
+        """Test summarization fails gracefully without API key."""
+        # Mock thread fetch
+        mock_gmail_service.users().threads().get().execute.return_value = {
+            "id": "thread123",
+            "messages": [
+                {
+                    "id": "msg1",
+                    "threadId": "thread123",
+                    "snippet": "Test",
+                    "labelIds": [],
+                    "payload": {
+                        "headers": [
+                            {"name": "Subject", "value": "Test"},
+                            {"name": "From", "value": "alice@example.com"},
+                            {"name": "Date", "value": "Mon, 20 Jan 2026 10:00:00 +0000"},
+                        ],
+                        "body": {"data": base64.urlsafe_b64encode(b"Test body").decode()},
+                    },
+                },
+            ],
+        }
+
+        # Ensure no API key
+        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": ""}, clear=False):
+            import os
+
+            original = os.environ.get("ANTHROPIC_API_KEY")
+            if "ANTHROPIC_API_KEY" in os.environ:
+                del os.environ["ANTHROPIC_API_KEY"]
+
+            try:
+                with pytest.raises(ExternalServiceError) as exc_info:
+                    await bridge.summarize_email_thread("thread123")
+                assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+            finally:
+                if original:
+                    os.environ["ANTHROPIC_API_KEY"] = original
+
+    def test_format_thread_for_summary(self, bridge):
+        """Test thread formatting for LLM."""
+        from klabautermann.mcp.google_workspace import EmailMessage, EmailThread
+
+        messages = [
+            EmailMessage(
+                id="msg1",
+                thread_id="thread123",
+                subject="Test",
+                sender="alice@example.com",
+                recipient="bob@example.com",
+                date=datetime(2026, 1, 20, 10, 0),
+                snippet="Hello",
+                body="Hello Bob, how are you?",
+            ),
+        ]
+
+        thread = EmailThread(
+            id="thread123",
+            subject="Test",
+            messages=messages,
+            participant_count=2,
+            message_count=1,
+        )
+
+        formatted = bridge._format_thread_for_summary(thread)
+
+        assert "Message 1" in formatted
+        assert "alice@example.com" in formatted
+        assert "Hello Bob" in formatted
+        assert "Jan 20" in formatted
