@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="bard-of-the-bilge">
+    <meta name="post-excerpt" content="Every ship needs a storyteller. The Bard of the Bilge weaves tales across conversations.">
+    <title>Tales from the Bilge | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Tales from the Bilge</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Every ship needs a storyteller. Someone to remember the adventures, spin the yarns, and keep the crew's spirits up during long voyages.</p>
+                <p>Meet the Bard of the Bilge.</p>
+
+                <h2>The Problem with Sterile Assistants</h2>
+                <p>Most AI assistants are relentlessly professional. They complete your tasks, answer your questions, and maintain the personality of a particularly efficient spreadsheet. Useful? Yes. Memorable? Not quite.</p>
+                <p>Klabautermann was always meant to have personality - the mythical ship spirit who helps sailors but does so with character. The Bard is where that character lives.</p>
+
+                <h2>Salting Responses</h2>
+                <p>The Bard doesn't interrupt. It seasons:</p>
+
+                <pre><code>from klabautermann.agents import BardOfTheBilge, BardConfig
+
+config = BardConfig(
+    tidbit_probability=0.07,  # 7% chance to add flavor
+    saga_continuation_probability=0.3,
+)
+
+bard = BardOfTheBilge(
+    neo4j_client=neo4j,
+    captain_uuid=captain.uuid,
+    config=config
+)
+
+# Maybe add a tidbit
+result = await bard.salt_response(
+    clean_response="Your meeting with Sarah is at 3pm.",
+    storm_mode=False
+)
+
+# 7% of the time:
+# "Your meeting with Sarah is at 3pm.
+#
+# _Reminds me of the time I navigated the Great Maelstrom of '98
+# using nothing but a rusted compass and a very confused seagull._"</code></pre>
+
+                <p>Storm mode? No tidbits. When things are urgent, the Bard stays quiet.</p>
+
+                <h2>The Canonical Tales</h2>
+                <p>The Bard draws from a collection of whimsical digital sea stories:</p>
+
+                <pre><code>CANONICAL_TIDBITS = [
+    "Reminds me of the time I navigated the Great Maelstrom of '98...",
+    "I once saw a virus that tried to convince me it was a long-lost cousin...",
+    "The fog was so thick in '03 you could barely fit a 'Hello' through the wire...",
+    "I once wrestled a Kraken made of social media notifications...",
+    "Many a Captain has been lost to the Sirens of the Inbox...",
+    "The last captain who forgot to check The Manifest ended up in the Doldrums...",
+    "There's an old sailor's saying: 'A clean Locker is a fast ship.'...",
+    "I've seen things you wouldn't believe. Attack ships on fire...",
+    "The sea teaches patience. So does waiting for API responses...",
+    "Once helped a captain remember where he buried his treasure...",
+]</code></pre>
+
+                <p>Digital-age mythology. The Great Maelstrom of dial-up. The Kraken of notifications. The Sirens of the Inbox.</p>
+
+                <h2>The LoreEpisode Graph</h2>
+                <p>But the Bard doesn't just tell random tales. Stories can evolve into sagas - multi-chapter narratives that persist across conversations:</p>
+
+                <pre><code># Graph structure
+(le:LoreEpisode {
+    saga_id: "saga-123",
+    saga_name: "The Ballad of the Forgotten Server",
+    chapter: 1,
+    content: "...",
+    told_at: timestamp()
+})-[:TOLD_TO]->(captain:Person)
+
+# Sagas chain together
+(chapter2)-[:EXPANDS_UPON]->(chapter1)</code></pre>
+
+                <p>The TOLD_TO relationship links episodes to the Captain who heard them. EXPANDS_UPON chains saga chapters. The graph remembers what stories were told and where they left off.</p>
+
+                <h2>Saga Continuation</h2>
+                <p>When the Bard decides to speak, there's a 30% chance it will continue an existing saga rather than start fresh:</p>
+
+                <pre><code>active_saga = await bard._get_active_saga()
+
+if active_saga and random.random() < 0.3:
+    tidbit, chapter = await bard._continue_saga(active_saga)
+    # Chapter 3 of "The Legend of the Daemon"
+else:
+    tidbit = bard._generate_standalone_tidbit()
+    # A new canonical tale</code></pre>
+
+                <p>Sagas complete at 5 chapters (configurable). Then they're done - a complete story in the graph.</p>
+
+                <h2>Saga Names</h2>
+                <p>New sagas get whimsical names:</p>
+
+                <pre><code>SAGA_PREFIXES = [
+    "The Ballad of",
+    "The Chronicle of",
+    "The Tale of",
+    "The Legend of",
+    "The Mystery of",
+    "The Voyage to",
+    "The Quest for",
+]
+
+SAGA_SUBJECTS = [
+    "the Forgotten Server",
+    "the Corrupted Cache",
+    "the Phantom Packet",
+    "the Lost Password",
+    "the Infinite Loop",
+    "the Silent Daemon",
+    "the Wandering Pointer",
+    "the Cursed Cron Job",
+    "the Haunted Hash Table",
+    "the Dreaded Deadlock",
+]
+
+# "The Chronicle of the Haunted Hash Table"
+# "The Quest for the Wandering Pointer"</code></pre>
+
+                <h2>Inter-Agent Communication</h2>
+                <p>Like all Klabautermann agents:</p>
+
+                <pre><code>message = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="bard_of_the_bilge",
+    intent="salt",
+    payload={
+        "operation": "salt_response",
+        "response": clean_response,
+        "storm_mode": False
+    }
+)
+
+response = await bard.process_message(message)
+print(response.payload["salted_response"])</code></pre>
+
+                <h2>Lore Statistics</h2>
+                <p>Track your Captain's lore collection:</p>
+
+                <pre><code>stats = await bard.get_lore_statistics()
+
+# {
+#     "total_sagas": 5,
+#     "total_episodes": 15,
+#     "avg_chapters_per_saga": 3.0,
+#     "canonical_tidbits_available": 10
+# }</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#37: [AGT-S-009] Create Bard of the Bilge agent skeleton</li>
+                    <li>#38: [AGT-S-010] Implement LoreEpisode node model</li>
+                    <li>#39: [AGT-S-011] Implement TOLD_TO relationship</li>
+                    <li>#40: [AGT-S-012] Implement EXPANDS_UPON relationship</li>
+                </ul>
+
+                <p>Your assistant has personality now. Not always. Not obtrusively. Just enough to remind you that there's a helpful spirit aboard.</p>
+
+                <p><em>The sea teaches patience. So does waiting for API responses, I've found.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
