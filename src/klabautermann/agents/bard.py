@@ -403,6 +403,30 @@ class BardOfTheBilge(BaseAgent):
                 "statistics": stats,
                 "captain_count": len(stats),
             }
+        elif operation == "archive_saga":
+            # #125, #126: Archive saga with summary
+            saga_id_param = payload.get("saga_id", "")
+            if not saga_id_param:
+                result_payload = {"error": "saga_id is required for archive_saga"}
+            else:
+                try:
+                    archive_result = await self.archive_saga(
+                        saga_id=saga_id_param, trace_id=trace_id
+                    )
+                    result_payload = {
+                        "archived": True,
+                        **archive_result,
+                    }
+                except ValueError as e:
+                    result_payload = {"error": str(e), "archived": False}
+        elif operation == "get_archived_saga":
+            # #125, #126: Get archived saga with summary
+            saga_id_param = payload.get("saga_id", "")
+            archived_saga = await self.get_archived_saga(saga_id=saga_id_param, trace_id=trace_id)
+            result_payload = {
+                "saga": archived_saga,
+                "found": archived_saga is not None,
+            }
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -696,7 +720,7 @@ class BardOfTheBilge(BaseAgent):
 
             days_inactive = int((now_ms - last_told) / (24 * 60 * 60 * 1000))
 
-            # Add a closing chapter to mark the saga as archived
+            # Add a closing chapter to mark the saga as complete
             closing_content = (
                 f"And so the tale of {saga_name} fades into the mists of memory, "
                 f"waiting perhaps for another day to be told..."
@@ -711,6 +735,9 @@ class BardOfTheBilge(BaseAgent):
                 trace_id=trace_id,
             )
 
+            # Archive the saga with summary and SUMMARIZES relationships (#125, #126)
+            archive_result = await self.archive_saga(saga_id=saga_id, trace_id=trace_id)
+
             archived.append(
                 {
                     "saga_id": saga_id,
@@ -718,6 +745,8 @@ class BardOfTheBilge(BaseAgent):
                     "last_chapter": last_chapter,
                     "days_inactive": days_inactive,
                     "closing_chapter": max_chapters,
+                    "note_uuid": archive_result.get("note_uuid"),
+                    "summary": archive_result.get("summary"),
                 }
             )
 
@@ -1228,6 +1257,240 @@ class BardOfTheBilge(BaseAgent):
             "status": "complete"
             if len(chapters) >= self.bard_config.max_saga_chapters
             else "active",
+        }
+
+    # =========================================================================
+    # Statistics
+    # =========================================================================
+
+    # =========================================================================
+    # Saga Archival (#125, #126)
+    # =========================================================================
+
+    async def archive_saga(
+        self,
+        saga_id: str,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Archive a saga by generating a summary and creating SUMMARIZES relationships (#125, #126).
+
+        When a saga is complete or timed out, this method:
+        1. Gathers all chapters of the saga
+        2. Generates a summary of the saga using LLM
+        3. Creates a Note node containing the summary
+        4. Creates SUMMARIZES relationships from Note to all LoreEpisodes
+        5. Marks all episodes as archived
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 3.3
+
+        Args:
+            saga_id: The saga ID to archive.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Dict with archive info including note_uuid and summary.
+
+        Raises:
+            ValueError: If saga doesn't exist or has no episodes.
+        """
+        # Get all episodes of the saga
+        episodes = await self._get_saga_chapters(
+            saga_id,
+            limit=self.bard_config.max_saga_chapters,
+            trace_id=trace_id,
+        )
+
+        if not episodes:
+            raise ValueError(f"No episodes found for saga: {saga_id}")
+
+        saga_name = episodes[0].saga_name
+        chapter_count = len(episodes)
+
+        # Generate summary from chapters
+        summary = await self._generate_saga_summary(episodes, trace_id=trace_id)
+
+        # Create Note node and SUMMARIZES relationships
+        note_uuid = await self._create_archive_note(
+            saga_id=saga_id,
+            saga_name=saga_name,
+            summary=summary,
+            trace_id=trace_id,
+        )
+
+        logger.info(
+            f"[CHART] Archived saga '{saga_name}' with {chapter_count} chapters",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return {
+            "saga_id": saga_id,
+            "saga_name": saga_name,
+            "chapter_count": chapter_count,
+            "note_uuid": note_uuid,
+            "summary": summary,
+        }
+
+    async def _generate_saga_summary(
+        self,
+        episodes: list[LoreEpisode],
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Generate a summary of a saga from its episodes (#125).
+
+        Creates a brief summary capturing the essence of the saga's narrative arc.
+
+        Args:
+            episodes: List of LoreEpisode objects (ordered by chapter).
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Summary string for the saga.
+        """
+        if not episodes:
+            return "An untold tale, lost to the digital mists."
+
+        saga_name = episodes[0].saga_name
+
+        # For now, generate a simple summary from the content
+        # A full implementation would use LLM with all chapter content
+        first_chapter = (
+            episodes[0].content[:100] + "..."
+            if len(episodes[0].content) > 100
+            else episodes[0].content
+        )
+        last_chapter = (
+            episodes[-1].content[:100] + "..."
+            if len(episodes[-1].content) > 100
+            else episodes[-1].content
+        )
+
+        summary = (
+            f"The tale of '{saga_name}' spans {len(episodes)} chapters, "
+            f'beginning with: "{first_chapter}" '
+            f'and concluding with: "{last_chapter}"'
+        )
+
+        logger.debug(
+            f"[CHART] Generated summary for saga '{saga_name}'",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return summary
+
+    async def _create_archive_note(
+        self,
+        saga_id: str,
+        saga_name: str,
+        summary: str,
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Create a Note node and SUMMARIZES relationships for archived saga (#126).
+
+        Creates:
+        - Note node with saga summary
+        - SUMMARIZES relationships from Note to all LoreEpisodes
+        - Sets archived=true on all episodes
+
+        Args:
+            saga_id: The saga ID being archived.
+            saga_name: Human-readable saga name.
+            summary: Generated summary content.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            UUID of the created Note node.
+        """
+        note_uuid = str(uuid.uuid4())
+        now_ms = int(time.time() * 1000)
+
+        query = """
+        CREATE (n:Note {
+            uuid: $note_uuid,
+            title: $title,
+            content: $summary,
+            source: 'lore_archive',
+            created_at: $now_ms
+        })
+        WITH n
+        MATCH (le:LoreEpisode {saga_id: $saga_id})
+        SET le.archived = true
+        WITH n, collect(le) as episodes
+        UNWIND episodes as ep
+        CREATE (n)-[:SUMMARIZES {created_at: $now_ms}]->(ep)
+        RETURN n.uuid as uuid
+        """
+
+        await self.neo4j.execute_query(
+            query,
+            {
+                "note_uuid": note_uuid,
+                "title": f"Saga: {saga_name}",
+                "summary": summary,
+                "saga_id": saga_id,
+                "now_ms": now_ms,
+            },
+            trace_id=trace_id,
+        )
+
+        logger.debug(
+            f"[CHART] Created archive Note {note_uuid} for saga '{saga_name}'",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return note_uuid
+
+    async def get_archived_saga(
+        self,
+        saga_id: str,
+        trace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Get an archived saga with its summary note.
+
+        Args:
+            saga_id: The saga ID to retrieve.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Dict with saga info and summary, or None if not found/not archived.
+        """
+        query = """
+        MATCH (n:Note {source: 'lore_archive'})-[:SUMMARIZES]->(le:LoreEpisode {saga_id: $saga_id})
+        WITH n, le
+        ORDER BY le.chapter ASC
+        WITH n, collect(le) as episodes
+        RETURN n.uuid as note_uuid, n.title as title, n.content as summary,
+               n.created_at as archived_at,
+               [ep in episodes | {
+                   uuid: ep.uuid,
+                   chapter: ep.chapter,
+                   content: ep.content,
+                   channel: ep.channel,
+                   told_at: ep.told_at
+               }] as chapters
+        LIMIT 1
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"saga_id": saga_id},
+            trace_id=trace_id,
+        )
+
+        if not results:
+            return None
+
+        row = results[0]
+        return {
+            "saga_id": saga_id,
+            "note_uuid": row["note_uuid"],
+            "title": row["title"],
+            "summary": row["summary"],
+            "archived_at": row["archived_at"],
+            "chapters": row["chapters"],
         }
 
     # =========================================================================
