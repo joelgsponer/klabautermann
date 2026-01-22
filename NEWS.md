@@ -6,6 +6,8 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Email Attachments**: View, download, and save email attachments ("download that PDF from Sarah's email", "save the spreadsheet to my downloads folder")
+- **File Operations**: Read and write local files via secure sandboxed access for attachment storage and file-based workflows
 - **Recurring Calendar Events**: Create recurring meetings and appointments ("schedule daily standup at 9am", "add weekly team meeting every Tuesday")
 - **Calendar Event Management**: Update and delete calendar events via natural language ("reschedule my meeting to 3pm", "cancel my 2pm appointment")
 - **Response Synthesis with Opus**: Orchestrator now uses Claude Opus to synthesize coherent responses from multiple subagent results, with proactive suggestions based on configuration

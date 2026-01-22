@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Email attachment support: parsing, download, and save to local storage (#208)
+- `EmailAttachment` model with attachment metadata (id, filename, mime_type, size)
+- `has_attachments` property and `attachments` list on `EmailMessage`
+- `download_attachment()` and `save_attachment()` methods in GoogleWorkspaceBridge
+- `FilesystemBridge` class for sandboxed file operations via MCP server (#213)
+- `FilesystemConfig` for configuring allowed paths and timeouts
+- Filesystem operations: read, write, list, create, move, get_file_info
+- 10 new unit tests for email attachment handling
+- 18 new unit tests for filesystem bridge
 - Recurring calendar events support with RFC 5545 RRULE (#211)
 - `RecurrenceBuilder` helper class for common recurrence patterns (daily, weekly, monthly, yearly)
 - `recurrence_rule` parameter in `create_event()` and `update_event()`
