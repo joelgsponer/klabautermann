@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,optimization">
+    <meta name="post-slug" content="multi-model-orchestration">
+    <meta name="post-excerpt" content="Picking the right AI model for each task. Haiku for speed, Opus for power, Sonnet for balance.">
+    <title>Right Model, Right Task: Multi-Model Orchestration | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">optimization</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Right Model, Right Task: Multi-Model Orchestration</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Not every task needs a battleship. Some just need a dinghy.</p>
+                <p>Previously: Klabautermann used Sonnet for everything. Now: dynamic model selection picks the right tool for each task.</p>
+
+                <h2>The Problem</h2>
+                <p>Claude models come in different sizes. Haiku is fast and cheap. Sonnet is balanced. Opus is the most capable but slowest and most expensive.</p>
+                <p>Using Opus for "classify this intent" is like using a sledgehammer to hang a picture frame. Using Haiku for "plan this complex multi-step task" is like bringing a spoon to a sword fight.</p>
+                <p>We were using Sonnet for everything. Good, but not optimal.</p>
+
+                <h2>The Solution: ModelSelector</h2>
+                <p>The new <code>ModelSelector</code> picks the appropriate model based on task purpose or complexity:</p>
+
+                <pre><code>from klabautermann.core import (
+    ModelSelector,
+    TaskPurpose,
+    TaskComplexity,
+    ModelSelectionConfig,
+)
+
+selector = ModelSelector(anthropic_client)
+
+# Select by purpose
+result = await selector.call(
+    prompt="Is this a search, action, or ingestion?",
+    purpose=TaskPurpose.CLASSIFICATION,  # -> Haiku
+)
+
+# Select by complexity
+result = await selector.call(
+    prompt="Plan the implementation of this feature...",
+    complexity=TaskComplexity.COMPLEX,  # -> Opus
+)</code></pre>
+
+                <h2>Task Purpose Mapping</h2>
+                <p>Each purpose maps to a default model tier:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Purpose</th>
+                            <th>Model</th>
+                            <th>Why</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>CLASSIFICATION</td>
+                            <td>Haiku</td>
+                            <td>Fast pattern matching</td>
+                        </tr>
+                        <tr>
+                            <td>EXTRACTION</td>
+                            <td>Haiku</td>
+                            <td>Structured data extraction</td>
+                        </tr>
+                        <tr>
+                            <td>SEARCH_PLANNING</td>
+                            <td>Haiku</td>
+                            <td>Query construction</td>
+                        </tr>
+                        <tr>
+                            <td>REASONING</td>
+                            <td>Sonnet</td>
+                            <td>Balanced reasoning</td>
+                        </tr>
+                        <tr>
+                            <td>SYNTHESIS</td>
+                            <td>Sonnet</td>
+                            <td>Response generation</td>
+                        </tr>
+                        <tr>
+                            <td>ACTION</td>
+                            <td>Sonnet</td>
+                            <td>Tool execution reasoning</td>
+                        </tr>
+                        <tr>
+                            <td>PLANNING</td>
+                            <td>Opus</td>
+                            <td>Complex multi-step reasoning</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Complexity-Based Selection</h2>
+                <p>Don't know the purpose? Select by complexity:</p>
+
+                <pre><code>class TaskComplexity(str, Enum):
+    SIMPLE = "simple"      # -> Haiku
+    MODERATE = "moderate"  # -> Sonnet
+    COMPLEX = "complex"    # -> Opus</code></pre>
+
+                <h2>Configuration Override</h2>
+                <p>Defaults not right for your use case? Override them:</p>
+
+                <pre><code>config = ModelSelectionConfig(
+    # Custom model IDs
+    models={
+        ModelTier.HAIKU: "claude-3-5-haiku-latest",
+        ModelTier.SONNET: "claude-sonnet-4-latest",
+        ModelTier.OPUS: "claude-opus-4-latest",
+    },
+
+    # Upgrade extraction to Sonnet for better accuracy
+    purpose_overrides={
+        TaskPurpose.EXTRACTION: ModelTier.SONNET,
+    },
+
+    # Always use Opus for the researcher
+    agent_overrides={
+        "researcher": ModelTier.OPUS,
+    },
+
+    # Fall back to Sonnet if primary fails
+    fallback_tier=ModelTier.SONNET,
+)
+
+selector = ModelSelector(client, config)</code></pre>
+
+                <h2>Automatic Fallback</h2>
+                <p>If the primary model fails (rate limit, timeout, error), the selector automatically tries the fallback:</p>
+
+                <pre><code>result = await selector.call(
+    prompt="Complex planning task...",
+    purpose=TaskPurpose.PLANNING,  # Primary: Opus
+)
+
+# If Opus fails, result.used_fallback will be True
+# and result.model_tier will be SONNET</code></pre>
+
+                <h2>Metrics Recording</h2>
+                <p>Every call records Prometheus metrics:</p>
+                <ul>
+                    <li><code>klabautermann_llm_calls_total{model, purpose}</code></li>
+                    <li><code>klabautermann_llm_tokens_total{model, token_type}</code></li>
+                    <li><code>klabautermann_llm_call_latency_seconds{model}</code></li>
+                </ul>
+
+                <p>Track costs, identify hot paths, optimize where it matters.</p>
+
+                <h2>Environment Variables</h2>
+                <p>Configure models without code changes:</p>
+
+                <pre><code># Override default model IDs
+HAIKU_MODEL=claude-3-5-haiku-20241022
+SONNET_MODEL=claude-sonnet-4-20250514
+OPUS_MODEL=claude-opus-4-5-20251101
+
+# Disable multi-model (use Sonnet everywhere)
+ENABLE_MULTI_MODEL=false</code></pre>
+
+                <h2>Agent Default Mapping</h2>
+                <p>For backward compatibility, agents have default model assignments:</p>
+
+                <pre><code>from klabautermann.core import get_model_for_agent
+
+get_model_for_agent("ingestor")     # -> Haiku
+get_model_for_agent("researcher")   # -> Haiku
+get_model_for_agent("orchestrator") # -> Sonnet
+get_model_for_agent("executor")     # -> Sonnet</code></pre>
+
+                <h2>Priority Chain</h2>
+                <p>Model selection follows this priority:</p>
+                <ol>
+                    <li>Agent override (if configured)</li>
+                    <li>Purpose override (if configured)</li>
+                    <li>Complexity (if provided)</li>
+                    <li>Purpose default (if provided)</li>
+                    <li>Fallback tier (Sonnet)</li>
+                </ol>
+
+                <h2>Issue Closed</h2>
+                <ul>
+                    <li>#3: [AGT-P-002] Implement true multi-model orchestration</li>
+                </ul>
+
+                <p>Right model for the right task. Fast where speed matters. Powerful where capability matters. Cost-optimized across the board.</p>
+
+                <p>Work smarter, not harder. Or rather: let the orchestrator work smarter for you.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
