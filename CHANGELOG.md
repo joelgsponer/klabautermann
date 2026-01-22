@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Multi-model orchestration for task-appropriate model selection (#3)
+  - New `model_selector.py` module with `ModelSelector` class
+  - `ModelTier` enum: HAIKU, SONNET, OPUS for cost/capability tiers
+  - `TaskComplexity` enum: SIMPLE, MODERATE, COMPLEX for complexity-based selection
+  - `TaskPurpose` enum: CLASSIFICATION, EXTRACTION, PLANNING, etc. for semantic selection
+  - `ModelSelectionConfig` for per-agent and per-purpose model overrides
+  - `ModelCallResult` dataclass with response, model info, tokens, latency, fallback status
+  - Automatic fallback to configured tier when primary model fails
+  - LLM metrics recording (calls, tokens, latency) via Prometheus integration
+  - `get_model_for_agent()` helper for agent-specific model lookup
+  - Environment variables: `HAIKU_MODEL`, `SONNET_MODEL`, `OPUS_MODEL`, `ENABLE_MULTI_MODEL`
+  - Default mapping: Haiku for classification/extraction/search, Sonnet for reasoning/actions, Opus for planning
+  - 29 new unit tests for comprehensive coverage
 - Ontology validation and LLM pre-extraction for Ingestor agent (#11, #13)
   - New `validation.py` module with `OntologyValidator` class
     - Validates entity types against `NodeLabel` enum
