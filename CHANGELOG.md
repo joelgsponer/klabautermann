@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Purser state synchronization agent (#49, #50, #51, #52)
+  - `Purser` agent skeleton extending `BaseAgent`
+  - `PurserConfig` for configurable sync behavior (intervals, limits)
+  - `SyncService` enum for external services (gmail, calendar)
+  - `SyncResult` and `SyncState` dataclasses for tracking sync operations
+  - `sync_gmail()` for delta-sync with last_sync timestamp tracking
+  - `sync_calendar()` for delta-sync with update detection and expiration
+  - `TheSieve` email filter class with noise and prompt injection detection
+  - `EmailManifest` and `RiskLevel` for email filtering results
+  - External ID tracking prevents duplicate ingestion
+  - SyncState persistence to Neo4j for resume across restarts
+  - `process_message()` support for inter-agent communication
+  - 41 new unit tests for comprehensive coverage
 - OfficerOfTheWatch proactive alert agent (#59, #60, #61)
   - `OfficerOfTheWatch` agent skeleton extending `BaseAgent`
   - `OfficerConfig` for configurable alert thresholds (hours, minutes, debounce)
