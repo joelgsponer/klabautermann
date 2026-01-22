@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Enhanced `JSONFormatter` with service/environment/hostname fields (#272)
+- `log_context()` context manager for scoped structured logging fields
+- `get_log_context()`, `set_log_context()`, `clear_log_context()` functions
+- Structured exception formatting with type/message/traceback in JSON logs
+- Optional source location logging via LOG_INCLUDE_SOURCE env var
+- Environment variables: LOG_SERVICE_NAME, LOG_ENVIRONMENT, LOG_FORMAT
+- 23 new unit tests for structured logging
 - `WorkflowInspector` class for agent workflow debugging (#357)
 - `WorkflowEntry` dataclass for structured workflow log entries
 - `WorkflowPhase` enum with REQUEST, THINKING, OUTPUT phases

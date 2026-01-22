@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Structured Logging**: JSON log format for log aggregation systems (Elasticsearch, Loki, CloudWatch). Enable with `LOG_FORMAT=json`. Includes trace IDs, timestamps, service name, environment, and hostname in every log entry. Use `with log_context(trace_id="...")` to add context to all logs in a scope.
 - **Agent Workflow Inspector**: Debug agent behavior with detailed logging of each agent's request, thinking, and output phases. Enable with `WORKFLOW_INSPECT=true` or filter specific agents with `WORKFLOW_FILTER_AGENTS=researcher,executor`. Logs to file, console, or both.
 - **Skill Documentation Generator**: Automatically generate documentation for skills with `generate_skill_docs()`. Outputs markdown or HTML with descriptions, parameters, trigger phrases, and usage examples. Generate index pages for skill catalogs.
 - **Skill Validation**: New validation system catches skill definition errors before runtime - malformed names, missing fields, and configuration issues are now reported with clear error messages.
