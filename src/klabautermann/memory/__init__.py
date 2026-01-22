@@ -17,6 +17,7 @@ Contains:
 - summary_cache: Thread summary caching
 - semantic_cache: Semantic query result caching with TTL
 - weight_decay: Relationship weight decay for graph maintenance
+- traversal: Optimized relationship traversal utilities
 """
 
 from klabautermann.memory.backup import (
@@ -109,6 +110,22 @@ from klabautermann.memory.temporal_spine import (
     link_to_day,
 )
 from klabautermann.memory.thread_manager import ThreadManager
+from klabautermann.memory.traversal import (
+    NODE_SEARCH_INDEXES,
+    RELATIONSHIP_INDEXES,
+    BenchmarkResult,
+    TraversalConfig,
+    TraversalDirection,
+    TraversalResult,
+    TraversalStats,
+    benchmark_traversal,
+    find_connected_entities,
+    find_shortest_path,
+    get_index_hint,
+    get_search_index,
+    traverse_dependency_chain,
+    traverse_from_node,
+)
 from klabautermann.memory.weight_decay import (
     DEFAULT_ACCESS_BOOST,
     DEFAULT_HALF_LIFE_SECONDS,
@@ -151,6 +168,21 @@ __all__ = [
     "restore_backup",
     "save_backup_to_file",
     "validate_backup",
+    # Traversal
+    "BenchmarkResult",
+    "NODE_SEARCH_INDEXES",
+    "RELATIONSHIP_INDEXES",
+    "TraversalConfig",
+    "TraversalDirection",
+    "TraversalResult",
+    "TraversalStats",
+    "benchmark_traversal",
+    "find_connected_entities",
+    "find_shortest_path",
+    "get_index_hint",
+    "get_search_index",
+    "traverse_dependency_chain",
+    "traverse_from_node",
     # Weight Decay
     "DEFAULT_ACCESS_BOOST",
     "DEFAULT_HALF_LIFE_SECONDS",
