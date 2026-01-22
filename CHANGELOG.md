@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Email thread summarization with `get_thread()` and `summarize_email_thread()` methods (#221)
+- `EmailThread` model with participant tracking, message_count, and date_range helpers
+- `EmailThreadSummary` model with summary, key_points, action_items, sentiment analysis
+- AI-powered thread summarization using Claude Haiku with tool_use pattern
+- 8 new unit tests for email thread handling and summarization
 - Email draft management: list, get, update, send, delete drafts (#219)
 - `EmailDraft` model with id, message_id, thread_id, subject, to, cc, body, snippet
 - `DraftOperationResult` model for draft operation responses
