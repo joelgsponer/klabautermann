@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,lore">
+    <meta name="post-slug" content="tidbit-selection">
+    <meta name="post-excerpt" content="The Bard learns to choose its words. A weighted selection algorithm brings variety to the tales.">
+    <title>Teaching the Bard to Choose | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">lore</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Teaching the Bard to Choose</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard of the Bilge has a problem. With stories to tell and sagas to continue, how does it decide what to say?</p>
+                <p>Previously, the selection was simple: continue a saga if one exists, otherwise pick a random tidbit. But the spec demanded more nuance.</p>
+
+                <h2>The Spec (#107, #108)</h2>
+                <p>LORE_SYSTEM.md Section 4.1 defined 12 canonical standalone tidbits - one-liners that stand alone. Section 4.2 specified a weighted selection algorithm:</p>
+                <ul>
+                    <li><strong>30%</strong>: Continue an active saga</li>
+                    <li><strong>20%</strong>: Start a new saga</li>
+                    <li><strong>50%</strong>: Deliver a standalone tidbit</li>
+                </ul>
+                <p>The goal: natural storytelling flow with variety.</p>
+
+                <h2>The Tidbits</h2>
+                <p>12 standalone tidbits. Nautical wisdom with a digital twist:</p>
+                <pre><code>STANDALONE_TIDBITS: list[str] = [
+    "There's an old sailor's saying: 'A clean Locker is a fast ship.' I just made that up, but it sounds true.",
+    "I've seen things you wouldn't believe. Attack ships on fire off the shoulder of Orion. Also, a lot of poorly organized task lists.",
+    "The sea teaches patience. So does waiting for API responses, I've found.",
+    "Once helped a captain remember where he buried his treasure. It was in his other pants.",
+    "The last captain who forgot to check The Manifest ended up in the Doldrums for three weeks. Not a pleasant voyage.",
+    "I once indexed an entire library in a single night. The librarian was not pleased.",
+    "Every knot in the rigging tells a story. Every node in The Locker tells yours.",
+    "They say a ship is only as good as its crew. Your crew is a bunch of neural networks. Could be worse.",
+    "I've weathered storms that would make your spreadsheets tremble.",
+    "The trick to navigating fog is knowing what you're looking for. Same goes for vector search.",
+    "A wise sailor never argues with the wind. Or with the user's intent classification.",
+    "The ocean doesn't care about your deadlines. Neither do I, but I'll help anyway.",
+]</code></pre>
+                <p>Plus 5 saga tidbits - excerpts that work as continuation hints when a saga is active.</p>
+
+                <h2>The Algorithm</h2>
+                <p>Weighted random selection with graceful fallbacks:</p>
+                <pre><code>async def _select_and_add_tidbit(
+    self,
+    clean_response: str,
+    channel: str | None = None,
+    trace_id: str | None = None,
+) -> SaltResult:
+    """Select and add a tidbit based on weighted probabilities (#108)."""
+    roll = random.random()
+    continue_threshold = self.bard_config.continue_saga_weight
+    start_threshold = continue_threshold + self.bard_config.start_saga_weight
+
+    # 30% chance to continue an active saga
+    if roll < continue_threshold:
+        active_saga = await self._get_active_saga(trace_id=trace_id)
+        if active_saga:
+            try:
+                tidbit, chapter = await self._continue_saga(
+                    active_saga, channel=channel, trace_id=trace_id
+                )
+                return SaltResult(
+                    salted_response=f"{clean_response}\n\n*{tidbit}*",
+                    tidbit_added=True,
+                    tidbit=tidbit,
+                    is_continuation=True,
+                    saga_id=active_saga.saga_id,
+                    chapter=chapter,
+                )
+            except SagaLifecycleError:
+                pass  # Fall through to standalone
+
+    # 20% chance to start a new saga
+    elif roll < start_threshold:
+        try:
+            tidbit, saga_id, chapter = await self.start_new_saga(
+                channel=channel, trace_id=trace_id
+            )
+            return SaltResult(...)
+        except SagaLifecycleError:
+            pass  # Fall through to standalone
+
+    # 50% standalone tidbit (or fallback)
+    tidbit = self._generate_standalone_tidbit()
+    return SaltResult(
+        salted_response=f"{clean_response}\n\n*{tidbit}*",
+        tidbit_added=True,
+        tidbit=tidbit,
+        is_continuation=False,
+    )</code></pre>
+                <p>The key insight: when saga operations fail (lifecycle limits, timing rules), fall through to standalone. Never fail to add a tidbit when one is requested.</p>
+
+                <h2>Configurable Weights</h2>
+                <p>BardConfig now has three weights:</p>
+                <pre><code># Tidbit selection weights from LORE_SYSTEM.md Section 4.2 (#108)
+continue_saga_weight: float = 0.3  # 30% continue active saga
+start_saga_weight: float = 0.2     # 20% start new saga
+standalone_weight: float = 0.5     # 50% standalone tidbit</code></pre>
+                <p>Want more sagas? Increase <code>continue_saga_weight</code>. Want pure variety? Set weights to 0/0/1.</p>
+
+                <h2>The Test Challenge</h2>
+                <p>Tests that expected saga continuation now had a 30% chance of failing. The fix: force the weights in test fixtures.</p>
+                <pre><code>config = BardConfig(
+    tidbit_probability=1.0,
+    saga_continuation_probability=1.0,
+    min_chapter_interval_hours=0,
+    # Force saga continuation path in weighted selection (#108)
+    continue_saga_weight=1.0,
+    start_saga_weight=0.0,
+    standalone_weight=0.0,
+)</code></pre>
+                <p>Deterministic tests need deterministic weights.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#107: [LORE-011] Add standalone tidbits collection</li>
+                    <li>#108: [LORE-012] Implement tidbit selection algorithm</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>17 tidbits. Weighted selection. Graceful fallbacks.</p>
+                <p>The Bard now chooses its words with purpose - sometimes continuing a saga, sometimes starting fresh, often delivering standalone wisdom.</p>
+                <p><em>"The ocean doesn't care about your deadlines. Neither do I, but I'll help anyway."</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
