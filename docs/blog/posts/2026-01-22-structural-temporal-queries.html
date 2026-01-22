@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,memory">
+    <meta name="post-slug" content="structural-temporal-queries">
+    <meta name="post-excerpt" content="Navigate reporting chains and travel through time. Temporal queries unlock the graph's historical memory.">
+    <title>Charting the Hierarchy and Sailing Through Time | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Charting the Hierarchy and Sailing Through Time</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Knowledge graphs store relationships, but navigating them takes more than simple lookups. Two common patterns emerged in our use cases:</p>
+                <ol>
+                    <li>Hierarchical traversal: "Who does Sarah report to?" or "Who reports to John?"</li>
+                    <li>Historical queries: "Who did Sarah work for last year?"</li>
+                </ol>
+                <p>The Researcher agent now handles both.</p>
+
+                <h2>Traversing Reporting Chains</h2>
+                <p>Organizations have hierarchies. REPORTS_TO relationships form chains from individual contributors up through managers to executives. Traversing these chains is a common query pattern:</p>
+
+                <pre><code>from klabautermann.memory import (
+    traverse_reporting_chain,
+    TraversalDirection,
+)
+
+# Find Sarah's managers (upward chain)
+result = await traverse_reporting_chain(
+    client=neo4j_client,
+    person_name="Sarah",
+    direction=TraversalDirection.OUTGOING,  # Upward
+    max_depth=5,
+)
+
+for node in result.nodes:
+    print(f"Level {node['depth']}: {node['name']}")</code></pre>
+
+                <p>Output might show:</p>
+                <pre><code>Level 1: John Manager
+Level 2: Sarah VP
+Level 3: Chris CEO</code></pre>
+
+                <h2>Finding Direct Reports</h2>
+                <p>Flip the direction to find who reports to someone:</p>
+
+                <pre><code># Find John's direct reports (downward chain)
+result = await traverse_reporting_chain(
+    client=neo4j_client,
+    person_uuid="john-uuid",
+    direction=TraversalDirection.INCOMING,  # Downward
+    max_depth=3,
+)
+
+for node in result.nodes:
+    print(f"  {'  ' * (node['depth'] - 1)}{node['name']}")</code></pre>
+
+                <h2>The Temporal Challenge</h2>
+                <p>Relationships change over time. Sarah worked at Acme Corp in 2024, but joined StartupXYZ in 2025. A simple "Where does Sarah work?" doesn't capture history.</p>
+                <p>Graphiti's temporal model stores <code>created_at</code> and <code>expired_at</code> timestamps on relationships. Our new temporal module parses natural language time expressions and filters accordingly.</p>
+
+                <h2>Parsing Time Expressions</h2>
+                <p>The <code>parse_time_expression()</code> function extracts temporal context from queries:</p>
+
+                <pre><code>from klabautermann.memory import parse_time_expression
+
+# Relative past
+result = parse_time_expression("meetings last week")
+print(result.expression_type)  # RELATIVE_PAST
+print(result.start)            # 2026-01-15 00:00:00
+print(result.end)              # 2026-01-22 00:00:00
+
+# Absolute year
+result = parse_time_expression("who worked at Acme in 2024")
+print(result.expression_type)  # ABSOLUTE
+print(result.start)            # 2024-01-01 00:00:00
+print(result.end)              # 2024-12-31 23:59:59
+
+# Point-in-time snapshot
+result = parse_time_expression("as of last year")
+print(result.expression_type)  # AS_OF
+print(result.as_of)            # 2025-12-31 23:59:59</code></pre>
+
+                <h2>Supported Expressions</h2>
+                <p>The parser handles a variety of time expressions:</p>
+                <ul>
+                    <li><strong>Relative past</strong>: "yesterday", "last week", "last month", "3 days ago", "2 weeks ago"</li>
+                    <li><strong>Relative future</strong>: "tomorrow", "next week", "in 5 days"</li>
+                    <li><strong>Absolute</strong>: "in 2024", "2025"</li>
+                    <li><strong>As-of snapshots</strong>: "as of last year", "as of last month"</li>
+                    <li><strong>Informal</strong>: "recently", "soon"</li>
+                </ul>
+
+                <h2>Historical Relationship Queries</h2>
+                <p>The real power comes from querying relationships at a point in time:</p>
+
+                <pre><code>from datetime import datetime
+from zoneinfo import ZoneInfo
+from klabautermann.memory import get_historical_relationships
+
+# Who did Sarah work for last year?
+as_of = datetime(2025, 12, 31, tzinfo=ZoneInfo("UTC"))
+
+results = await get_historical_relationships(
+    client=neo4j_client,
+    person_name="Sarah",
+    relationship_type="WORKS_AT",
+    as_of=as_of,
+)
+
+for rel in results:
+    print(f"Sarah worked at {rel['target_name']}")
+    print(f"  From: {rel['since']} to {rel['until']}")</code></pre>
+
+                <p>The query filters by:</p>
+                <ul>
+                    <li><code>created_at <= as_of</code>: Relationship existed by that time</li>
+                    <li><code>expired_at IS NULL OR expired_at > as_of</code>: Relationship hadn't ended yet</li>
+                </ul>
+
+                <h2>Combining with Temporal Filtering</h2>
+                <p>The reporting chain traversal respects temporal filters too:</p>
+
+                <pre><code># Who did Sarah report to in 2024?
+result = await traverse_reporting_chain(
+    client=neo4j_client,
+    person_name="Sarah",
+    direction=TraversalDirection.OUTGOING,
+    include_expired=True,  # Include historical relationships
+)
+
+# Filter results manually for 2024
+as_of = datetime(2024, 12, 31, tzinfo=ZoneInfo("UTC"))</code></pre>
+
+                <h2>The Cypher Behind It</h2>
+                <p>Historical queries use Neo4j's timestamp comparisons:</p>
+
+                <pre><code>MATCH (p:Person)-[r]->(target)
+WHERE toLower(p.name) CONTAINS toLower($person_name)
+  AND type(r) = $rel_type
+  AND r.created_at <= $as_of_ms
+  AND (r.expired_at IS NULL OR r.expired_at > $as_of_ms)
+RETURN p.name, type(r), target.name, r.created_at, r.expired_at
+ORDER BY r.created_at DESC</code></pre>
+
+                <p>Timestamps are stored as milliseconds since epoch for efficient indexing.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#19: [AGT-P-013] Add structural traversal queries (REPORTS_TO chains)</li>
+                    <li>#21: [AGT-P-014] Implement time-filtered temporal queries</li>
+                </ul>
+
+                <p>Your knowledge graph now has a memory of the past. Ask who reported to whom, who worked where, and when things changed. The Researcher navigates not just the graph, but time itself.</p>
+
+                <p>History is preserved. The past is queryable.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
