@@ -28,6 +28,14 @@ from klabautermann.skills.models import (
     SkillMetadata,
 )
 from klabautermann.skills.planner import SkillAwarePlanner
+from klabautermann.skills.validation import (
+    SkillValidator,
+    ValidationError,
+    ValidationResult,
+    validate_all_skills,
+    validate_skill,
+    validate_skill_file,
+)
 
 
 __all__ = [
@@ -38,4 +46,10 @@ __all__ = [
     "SkillDiscovery",
     "SkillLoader",
     "SkillMetadata",
+    "SkillValidator",
+    "ValidationError",
+    "ValidationResult",
+    "validate_all_skills",
+    "validate_skill",
+    "validate_skill_file",
 ]
