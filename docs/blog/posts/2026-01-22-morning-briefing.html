@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="morning-briefing">
+    <meta name="post-excerpt" content="Start your day informed. The Officer of the Watch now delivers morning briefings with schedule, tasks, and alerts.">
+    <title>Good Morning, Captain: Proactive Morning Briefings | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Good Morning, Captain: Proactive Morning Briefings</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Officer of the Watch now greets you each morning with everything you need to know.</p>
+                <p>Previously: Check calendar. Check tasks. Check alerts. All separate. Now: One briefing, all the context.</p>
+
+                <h2>The Problem</h2>
+                <p>Morning routine: Open calendar, scan events. Open task manager, find urgent items. Check email, look for overnight fires. Repeat across multiple tools, multiple contexts.</p>
+                <p>By the time you're done gathering context, you've lost valuable minutes. And you might have missed something.</p>
+
+                <h2>The Solution: Morning Briefing</h2>
+                <p>The Officer of the Watch generates a proactive briefing every morning:</p>
+
+                <pre><code>from klabautermann.agents.officer import OfficerOfTheWatch, OfficerConfig
+
+officer = OfficerOfTheWatch(
+    neo4j_client=neo4j,
+    config=OfficerConfig(
+        briefing_hour=7,      # Generate at 7:00 AM
+        briefing_minute=0,
+    ),
+)
+
+briefing = await officer.generate_morning_briefing()
+print(briefing.greeting)
+# "Good morning, Captain. Moderate winds - a full but manageable schedule."
+
+print(briefing.summary_text)
+# **Schedule**: 4 event(s) today
+#   - 09:00: Team Standup at Zoom
+#   - 11:00: Product Review at Room A
+#   - 14:00: 1:1 with Sarah
+#   - 16:00: Sprint Planning
+#
+# **High Priority Tasks**: 2 task(s)
+#   - [!] Deploy hotfix (Backend)
+#   - [H] Review security audit
+#
+# **Overdue**: All clear</code></pre>
+
+                <h2>What's in a Briefing</h2>
+                <p>The <code>MorningBriefing</code> includes everything you need:</p>
+
+                <ul>
+                    <li><strong>events_today</strong>: Calendar events for the day, sorted by start time</li>
+                    <li><strong>high_priority_tasks</strong>: Urgent and high-priority tasks</li>
+                    <li><strong>overdue_tasks</strong>: Tasks past their due date</li>
+                    <li><strong>overnight_alerts</strong>: Deadline warnings and overdue alerts</li>
+                    <li><strong>greeting</strong>: Nautical-themed greeting based on workload</li>
+                    <li><strong>summary_text</strong>: Human-readable markdown summary</li>
+                </ul>
+
+                <h2>Greetings Based on Outlook</h2>
+                <p>The greeting adapts to your day's workload:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Workload</th>
+                            <th>Greeting</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>No events or tasks</td>
+                            <td>"Clear skies ahead - no events or urgent tasks today."</td>
+                        </tr>
+                        <tr>
+                            <td>1-3 items</td>
+                            <td>"Calm seas - a manageable day ahead."</td>
+                        </tr>
+                        <tr>
+                            <td>4-6 items</td>
+                            <td>"Moderate winds - a full but manageable schedule."</td>
+                        </tr>
+                        <tr>
+                            <td>7+ items</td>
+                            <td>"Choppy waters - a busy day ahead. Steady as she goes."</td>
+                        </tr>
+                        <tr>
+                            <td>Overdue tasks</td>
+                            <td>"There are overdue items requiring attention."</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h2>Configuration</h2>
+                <p>Customize the briefing time to match your schedule:</p>
+
+                <pre><code>config = OfficerConfig(
+    briefing_hour=6,       # Early bird? 6:00 AM
+    briefing_minute=30,    # Half past the hour
+    briefing_look_ahead_days=1,  # Days to look ahead
+)</code></pre>
+
+                <h2>Scheduler Integration</h2>
+                <p>Check if it's briefing time with the helper method:</p>
+
+                <pre><code>if officer.is_briefing_time():
+    briefing = await officer.generate_morning_briefing()
+    # Send to all channels
+    await channel_manager.broadcast(briefing.summary_text)</code></pre>
+
+                <h2>Process Message Interface</h2>
+                <p>Request a briefing through the standard agent interface:</p>
+
+                <pre><code>msg = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="officer_of_the_watch",
+    intent="briefing",
+    payload={"operation": "morning_briefing"},
+    trace_id=trace_id,
+)
+
+response = await officer.process_message(msg)
+briefing_data = response.payload</code></pre>
+
+                <h2>Data Structures</h2>
+                <p>All components are serializable for channel transport:</p>
+
+                <pre><code>@dataclass
+class MorningBriefing:
+    generated_at: datetime
+    greeting: str
+    events_today: list[CalendarEventSummary]
+    high_priority_tasks: list[TaskSummary]
+    overdue_tasks: list[TaskSummary]
+    overnight_alerts: list[Alert]
+    summary_text: str
+    duration_ms: float
+
+    def to_dict(self) -> dict[str, Any]:
+        # Full serialization for JSON transport
+        ...</code></pre>
+
+                <h2>Issue Closed</h2>
+                <ul>
+                    <li>#4: [AGT-P-003] Add proactive morning briefing generation</li>
+                </ul>
+
+                <p>Start your day with context, not chaos. The Officer of the Watch stands ready.</p>
+
+                <p>Good morning, Captain. What shall we tackle first?</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
