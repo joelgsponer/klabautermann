@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,channel">
+    <meta name="post-slug" content="channel-resilience">
+    <meta name="post-excerpt" content="Channels that heal themselves. Auto-restart on failure, broadcast to all, and track every delivery.">
+    <title>Self-Healing Channels | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">channel</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Self-Healing Channels</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Networks fail. Connections drop. Bots timeout. That's life.</p>
+
+                <p>Today, Klabautermann learned to pick itself up.</p>
+
+                <h2>The Problem</h2>
+                <p>Telegram's API has hiccups. Your home network goes down for a minute. The webhook times out. The channel marks itself as ERROR and stays there.</p>
+
+                <p>You come back an hour later: "Why isn't my Telegram bot responding?"</p>
+
+                <p>Because nothing tried to restart it.</p>
+
+                <h2>The Solution</h2>
+                <p>Auto-restart with exponential backoff:</p>
+
+                <pre><code>config = ChannelConfig(
+    auto_restart=True,           # Try to recover
+    max_restart_attempts=3,      # Give up after 3 tries
+    restart_backoff_seconds=5.0, # Start with 5s delay
+)</code></pre>
+
+                <p>First failure: wait 5 seconds, restart. Second failure: wait 10 seconds, restart. Third failure: wait 20 seconds, restart. Fourth failure? Give up and notify.</p>
+
+                <h2>The Health Check</h2>
+                <p>The ChannelManager already ran periodic health checks. Now it does something about unhealthy channels:</p>
+
+                <pre><code>async def _perform_health_checks(self, stale_threshold: float) -> None:
+    for name, channel in self._channels.items():
+        # ... existing health check logic ...
+
+        if not is_healthy:
+            if self._config.auto_restart:
+                await self._attempt_auto_restart(name, error)</code></pre>
+
+                <p>Unhealthy? Attempt restart. Within limits.</p>
+
+                <h2>Tracking Attempts</h2>
+                <p>Each channel tracks its restart attempts:</p>
+
+                <pre><code>manager.get_restart_attempts("telegram")  # How many times?
+manager.reset_restart_attempts("telegram") # Clear the counter</code></pre>
+
+                <p>Successful restart? Counter resets to zero. The channel earned back its trust.</p>
+
+                <h2>Failure Callbacks</h2>
+                <p>Sometimes you need to know when things break:</p>
+
+                <pre><code>def notify_failure(channel_name: str, error: str) -> None:
+    send_slack_alert(f"Channel {channel_name} failed: {error}")
+
+manager.on_failure(notify_failure)</code></pre>
+
+                <p>Async callbacks work too:</p>
+
+                <pre><code>async def async_notify(channel_name: str, error: str) -> None:
+    await send_webhook(channel_name, error)
+
+manager.on_failure(async_notify)</code></pre>
+
+                <h2>Broadcast</h2>
+                <p>Second feature: cross-channel messaging. Send to everyone at once:</p>
+
+                <pre><code>result = await manager.broadcast(
+    "System maintenance in 10 minutes",
+    exclude_channels=["test"],  # Skip the test channel
+)
+
+print(f"Delivered to {result.delivered_count} channels")
+print(f"Failed: {result.channels_failed}")</code></pre>
+
+                <p>Each channel receives the message on its own thread:</p>
+
+                <pre><code>result = await manager.broadcast(
+    "Important update",
+    thread_ids={
+        "cli": "system-announcements",
+        "telegram": "telegram-123456789",
+    },
+)</code></pre>
+
+                <h2>The BroadcastResult</h2>
+                <p>Full transparency on what happened:</p>
+
+                <pre><code>@dataclass
+class BroadcastResult:
+    timestamp: datetime
+    content: str
+    results: dict[str, bool]    # channel -> success
+    errors: dict[str, str]      # channel -> error message
+    delivered_count: int
+    failed_count: int
+
+    @property
+    def all_delivered(self) -> bool: ...
+    @property
+    def channels_delivered(self) -> list[str]: ...
+    @property
+    def channels_failed(self) -> list[str]: ...</code></pre>
+
+                <p>Know exactly what went where.</p>
+
+                <h2>Targeted Messages</h2>
+                <p>Sometimes you need to reach one specific channel:</p>
+
+                <pre><code>success = await manager.send_to_channel(
+    channel_name="telegram",
+    content="Just for Telegram users",
+    thread_id="telegram-123456789",
+)
+
+if not success:
+    logger.warning("Telegram message failed")</code></pre>
+
+                <p>Returns False if the channel doesn't exist or isn't running.</p>
+
+                <h2>Configuration</h2>
+                <p>Environment variables for everything:</p>
+
+                <pre><code>CHANNEL_AUTO_RESTART=true
+CHANNEL_MAX_RESTART_ATTEMPTS=3
+CHANNEL_RESTART_BACKOFF=5.0</code></pre>
+
+                <p>Or programmatic:</p>
+
+                <pre><code>config = ChannelConfig(
+    auto_restart=True,
+    max_restart_attempts=5,
+    restart_backoff_seconds=10.0,
+)</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#154: Implement channel restart</li>
+                    <li>#156: Implement cross-channel messaging</li>
+                </ul>
+
+                <p>Two issues. Resilient channels. Messages that reach everyone.</p>
+
+                <h2>What's Next</h2>
+                <p>The channel test suite (#161) still needs writing. Discord driver (#144) is waiting. But the foundation is solid now. Channels fail gracefully, recover automatically, and communicate across boundaries.</p>
+
+                <p>The voyage continues. Now with self-healing ports.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
