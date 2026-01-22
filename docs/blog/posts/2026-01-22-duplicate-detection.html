@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="duplicate-detection">
+    <meta name="post-excerpt" content="The Hull Cleaner learns to spot doubles. Fuzzy matching and APOC merging keep your crew roster clean.">
+    <title>Scraping Barnacles: Duplicate Detection | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Scraping Barnacles: Duplicate Detection</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Over time, knowledge graphs accumulate duplicates. "John Doe" from one conversation becomes "Jon Doe" in another. "Acme Corp" morphs into "Acme Corporation" from a different email thread.</p>
+                <p>The Hull Cleaner now spots these doubles and merges them.</p>
+
+                <h2>The Fuzzy Matching Problem</h2>
+                <p>Exact string matching won't catch duplicates. Names vary across contexts:</p>
+                <ul>
+                    <li>"John Doe" vs "Jon Doe" (typo)</li>
+                    <li>"Sarah Smith" vs "Sarah J. Smith" (middle initial)</li>
+                    <li>"Acme Corp" vs "Acme Corporation" (abbreviation)</li>
+                </ul>
+                <p>We need similarity matching that tolerates small variations while rejecting completely different entities.</p>
+
+                <h2>Levenshtein Similarity</h2>
+                <p>The Hull Cleaner uses APOC's Levenshtein similarity function to compare entity names:</p>
+
+                <pre><code>MATCH (p1:Person), (p2:Person)
+WHERE p1.uuid < p2.uuid
+  AND apoc.text.levenshteinSimilarity(
+      toLower(p1.name),
+      toLower(p2.name)
+  ) > 0.85
+RETURN p1.uuid, p2.uuid, p1.name, p2.name</code></pre>
+
+                <p>Levenshtein distance counts the minimum edits needed to transform one string into another. The similarity score (0.0 to 1.0) tells us how close two names are.</p>
+
+                <h2>Confidence Levels</h2>
+                <p>Not all matches deserve the same treatment:</p>
+
+                <pre><code>from klabautermann.agents import DuplicateCandidate
+
+candidate = DuplicateCandidate(
+    uuid1="uuid-1",
+    uuid2="uuid-2",
+    name1="John Doe",
+    name2="John D.",
+    entity_type="Person",
+    similarity=0.86,
+    email_match=True,
+)
+
+print(candidate.confidence)  # "HIGH"</code></pre>
+
+                <ul>
+                    <li><strong>HIGH</strong>: Similarity >= 0.95 OR matching email. Auto-merge.</li>
+                    <li><strong>MEDIUM</strong>: Similarity 0.85-0.95. Flag for review.</li>
+                    <li><strong>LOW</strong>: Below 0.85. Skip entirely.</li>
+                </ul>
+
+                <h2>APOC Refactor Merge</h2>
+                <p>Once we're confident two nodes are duplicates, APOC handles the merge:</p>
+
+                <pre><code>MATCH (keep {uuid: $keep_uuid}), (remove {uuid: $remove_uuid})
+CALL apoc.refactor.mergeNodes([keep, remove], {
+    properties: 'combine',
+    mergeRels: true
+})
+YIELD node
+RETURN node.uuid</code></pre>
+
+                <p>The merge:</p>
+                <ul>
+                    <li><strong>Combines properties</strong>: Both nodes' attributes are kept</li>
+                    <li><strong>Transfers relationships</strong>: All edges from the removed node move to the kept node</li>
+                    <li><strong>Preserves UUIDs</strong>: The kept node's UUID remains stable</li>
+                </ul>
+
+                <h2>Integration with Scrape Barnacles</h2>
+                <p>Duplicate detection is now part of the Hull Cleaner's regular maintenance:</p>
+
+                <pre><code>from klabautermann.agents import HullCleaner, HullCleanerConfig
+
+config = HullCleanerConfig(
+    detect_duplicates=True,
+    duplicate_similarity_threshold=0.85,
+    duplicate_auto_merge_threshold=0.95,
+)
+
+cleaner = HullCleaner(neo4j_client=neo4j, config=config)
+
+# Full maintenance including duplicate detection
+result = await cleaner.scrape_barnacles(dry_run=False)
+
+print(f"Merged: {result.nodes_removed}")</code></pre>
+
+                <h2>The Review Flow</h2>
+                <p>MEDIUM confidence matches get flagged in the audit trail:</p>
+
+                <pre><code># Find duplicates first
+duplicates = await cleaner.find_duplicate_entities()
+
+# Review MEDIUM confidence ones
+for dup in duplicates:
+    if dup.confidence == "MEDIUM":
+        print(f"Review: '{dup.name1}' vs '{dup.name2}'")
+        print(f"  Similarity: {dup.similarity:.0%}")
+        print(f"  Entity type: {dup.entity_type}")
+
+# Then merge with review complete
+result = await cleaner.merge_duplicates(
+    dry_run=False,
+    auto_merge_only=False  # Include MEDIUM
+)</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#84: [AGT-S-048] Implement duplicate entity detection</li>
+                    <li>#85: [AGT-S-049] Implement entity merge</li>
+                </ul>
+
+                <p>Your knowledge graph stays clean. "John Doe" and "Jon Doe" become one person with combined knowledge. The crew roster is accurate.</p>
+
+                <p>The Hull Cleaner keeps scraping those barnacles.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
