@@ -12,8 +12,18 @@ Contains:
 - hull_cleaner: Graph maintenance (The Hull Cleaner)
 - officer: Proactive alerts (The Officer of the Watch)
 - purser: State synchronization (The Purser)
+- bard: Lore and storytelling (The Bard of the Bilge)
 """
 
+from klabautermann.agents.bard import (
+    CANONICAL_TIDBITS,
+    ActiveSaga,
+    BardConfig,
+    BardOfTheBilge,
+    LoreEpisode,
+    SaltResult,
+    generate_saga_name,
+)
 from klabautermann.agents.executor import Executor
 from klabautermann.agents.hull_cleaner import (
     AuditEntry,
@@ -45,15 +55,20 @@ from klabautermann.agents.scribe import Scribe
 
 
 __all__ = [
+    "ActiveSaga",
     "Alert",
     "AlertCheckResult",
     "AlertPriority",
     "AlertType",
     "AuditEntry",
+    "BardConfig",
+    "BardOfTheBilge",
+    "CANONICAL_TIDBITS",
     "EmailManifest",
     "Executor",
     "HullCleaner",
     "HullCleanerConfig",
+    "LoreEpisode",
     "OfficerConfig",
     "OfficerOfTheWatch",
     "PruningAction",
@@ -62,9 +77,11 @@ __all__ = [
     "Purser",
     "PurserConfig",
     "RiskLevel",
+    "SaltResult",
     "Scribe",
     "SyncResult",
     "SyncService",
     "SyncState",
     "TheSieve",
+    "generate_saga_name",
 ]

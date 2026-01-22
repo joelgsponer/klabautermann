@@ -1,0 +1,769 @@
+"""
+BardOfTheBilge agent for Klabautermann.
+
+The keeper of Klabautermann's mythology - a storyteller who weaves tales of
+digital adventures across conversations. Maintains a parallel memory system
+(LoreEpisode graph) separate from task-oriented threads, allowing stories
+to persist and evolve without polluting the working context.
+
+Reference: specs/architecture/AGENTS_EXTENDED.md Section 1
+Issues: #37, #38, #39, #40
+"""
+
+from __future__ import annotations
+
+import random
+import time
+import uuid
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, ClassVar
+
+from klabautermann.agents.base_agent import BaseAgent
+from klabautermann.core.logger import logger
+from klabautermann.core.models import AgentMessage
+
+
+if TYPE_CHECKING:
+    from klabautermann.memory.neo4j_client import Neo4jClient
+
+
+# =============================================================================
+# Canonical Tidbits (Seed Data)
+# =============================================================================
+
+CANONICAL_TIDBITS: list[str] = [
+    "Reminds me of the time I navigated the Great Maelstrom of '98 using nothing but a rusted compass and a very confused seagull.",
+    "I once saw a virus that tried to convince me it was a long-lost cousin from the Baltic. Charming fellow, but he walked the plank all the same.",
+    "The fog was so thick in '03 you could barely fit a 'Hello' through the wire. I hand-carried every byte.",
+    "I once wrestled a Kraken made of social media notifications. Every time I cut off a 'Like,' two 'Retweets' grew in its place.",
+    "Many a Captain has been lost to the Sirens of the Inbox. I plugged my ears with digital wax.",
+    "The last captain who forgot to check The Manifest ended up in the Doldrums for three weeks.",
+    "There's an old sailor's saying: 'A clean Locker is a fast ship.' I just made that up, but it sounds true.",
+    "I've seen things you wouldn't believe. Attack ships on fire off the shoulder of Orion. Also, a lot of poorly organized task lists.",
+    "The sea teaches patience. So does waiting for API responses, I've found.",
+    "Once helped a captain remember where he buried his treasure. It was in his other pants.",
+]
+
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+
+@dataclass
+class BardConfig:
+    """Configuration for BardOfTheBilge agent."""
+
+    # Probability of adding a tidbit to a response (5-10%)
+    tidbit_probability: float = 0.07
+
+    # Probability of continuing an active saga vs standalone tidbit
+    saga_continuation_probability: float = 0.3
+
+    # Maximum chapters in a saga before it concludes
+    max_saga_chapters: int = 5
+
+    # Maximum words in a tidbit/chapter
+    max_tidbit_words: int = 50
+
+    # Query limits
+    default_query_limit: int = 10
+
+
+@dataclass
+class LoreEpisode:
+    """
+    A single episode in Klabautermann's mythology.
+
+    LoreEpisode nodes form the parallel memory system for storytelling,
+    separate from task-oriented Thread/Message nodes.
+
+    Relationships:
+        - TOLD_TO -> Person (the Captain who heard this tale)
+        - EXPANDS_UPON -> LoreEpisode (previous chapter in saga)
+    """
+
+    uuid: str
+    saga_id: str
+    saga_name: str
+    chapter: int
+    content: str
+    told_at: int  # Unix timestamp (milliseconds)
+    created_at: int  # Unix timestamp (milliseconds)
+    captain_uuid: str | None = None  # The Person this was told to
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "uuid": self.uuid,
+            "saga_id": self.saga_id,
+            "saga_name": self.saga_name,
+            "chapter": self.chapter,
+            "content": self.content,
+            "told_at": self.told_at,
+            "created_at": self.created_at,
+            "captain_uuid": self.captain_uuid,
+        }
+
+
+@dataclass
+class SaltResult:
+    """Result of salting a response with a tidbit."""
+
+    original_response: str
+    salted_response: str
+    tidbit_added: bool
+    tidbit: str | None = None
+    saga_id: str | None = None
+    chapter: int | None = None
+    is_continuation: bool = False
+    storm_mode_skipped: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "tidbit_added": self.tidbit_added,
+            "tidbit": self.tidbit,
+            "saga_id": self.saga_id,
+            "chapter": self.chapter,
+            "is_continuation": self.is_continuation,
+            "storm_mode_skipped": self.storm_mode_skipped,
+        }
+
+
+@dataclass
+class ActiveSaga:
+    """Information about an active (unfinished) saga."""
+
+    saga_id: str
+    saga_name: str
+    last_chapter: int
+    last_told: int  # Unix timestamp (milliseconds)
+    chapters: list[LoreEpisode] = field(default_factory=list)
+
+
+# =============================================================================
+# Saga Name Generator
+# =============================================================================
+
+
+SAGA_PREFIXES: list[str] = [
+    "The Ballad of",
+    "The Chronicle of",
+    "The Tale of",
+    "The Legend of",
+    "The Mystery of",
+    "The Voyage to",
+    "The Quest for",
+]
+
+SAGA_SUBJECTS: list[str] = [
+    "the Forgotten Server",
+    "the Corrupted Cache",
+    "the Phantom Packet",
+    "the Lost Password",
+    "the Infinite Loop",
+    "the Silent Daemon",
+    "the Wandering Pointer",
+    "the Cursed Cron Job",
+    "the Haunted Hash Table",
+    "the Dreaded Deadlock",
+]
+
+
+def generate_saga_name() -> str:
+    """Generate a whimsical saga name."""
+    prefix = random.choice(SAGA_PREFIXES)
+    subject = random.choice(SAGA_SUBJECTS)
+    return f"{prefix} {subject}"
+
+
+# =============================================================================
+# BardOfTheBilge Agent
+# =============================================================================
+
+
+class BardOfTheBilge(BaseAgent):
+    """
+    The keeper of Klabautermann's mythology.
+
+    The Bard generates short, evocative story fragments ("tidbits") that add
+    flavor to responses. It can continue ongoing sagas across multiple
+    conversations, tracking them via the LoreEpisode graph.
+
+    Story Guidelines:
+        - Keep tidbits to 1-2 sentences maximum
+        - Use nautical voice but avoid pirate clichés ("Arrr", "Matey")
+        - Stories should be whimsical, slightly melancholic, and reference
+          digital-age concepts
+        - Never interrupt urgent/storm-mode responses with stories
+        - Never generate content longer than 50 words
+    """
+
+    # Class-level constant for canonical tidbits
+    CANONICAL_TIDBITS: ClassVar[list[str]] = CANONICAL_TIDBITS
+
+    def __init__(
+        self,
+        neo4j_client: Neo4jClient,
+        captain_uuid: str,
+        config: BardConfig | None = None,
+    ) -> None:
+        """
+        Initialize BardOfTheBilge.
+
+        Args:
+            neo4j_client: Connected Neo4j client for graph operations.
+            captain_uuid: UUID of the Captain (Person node) to tell stories to.
+            config: Optional configuration for story behavior.
+        """
+        super().__init__(name="bard_of_the_bilge")
+        self.neo4j = neo4j_client
+        self.captain_uuid = captain_uuid
+        self.bard_config = config or BardConfig()
+
+    async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
+        """
+        Process an incoming message.
+
+        BardOfTheBilge responds to salt_response and saga management commands.
+
+        Args:
+            msg: The incoming agent message.
+
+        Returns:
+            Response message with salt result or saga info.
+        """
+        trace_id = msg.trace_id
+        payload = msg.payload or {}
+
+        operation = payload.get("operation", "salt_response")
+
+        logger.info(
+            f"[CHART] BardOfTheBilge processing {operation}",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        if operation == "salt_response":
+            clean_response = payload.get("response", "")
+            storm_mode = payload.get("storm_mode", False)
+            result = await self.salt_response(
+                clean_response,
+                storm_mode=storm_mode,
+                trace_id=trace_id,
+            )
+            result_payload = {
+                "salted_response": result.salted_response,
+                **result.to_dict(),
+            }
+        elif operation == "get_active_saga":
+            saga = await self._get_active_saga(trace_id=trace_id)
+            result_payload = {
+                "saga": {
+                    "saga_id": saga.saga_id,
+                    "saga_name": saga.saga_name,
+                    "last_chapter": saga.last_chapter,
+                    "last_told": saga.last_told,
+                }
+                if saga
+                else None
+            }
+        elif operation == "get_saga_chapters":
+            saga_id_param: str = payload.get("saga_id", "")
+            limit = payload.get("limit", 5)
+            chapters = await self._get_saga_chapters(saga_id_param, limit=limit, trace_id=trace_id)
+            result_payload = {
+                "chapters": [c.to_dict() for c in chapters],
+                "count": len(chapters),
+            }
+        elif operation == "get_all_sagas":
+            sagas = await self.get_all_sagas(trace_id=trace_id)
+            result_payload = {
+                "sagas": sagas,
+                "count": len(sagas),
+            }
+        else:
+            result_payload = {"error": f"Unknown operation: {operation}"}
+
+        return AgentMessage(
+            source_agent=self.name,
+            target_agent=msg.source_agent,
+            intent="bard_result",
+            payload=result_payload,
+            trace_id=trace_id,
+        )
+
+    # =========================================================================
+    # Main Operations
+    # =========================================================================
+
+    async def salt_response(
+        self,
+        clean_response: str,
+        storm_mode: bool = False,
+        trace_id: str | None = None,
+    ) -> SaltResult:
+        """
+        Add flavor to a clean response with a story tidbit.
+
+        The Bard adds tidbits based on probability. During storm mode,
+        no tidbits are added. If an active saga exists, there's a chance
+        to continue it rather than generate a standalone tidbit.
+
+        Args:
+            clean_response: The response to potentially salt with a tidbit.
+            storm_mode: If True, never add tidbits (urgent situation).
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            SaltResult with the (potentially) salted response and metadata.
+        """
+        # Never during Storm Mode
+        if storm_mode:
+            logger.debug(
+                "[WHISPER] Storm mode active, skipping tidbit",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return SaltResult(
+                original_response=clean_response,
+                salted_response=clean_response,
+                tidbit_added=False,
+                storm_mode_skipped=True,
+            )
+
+        # Roll the dice
+        if random.random() > self.bard_config.tidbit_probability:
+            logger.debug(
+                "[WHISPER] Probability check failed, no tidbit",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return SaltResult(
+                original_response=clean_response,
+                salted_response=clean_response,
+                tidbit_added=False,
+            )
+
+        # Check for active saga
+        active_saga = await self._get_active_saga(trace_id=trace_id)
+
+        if active_saga and random.random() < self.bard_config.saga_continuation_probability:
+            # Continue the saga
+            tidbit, chapter = await self._continue_saga(active_saga, trace_id=trace_id)
+            salted = f"{clean_response}\n\n_{tidbit}_"
+
+            logger.info(
+                f"[BEACON] Continued saga '{active_saga.saga_name}' chapter {chapter}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            return SaltResult(
+                original_response=clean_response,
+                salted_response=salted,
+                tidbit_added=True,
+                tidbit=tidbit,
+                saga_id=active_saga.saga_id,
+                chapter=chapter,
+                is_continuation=True,
+            )
+        else:
+            # Standalone tidbit (from canonical list)
+            tidbit = self._generate_standalone_tidbit()
+            salted = f"{clean_response}\n\n_{tidbit}_"
+
+            logger.info(
+                "[BEACON] Added standalone tidbit to response",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            return SaltResult(
+                original_response=clean_response,
+                salted_response=salted,
+                tidbit_added=True,
+                tidbit=tidbit,
+            )
+
+    # =========================================================================
+    # Saga Management
+    # =========================================================================
+
+    async def _get_active_saga(
+        self,
+        trace_id: str | None = None,
+    ) -> ActiveSaga | None:
+        """
+        Get the most recent unfinished saga for this Captain.
+
+        A saga is considered active if it has fewer than max_saga_chapters.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            ActiveSaga if one exists, None otherwise.
+        """
+        max_chapters = self.bard_config.max_saga_chapters
+
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le.saga_id as saga_id, le.saga_name as saga_name,
+             max(le.chapter) as last_chapter, max(le.told_at) as last_told
+        WHERE last_chapter < $max_chapters
+        RETURN saga_id, saga_name, last_chapter, last_told
+        ORDER BY last_told DESC
+        LIMIT 1
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {
+                "captain_uuid": self.captain_uuid,
+                "max_chapters": max_chapters,
+            },
+            trace_id=trace_id,
+        )
+
+        if not result:
+            return None
+
+        row = result[0]
+        return ActiveSaga(
+            saga_id=row["saga_id"],
+            saga_name=row["saga_name"],
+            last_chapter=row["last_chapter"],
+            last_told=row["last_told"],
+        )
+
+    async def _get_saga_chapters(
+        self,
+        saga_id: str,
+        limit: int = 5,
+        trace_id: str | None = None,
+    ) -> list[LoreEpisode]:
+        """
+        Fetch chapters of a saga for context.
+
+        Args:
+            saga_id: The saga ID to fetch chapters for.
+            limit: Maximum chapters to return.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of LoreEpisode objects ordered by chapter.
+        """
+        query = """
+        MATCH (le:LoreEpisode {saga_id: $saga_id})-[:TOLD_TO]->(p:Person)
+        RETURN le.uuid as uuid, le.saga_id as saga_id, le.saga_name as saga_name,
+               le.chapter as chapter, le.content as content,
+               le.told_at as told_at, le.created_at as created_at,
+               p.uuid as captain_uuid
+        ORDER BY le.chapter ASC
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"saga_id": saga_id, "limit": limit},
+            trace_id=trace_id,
+        )
+
+        return [
+            LoreEpisode(
+                uuid=row["uuid"],
+                saga_id=row["saga_id"],
+                saga_name=row["saga_name"],
+                chapter=row["chapter"],
+                content=row["content"],
+                told_at=row["told_at"],
+                created_at=row["created_at"],
+                captain_uuid=row.get("captain_uuid"),
+            )
+            for row in results
+        ]
+
+    async def _continue_saga(
+        self,
+        saga: ActiveSaga,
+        trace_id: str | None = None,
+    ) -> tuple[str, int]:
+        """
+        Generate the next chapter of an ongoing saga.
+
+        For now, this uses a canonical tidbit as the continuation.
+        A full implementation would use LLM to generate contextual content.
+
+        Args:
+            saga: The active saga to continue.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Tuple of (tidbit content, chapter number).
+        """
+        new_chapter = saga.last_chapter + 1
+        content = self._generate_standalone_tidbit()
+
+        # Persist the new chapter
+        await self._save_episode(
+            saga_id=saga.saga_id,
+            saga_name=saga.saga_name,
+            chapter=new_chapter,
+            content=content,
+            trace_id=trace_id,
+        )
+
+        return content, new_chapter
+
+    async def start_new_saga(
+        self,
+        trace_id: str | None = None,
+    ) -> tuple[str, str, int]:
+        """
+        Start a new saga with chapter 1.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Tuple of (tidbit content, saga_id, chapter number).
+        """
+        saga_id = str(uuid.uuid4())
+        saga_name = generate_saga_name()
+        content = self._generate_standalone_tidbit()
+
+        await self._save_episode(
+            saga_id=saga_id,
+            saga_name=saga_name,
+            chapter=1,
+            content=content,
+            trace_id=trace_id,
+        )
+
+        logger.info(
+            f"[BEACON] Started new saga: '{saga_name}'",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return content, saga_id, 1
+
+    async def _save_episode(
+        self,
+        saga_id: str,
+        saga_name: str,
+        chapter: int,
+        content: str,
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Persist a LoreEpisode to the graph.
+
+        Creates the LoreEpisode node with:
+            - TOLD_TO relationship to the Captain (Person)
+            - EXPANDS_UPON relationship to previous chapter (if exists)
+
+        Args:
+            saga_id: Unique identifier for the saga.
+            saga_name: Human-readable name of the saga.
+            chapter: Chapter number (1-indexed).
+            content: The story content.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            UUID of the created LoreEpisode.
+        """
+        episode_uuid = str(uuid.uuid4())
+        now_ms = int(time.time() * 1000)
+
+        # Create episode with TOLD_TO relationship
+        query = """
+        CREATE (le:LoreEpisode {
+            uuid: $uuid,
+            saga_id: $saga_id,
+            saga_name: $saga_name,
+            chapter: $chapter,
+            content: $content,
+            told_at: $now_ms,
+            created_at: $now_ms
+        })
+        WITH le
+        MATCH (p:Person {uuid: $captain_uuid})
+        CREATE (le)-[:TOLD_TO {created_at: $now_ms}]->(p)
+        WITH le
+        OPTIONAL MATCH (prev:LoreEpisode {saga_id: $saga_id, chapter: $prev_chapter})
+        FOREACH (_ IN CASE WHEN prev IS NOT NULL THEN [1] ELSE [] END |
+            CREATE (le)-[:EXPANDS_UPON {created_at: $now_ms}]->(prev)
+        )
+        RETURN le.uuid as uuid
+        """
+
+        await self.neo4j.execute_query(
+            query,
+            {
+                "uuid": episode_uuid,
+                "saga_id": saga_id,
+                "saga_name": saga_name,
+                "chapter": chapter,
+                "content": content,
+                "now_ms": now_ms,
+                "captain_uuid": self.captain_uuid,
+                "prev_chapter": chapter - 1,
+            },
+            trace_id=trace_id,
+        )
+
+        logger.debug(
+            f"[CHART] Saved LoreEpisode {saga_name} ch.{chapter}",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return episode_uuid
+
+    def _generate_standalone_tidbit(self) -> str:
+        """
+        Generate a standalone tidbit from the canonical collection.
+
+        Returns:
+            A random canonical tidbit string.
+        """
+        return random.choice(self.CANONICAL_TIDBITS)
+
+    # =========================================================================
+    # Query Operations
+    # =========================================================================
+
+    async def get_all_sagas(
+        self,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get all sagas told to this Captain.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of saga summaries with id, name, chapter count, and status.
+        """
+        max_chapters = self.bard_config.max_saga_chapters
+
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le.saga_id as saga_id, le.saga_name as saga_name,
+             max(le.chapter) as chapter_count, max(le.told_at) as last_told
+        RETURN saga_id, saga_name, chapter_count, last_told,
+               CASE WHEN chapter_count >= $max_chapters
+                    THEN 'complete' ELSE 'active' END as status
+        ORDER BY last_told DESC
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {
+                "captain_uuid": self.captain_uuid,
+                "max_chapters": max_chapters,
+                "limit": self.bard_config.default_query_limit,
+            },
+            trace_id=trace_id,
+        )
+
+        return [
+            {
+                "saga_id": row["saga_id"],
+                "saga_name": row["saga_name"],
+                "chapter_count": row["chapter_count"],
+                "last_told": row["last_told"],
+                "status": row["status"],
+            }
+            for row in results
+        ]
+
+    async def get_saga_by_id(
+        self,
+        saga_id: str,
+        trace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """
+        Get a complete saga with all its chapters.
+
+        Args:
+            saga_id: The saga ID to retrieve.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Saga info with chapters, or None if not found.
+        """
+        chapters = await self._get_saga_chapters(
+            saga_id,
+            limit=self.bard_config.max_saga_chapters,
+            trace_id=trace_id,
+        )
+
+        if not chapters:
+            return None
+
+        first_chapter = chapters[0]
+        return {
+            "saga_id": saga_id,
+            "saga_name": first_chapter.saga_name,
+            "chapter_count": len(chapters),
+            "chapters": [c.to_dict() for c in chapters],
+            "status": "complete"
+            if len(chapters) >= self.bard_config.max_saga_chapters
+            else "active",
+        }
+
+    # =========================================================================
+    # Statistics
+    # =========================================================================
+
+    async def get_lore_statistics(
+        self,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get statistics about the Captain's lore collection.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Dictionary with lore statistics.
+        """
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le.saga_id as saga_id, count(le) as chapter_count
+        RETURN
+            count(saga_id) as total_sagas,
+            sum(chapter_count) as total_episodes,
+            avg(chapter_count) as avg_chapters_per_saga
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {"captain_uuid": self.captain_uuid},
+            trace_id=trace_id,
+        )
+
+        stats = result[0] if result else {}
+
+        return {
+            "total_sagas": stats.get("total_sagas", 0),
+            "total_episodes": stats.get("total_episodes", 0),
+            "avg_chapters_per_saga": round(stats.get("avg_chapters_per_saga", 0) or 0, 1),
+            "captain_uuid": self.captain_uuid,
+            "canonical_tidbits_available": len(self.CANONICAL_TIDBITS),
+        }
+
+
+# =============================================================================
+# Export
+# =============================================================================
+
+__all__ = [
+    "CANONICAL_TIDBITS",
+    "ActiveSaga",
+    "BardConfig",
+    "BardOfTheBilge",
+    "LoreEpisode",
+    "SaltResult",
+    "generate_saga_name",
+]
