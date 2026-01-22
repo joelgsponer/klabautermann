@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Lore query methods for BardOfTheBilge agent (#112, #113, #114, #115)
+  - `get_recent_lore(limit)` - Retrieve last N story episodes ordered by told_at DESC
+  - `get_saga_chain(saga_id)` - Get all chapters of a saga in order with metadata
+  - `get_cross_channel_story(saga_id)` - Show how a story traveled across channels
+  - `get_saga_statistics_by_captain()` - Count sagas and chapters grouped by Captain
+  - Channel field added to `LoreEpisode` for tracking where episodes were told
+  - Channel parameter added to `salt_response()`, `_continue_saga()`, `start_new_saga()`
+  - New process_message operations: `get_recent_lore`, `get_saga_chain`, `get_cross_channel_story`, `get_saga_statistics_by_captain`
+  - 17 new unit tests for lore query methods
 - Bard integration with Orchestrator for response salting (#109, #116, #117)
   - `config/agents/bard.yaml` configuration file for Bard settings
     - `tidbit_probability`: 0.07 (7% of responses get tidbits)
