@@ -144,17 +144,31 @@ class TestThreadArchivalFlow:
         mock_thread_manager.mark_archived = AsyncMock(return_value=True)
 
         # Mock summarization (this would normally call LLM)
-        with patch(
-            "klabautermann.agents.archivist.summarize_thread",
-            new_callable=AsyncMock,
-        ) as mock_summarize:
+        # Also mock create_note_with_links to avoid Neo4j query issues
+        with (
+            patch(
+                "klabautermann.agents.archivist.summarize_thread",
+                new_callable=AsyncMock,
+            ) as mock_summarize,
+            patch(
+                "klabautermann.agents.archivist.create_note_with_links",
+                new_callable=AsyncMock,
+            ) as mock_create_note,
+        ):
             mock_summarize.return_value = MagicMock(
                 summary="Discussed Sarah, CTO at Acme Corp",
                 topics=["people", "organizations"],
                 action_items=[],
                 new_facts=[],
                 conflicts=[],
+                participants=["Sarah"],
             )
+            # Return a valid note_uuid from create_note_with_links
+            expected_note_uuid = str(uuid.uuid4())
+            mock_create_note.return_value = {
+                "note_uuid": expected_note_uuid,
+                "entity_link_count": 1,
+            }
 
             # Create Archivist and archive thread
             archivist = Archivist(
@@ -167,6 +181,7 @@ class TestThreadArchivalFlow:
             # Assert: Note UUID returned
             assert note_uuid is not None
             assert isinstance(note_uuid, str)
+            assert note_uuid == expected_note_uuid
 
             # Assert: Thread marked as archiving then archived
             # Use ANY for trace_id since it's dynamically generated
@@ -177,8 +192,9 @@ class TestThreadArchivalFlow:
             assert call_kwargs["thread_uuid"] == test_thread_uuid
             assert call_kwargs["summary_uuid"] == note_uuid
 
-            # Assert: Summarization called
+            # Assert: Summarization and note creation called
             mock_summarize.assert_called_once()
+            mock_create_note.assert_called_once()
 
     @pytest.mark.integration
     @pytest.mark.asyncio
@@ -650,11 +666,17 @@ class TestConflictDetection:
         mock_thread_manager.mark_archiving = AsyncMock(return_value=True)
         mock_thread_manager.mark_archived = AsyncMock(return_value=True)
 
-        # Mock summarization with conflict
-        with patch(
-            "klabautermann.agents.archivist.summarize_thread",
-            new_callable=AsyncMock,
-        ) as mock_summarize:
+        # Mock summarization with conflict and create_note_with_links
+        with (
+            patch(
+                "klabautermann.agents.archivist.summarize_thread",
+                new_callable=AsyncMock,
+            ) as mock_summarize,
+            patch(
+                "klabautermann.agents.archivist.create_note_with_links",
+                new_callable=AsyncMock,
+            ) as mock_create_note,
+        ):
             mock_summarize.return_value = MagicMock(
                 summary="Sarah changed jobs",
                 topics=["people", "career"],
@@ -674,7 +696,14 @@ class TestConflictDetection:
                         resolution="expire_old",
                     )
                 ],
+                participants=["Sarah"],
             )
+            # Return a valid note_uuid from create_note_with_links
+            expected_note_uuid = str(uuid.uuid4())
+            mock_create_note.return_value = {
+                "note_uuid": expected_note_uuid,
+                "entity_link_count": 1,
+            }
 
             archivist = Archivist(
                 thread_manager=mock_thread_manager,
@@ -686,6 +715,7 @@ class TestConflictDetection:
 
             # Assert: Note created
             assert note_uuid is not None
+            assert note_uuid == expected_note_uuid
 
             # Assert: Summary contains conflict
             summary = mock_summarize.return_value
@@ -938,8 +968,8 @@ class TestSkillsToExecutorIntegration:
             google_bridge=mock_bridge,
         )
 
-        # Mock the internal email handling
-        with patch.object(executor, "_handle_email_action", new_callable=AsyncMock) as mock_handle:
+        # Mock the internal Gmail send handling (_handle_gmail_send is the actual method)
+        with patch.object(executor, "_handle_gmail_send", new_callable=AsyncMock) as mock_handle:
             mock_handle.return_value = MagicMock(
                 success=True,
                 message="Email sent to test@example.com",
