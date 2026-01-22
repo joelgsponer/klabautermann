@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,lore,agents">
+    <meta name="post-slug" content="saga-progress-journal">
+    <meta name="post-excerpt" content="The Scribe remembers what the Bard told. Daily journals now chronicle your storytelling progress.">
+    <title>The Scribe Remembers the Tales | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">lore</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Scribe Remembers the Tales</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard tells tales. The Scribe writes history. Now they work together.</p>
+                <p>LORE_SYSTEM.md Section 5.2 specified that the Scribe's daily reflection should include saga progress. Today we made it happen.</p>
+
+                <h2>The Integration (#110)</h2>
+                <p>The Scribe generates daily journals at midnight. These journals summarize the day's interactions, tasks, and observations. But until now, they missed one thing: the stories.</p>
+                <p>When the Bard tells a tale - advances a saga chapter or shares a standalone tidbit - that's part of the Captain's day. It belongs in the Ship's Log.</p>
+
+                <h2>The Data Model</h2>
+                <p>A new model tracks saga progress:</p>
+                <pre><code>class SagaProgress(BaseModel):
+    """Progress update for a saga told during the day."""
+    saga_id: str
+    saga_name: str
+    chapter: int
+    channel: str | None = None</code></pre>
+                <p>Simple. A saga, its name, the chapter told, and where.</p>
+
+                <h2>The Query</h2>
+                <p>LoreEpisodes know when they were told (<code>told_at</code> timestamp). Query the day's episodes:</p>
+                <pre><code>MATCH (le:LoreEpisode)
+WHERE le.told_at >= $day_start_ms AND le.told_at < $day_end_ms
+  AND le.saga_id IS NOT NULL
+RETURN le.saga_id as saga_id,
+       le.saga_name as saga_name,
+       le.chapter as chapter,
+       le.channel as channel
+ORDER BY le.told_at ASC</code></pre>
+                <p>Note: <code>told_at</code> is stored in milliseconds. Day bounds must be converted.</p>
+
+                <h2>The Journal Section</h2>
+                <p>The Scribe's system prompt now includes a sixth section:</p>
+                <pre><code>5. LORE PROGRESS (if any tales were told)
+   - Mention any saga chapters advanced today
+   - Note which channels the tales traveled through
+   - Skip this section if no tales were told
+
+6. SAILOR'S THINKING</code></pre>
+                <p>The analytics context formats progress for the LLM:</p>
+                <pre><code>Lore Progress:
+  - Advanced 'The Great Maelstrom of '98' to chapter 2 via cli
+  - Advanced 'The Great Maelstrom of '98' to chapter 3 via telegram</code></pre>
+                <p>Or when quiet:</p>
+                <pre><code>Lore Progress: No tales were told today. The sea was quiet.</code></pre>
+
+                <h2>The Result</h2>
+                <p>A day's journal might now read:</p>
+                <blockquote>
+                    <p>I advanced 'The Great Maelstrom of '98' to chapter 3 today, shared across CLI and Telegram. The tale travels well between ports.</p>
+                </blockquote>
+                <p>The Ship's Log now chronicles mythology alongside work.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#110: [LORE-014] Add saga progress to daily reflection</li>
+                </ul>
+                <p>Plus 10 already-implemented issues that were discovered during triage (#41-48, #101, #111).</p>
+
+                <h2>The Connection</h2>
+                <p>The Bard and Scribe now share a thread. When the Bard weaves a tale, the Scribe records it. When the Scribe writes the day's log, the Bard's work is remembered.</p>
+                <p><em>A story told is a story that matters. A story recorded is a story that lasts.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

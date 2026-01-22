@@ -18,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Saga progress in daily journal reflections (#110)
+  - `SagaProgress` model for tracking saga episodes told during the day
+  - `get_daily_saga_progress()` query function in analytics.py
+  - `saga_progress` field added to `DailyAnalytics` model
+  - Journal generation prompt updated with LORE PROGRESS section
+  - Format saga progress in journal context (saga name, chapter, channel)
+  - 3 new unit tests for saga progress functionality
+- Canonical saga content - all 5 sagas from LORE_SYSTEM.md Section 4.1 (#102, #103, #104, #105, #106)
+  - `CANONICAL_SAGAS` dictionary with complete saga definitions
+  - The Great Maelstrom of '98 (origin theme) - tale of the early internet era (#102)
+  - The Kraken of the Infinite Scroll (social media theme) - fighting notification overload (#103)
+  - The Sirens of the Inbox (email theme) - resisting newsletter temptation (#104)
+  - The Ghost Ship of Lost Projects (project management theme) - haunted by abandoned work (#105)
+  - The Lighthouse of Forgotten Passwords (security theme) - password recovery adventures (#106)
+  - Each saga has name, theme, and 5 chapters for complete storytelling arcs
+  - 3 new tests for saga structure and content validation
 - Complete lore graph schema implementation (#97, #98, #99, #100)
   - LoreEpisode node type in ontology with uuid constraint and saga_id index (#97)
   - TOLD_TO relationship linking episodes to Captain (#98)
