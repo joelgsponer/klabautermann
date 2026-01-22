@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- OfficerOfTheWatch proactive alert agent (#59, #60, #61)
+  - `OfficerOfTheWatch` agent skeleton extending `BaseAgent`
+  - `OfficerConfig` for configurable alert thresholds (hours, minutes, debounce)
+  - `AlertType` enum for alert types (deadline_warning, meeting_reminder, overdue_task, etc.)
+  - `AlertPriority` enum for priority levels (INFO, WARNING, ERROR, CRITICAL)
+  - `Alert` and `AlertCheckResult` dataclasses for structured results
+  - `check_upcoming_deadlines()` for tasks due within N hours
+  - `check_upcoming_meetings()` for events starting within N minutes
+  - `check_overdue_tasks()` for tasks past their due date
+  - `is_deep_work_time()` for detecting "Deep Work" calendar blocks (quiet mode)
+  - Alert debouncing to prevent duplicate notifications
+  - `process_message()` support for inter-agent communication
+  - 32 new unit tests for comprehensive coverage
 - HullCleaner orphan message management (#82, #83)
   - `find_orphan_messages()` detects messages without thread connections
   - `remove_orphan_messages()` with dry-run support and audit logging
