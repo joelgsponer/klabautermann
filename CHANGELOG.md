@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)
 
 ### Added
+- Prometheus metrics export with `/metrics` endpoint (#271)
+- Agent metrics: `klabautermann_agent_requests_total`, `klabautermann_agent_successes_total`, `klabautermann_agent_errors_total`, `klabautermann_agent_request_latency_ms`, `klabautermann_agent_running`, `klabautermann_agent_inbox_size`
+- API metrics: `klabautermann_api_requests_total`, `klabautermann_api_request_latency_seconds`, `klabautermann_api_websocket_connections`
+- Graph metrics: `klabautermann_graph_operations_total`, `klabautermann_graph_operation_latency_seconds`
+- LLM metrics: `klabautermann_llm_calls_total`, `klabautermann_llm_tokens_total`, `klabautermann_llm_call_latency_seconds`
+- Helper functions: `record_agent_*`, `record_api_*`, `record_graph_*`, `record_llm_*`
+- `timed_operation` decorator for automatic latency tracking
+- 27 new unit tests for Prometheus metrics
 - Enhanced `JSONFormatter` with service/environment/hostname fields (#272)
 - `log_context()` context manager for scoped structured logging fields
 - `get_log_context()`, `set_log_context()`, `clear_log_context()` functions
