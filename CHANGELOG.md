@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- JSON-based graph backup and restore (#203, #204)
+  - `create_backup()` exports all nodes and relationships to JSON
+  - `restore_backup()` imports snapshot with optional `clear_existing`
+  - `BackupMetadata` tracks timestamps, counts, labels, version
+  - `BackupSnapshot` contains complete graph state
+  - `RestoreResult` reports success, counts, errors
+  - `validate_backup()` checks consistency before restore
+  - `save_backup_to_file()` and `load_backup_from_file()` for persistence
+  - `clear_database()` for controlled data removal
+  - 24 new unit tests for backup/restore functionality
 - Channel auto-restart with exponential backoff (#154)
   - Auto-restart unhealthy channels during health monitoring
   - Configurable `max_restart_attempts` and `restart_backoff_seconds`

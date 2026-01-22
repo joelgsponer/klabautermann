@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Graph Backup & Restore**: Export your knowledge graph to JSON and restore it later. Create backups with `create_backup()`, save to file with timestamps and metadata. Restore with optional `clear_existing` mode. Validates integrity before restore - checks counts, orphan relationships, and duplicate UUIDs.
 - **Channel Auto-Recovery**: Channels now automatically restart when they fail. If Telegram drops, it restarts with exponential backoff. After 3 failed attempts, it stops retrying and notifies you. Broadcast messages to all channels at once with `broadcast()`.
 - **Channel Metrics**: Monitor your channels with Prometheus metrics. Track message counts, response latencies, error rates, and health status per channel. See which channels are active, healthy, and how many broadcasts succeeded or failed.
 - **Distributed Tracing**: Track requests across agents with W3C Trace Context compatible trace IDs. Each request gets a unique 128-bit trace ID that propagates through all agent calls. Create spans to track individual operations with `trace_span("operation.name")`. Export traces to stdout for development or configure OTLP export for production. Enable with `TRACING_ENABLED=true` and `TRACING_EXPORT=stdout`.
