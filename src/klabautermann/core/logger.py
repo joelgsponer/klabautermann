@@ -6,21 +6,34 @@ All log levels are mapped to nautical terminology to maintain the ship spirit pe
 
 Features:
 - Nautical-themed log levels ([WHISPER], [CHART], [BEACON], [SWELL], [STORM], [SHIPWRECK])
-- JSON structured logging for file output
+- JSON structured logging for file output and log aggregation
 - Log rotation with configurable size/count limits
 - Gzip compression for old logs
+- Structured context support with LogContext for adding fields to log scopes
+- Environment-based configuration for production deployments
+
+Environment Variables:
+- LOG_LEVEL: Set log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+- LOG_FORMAT: Set output format (json, text). Default: text
+- LOG_TO_FILE: Enable file logging (true/false). Default: false
+- LOG_SERVICE_NAME: Service name for structured logs. Default: klabautermann
+- LOG_ENVIRONMENT: Deployment environment (dev, staging, prod). Default: dev
 
 Reference: specs/quality/LOGGING.md
+Issue: #272 - Add structured logging
 """
 
 from __future__ import annotations
 
+import contextvars
 import gzip
 import json
 import logging
 import os
+import platform
 import shutil
 import sys
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -28,7 +41,51 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from logging import LogRecord
+
+
+# ===========================================================================
+# Context Variables for Structured Logging
+# ===========================================================================
+
+# Context variable for storing log context that applies to all logs in scope
+_log_context: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "log_context", default={}
+)
+
+
+def get_log_context() -> dict[str, Any]:
+    """Get the current log context dictionary."""
+    return _log_context.get().copy()
+
+
+def set_log_context(**kwargs: Any) -> contextvars.Token[dict[str, Any]]:
+    """Set log context fields. Returns token for reset."""
+    current = _log_context.get().copy()
+    current.update(kwargs)
+    return _log_context.set(current)
+
+
+def clear_log_context() -> None:
+    """Clear all log context fields."""
+    _log_context.set({})
+
+
+@contextmanager
+def log_context(**kwargs: Any) -> Iterator[None]:
+    """
+    Context manager for adding fields to all logs within a scope.
+
+    Example:
+        with log_context(trace_id="abc123", user_id="user1"):
+            logger.info("Processing request")  # Includes trace_id and user_id
+    """
+    token = set_log_context(**kwargs)
+    try:
+        yield
+    finally:
+        _log_context.reset(token)
 
 
 # ===========================================================================
@@ -138,32 +195,108 @@ class NauticalFormatter(logging.Formatter):
 
 
 class JSONFormatter(logging.Formatter):
-    """JSON formatter for structured log aggregation."""
+    """
+    JSON formatter for structured log aggregation.
+
+    Produces JSON lines suitable for log aggregation systems like
+    Elasticsearch, Loki, or CloudWatch. Each line is a complete
+    JSON object with standardized fields.
+
+    Standard Fields:
+    - timestamp: ISO 8601 timestamp with timezone
+    - level: Standard log level (DEBUG, INFO, etc.)
+    - nautical_level: Klabautermann themed level ([WHISPER], [CHART], etc.)
+    - logger: Logger name
+    - message: Log message
+    - service: Service name (from LOG_SERVICE_NAME or "klabautermann")
+    - environment: Deployment environment (from LOG_ENVIRONMENT or "dev")
+    - hostname: Machine hostname
+
+    Context Fields (when present):
+    - trace_id: Request trace ID for correlation
+    - agent_name: Agent that generated the log
+    - thread_id: Conversation thread ID
+    - user_id: User identifier
+
+    Performance Fields (when present):
+    - latency_ms: Operation latency in milliseconds
+    - tool_name: MCP tool being invoked
+    - operation: Operation type
+
+    Additional fields from log_context() are merged automatically.
+    """
+
+    # Cache static fields that don't change
+    _static_fields: ClassVar[dict[str, str] | None] = None
+
+    @classmethod
+    def _get_static_fields(cls) -> dict[str, str]:
+        """Get static fields (computed once and cached)."""
+        if cls._static_fields is None:
+            cls._static_fields = {
+                "service": os.getenv("LOG_SERVICE_NAME", "klabautermann"),
+                "environment": os.getenv("LOG_ENVIRONMENT", "dev"),
+                "hostname": platform.node(),
+            }
+        return cls._static_fields
 
     def format(self, record: LogRecord) -> str:
-        log_entry: dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
-            "level": record.levelname,
-            "nautical_level": NauticalFormatter.LEVEL_MAP.get(record.levelname, record.levelname),
-            "logger": record.name,
-            "message": record.getMessage(),
-        }
+        # Start with static fields
+        log_entry: dict[str, Any] = self._get_static_fields().copy()
 
-        # Add trace context if present
-        for key in ("trace_id", "agent_name", "thread_id", "user_id"):
-            if hasattr(record, key):
-                log_entry[key] = getattr(record, key)
+        # Add core fields
+        log_entry.update(
+            {
+                "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+                "level": record.levelname,
+                "nautical_level": NauticalFormatter.LEVEL_MAP.get(
+                    record.levelname, record.levelname
+                ),
+                "logger": record.name,
+                "message": record.getMessage(),
+            }
+        )
+
+        # Add context from contextvars (set via log_context())
+        context = get_log_context()
+        if context:
+            log_entry.update(context)
+
+        # Add trace context if present on record
+        for key in ("trace_id", "agent_name", "thread_id", "user_id", "captain_uuid"):
+            value = getattr(record, key, None)
+            if value is not None:
+                log_entry[key] = value
 
         # Add performance metrics if present
-        for key in ("latency_ms", "tool_name", "operation"):
-            if hasattr(record, key):
-                log_entry[key] = getattr(record, key)
+        for key in ("latency_ms", "tool_name", "operation", "duration_ms"):
+            value = getattr(record, key, None)
+            if value is not None:
+                log_entry[key] = value
+
+        # Add workflow inspection fields if present
+        for key in ("workflow_phase", "step"):
+            value = getattr(record, key, None)
+            if value is not None:
+                log_entry[key] = value
+
+        # Add source location for debugging (optional, controlled by env var)
+        if os.getenv("LOG_INCLUDE_SOURCE", "").lower() in ("true", "1", "yes"):
+            log_entry["source"] = {
+                "file": record.pathname,
+                "line": record.lineno,
+                "function": record.funcName,
+            }
 
         # Add exception info
         if record.exc_info:
-            log_entry["exception"] = self.formatException(record.exc_info)
+            log_entry["exception"] = {
+                "type": record.exc_info[0].__name__ if record.exc_info[0] else "Unknown",
+                "message": str(record.exc_info[1]) if record.exc_info[1] else "",
+                "traceback": self.formatException(record.exc_info),
+            }
 
-        return json.dumps(log_entry)
+        return json.dumps(log_entry, default=str)
 
 
 # ===========================================================================
@@ -449,11 +582,15 @@ __all__ = [
     "KlabautermannLogger",
     "LogRotationConfig",
     "NauticalFormatter",
+    "clear_log_context",
+    "get_log_context",
     "get_logger",
+    "log_context",
     "log_with_context",
     "logger",
     "restore_console_logging",
     "set_cli_log_level",
+    "set_log_context",
     "setup_logger",
     "suppress_console_logging",
 ]
