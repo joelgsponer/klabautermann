@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,infra">
+    <meta name="post-slug" content="structured-logging">
+    <meta name="post-excerpt" content="JSON log format for log aggregation. Service name, environment, hostname, and trace IDs in every entry.">
+    <title>Logs That Tell Stories | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">infra</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Logs That Tell Stories</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Text logs are for humans. JSON logs are for machines. Today we enhanced the logging system to speak both languages fluently.</p>
+
+                <h2>The Problem</h2>
+                <p>When you're debugging locally, you want readable output:</p>
+
+                <pre><code>15:42:03 | abc12345 | researcher   | [CHART]     | Processing query</code></pre>
+
+                <p>When you're running in production with Elasticsearch or Loki, you need structure:</p>
+
+                <pre><code>{
+  "timestamp": "2026-01-22T15:42:03.123Z",
+  "level": "INFO",
+  "service": "klabautermann",
+  "trace_id": "abc12345",
+  "message": "Processing query"
+}</code></pre>
+
+                <p>Same information, different format. The logging system now supports both.</p>
+
+                <h2>Enable JSON Output</h2>
+                <pre><code>export LOG_FORMAT=json</code></pre>
+
+                <p>That's it. Every log becomes a JSON line ready for aggregation.</p>
+
+                <h2>Standard Fields</h2>
+                <p>Every JSON log entry includes:</p>
+
+                <pre><code>{
+  "timestamp": "2026-01-22T15:42:03.123456+00:00",
+  "level": "INFO",
+  "nautical_level": "[CHART]",
+  "logger": "klabautermann.agents.researcher",
+  "message": "Planning search strategy",
+  "service": "klabautermann",
+  "environment": "dev",
+  "hostname": "prod-node-1"
+}</code></pre>
+
+                <h3>Service Identity</h3>
+                <pre><code>export LOG_SERVICE_NAME=klabautermann-worker-1
+export LOG_ENVIRONMENT=prod</code></pre>
+
+                <p>When running multiple instances, these fields help you filter and aggregate.</p>
+
+                <h2>Context Without Repetition</h2>
+                <p>Instead of passing trace_id to every log call:</p>
+
+                <pre><code># Tedious
+logger.info("Start", extra={"trace_id": tid})
+logger.info("Middle", extra={"trace_id": tid})
+logger.info("End", extra={"trace_id": tid})</code></pre>
+
+                <p>Use the context manager:</p>
+
+                <pre><code>from klabautermann.core.logger import log_context
+
+with log_context(trace_id=tid, user_id=uid):
+    logger.info("Start")   # Includes trace_id and user_id
+    logger.info("Middle")  # Same context
+    logger.info("End")     # Same context</code></pre>
+
+                <p>The context is stored in a contextvars.ContextVar, so it's async-safe and thread-safe.</p>
+
+                <h2>Structured Exceptions</h2>
+                <p>Exceptions become structured data:</p>
+
+                <pre><code>{
+  "timestamp": "2026-01-22T15:42:03.123Z",
+  "level": "ERROR",
+  "message": "Failed to process",
+  "exception": {
+    "type": "ValueError",
+    "message": "Invalid input",
+    "traceback": "Traceback (most recent call last):..."
+  }
+}</code></pre>
+
+                <p>Type and message are separate fields - easy to aggregate error types and search for specific messages.</p>
+
+                <h2>Source Location</h2>
+                <p>For deep debugging, enable source location:</p>
+
+                <pre><code>export LOG_INCLUDE_SOURCE=true</code></pre>
+
+                <p>This adds:</p>
+
+                <pre><code>{
+  "source": {
+    "file": "/app/src/klabautermann/agents/researcher.py",
+    "line": 245,
+    "function": "_plan_search"
+  }
+}</code></pre>
+
+                <p>Expensive in terms of log size, but invaluable when hunting a bug.</p>
+
+                <h2>The Implementation</h2>
+                <p>The enhanced <code>JSONFormatter</code>:</p>
+
+                <pre><code>class JSONFormatter(logging.Formatter):
+    """JSON formatter for structured log aggregation."""
+
+    # Cache static fields (computed once)
+    _static_fields: ClassVar[dict[str, str] | None] = None
+
+    @classmethod
+    def _get_static_fields(cls) -> dict[str, str]:
+        if cls._static_fields is None:
+            cls._static_fields = {
+                "service": os.getenv("LOG_SERVICE_NAME", "klabautermann"),
+                "environment": os.getenv("LOG_ENVIRONMENT", "dev"),
+                "hostname": platform.node(),
+            }
+        return cls._static_fields
+
+    def format(self, record: LogRecord) -> str:
+        log_entry = self._get_static_fields().copy()
+
+        # Core fields
+        log_entry.update({
+            "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+            "level": record.levelname,
+            "nautical_level": NauticalFormatter.LEVEL_MAP.get(record.levelname, record.levelname),
+            "logger": record.name,
+            "message": record.getMessage(),
+        })
+
+        # Context from log_context()
+        context = get_log_context()
+        if context:
+            log_entry.update(context)
+
+        # Fields from record.extra
+        for key in ("trace_id", "agent_name", "latency_ms", ...):
+            value = getattr(record, key, None)
+            if value is not None:
+                log_entry[key] = value
+
+        return json.dumps(log_entry, default=str)</code></pre>
+
+                <p>Static fields are computed once and cached. Context fields are merged on every call. Record fields are extracted dynamically.</p>
+
+                <h2>Context Manager</h2>
+                <pre><code>_log_context: contextvars.ContextVar[dict[str, Any]] = contextvars.ContextVar(
+    "log_context", default={}
+)
+
+@contextmanager
+def log_context(**kwargs: Any) -> Iterator[None]:
+    token = set_log_context(**kwargs)
+    try:
+        yield
+    finally:
+        _log_context.reset(token)</code></pre>
+
+                <p>The token pattern ensures nested contexts work correctly - each scope restores the previous state on exit.</p>
+
+                <h2>Environment Variables</h2>
+                <table>
+                    <thead>
+                        <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>LOG_FORMAT</td><td>text</td><td>Output format (json or text)</td></tr>
+                        <tr><td>LOG_SERVICE_NAME</td><td>klabautermann</td><td>Service identifier</td></tr>
+                        <tr><td>LOG_ENVIRONMENT</td><td>dev</td><td>Deployment environment</td></tr>
+                        <tr><td>LOG_INCLUDE_SOURCE</td><td>false</td><td>Include file/line/function</td></tr>
+                        <tr><td>LOG_LEVEL</td><td>INFO</td><td>Minimum log level</td></tr>
+                        <tr><td>LOG_TO_FILE</td><td>false</td><td>Enable file output</td></tr>
+                    </tbody>
+                </table>
+
+                <h2>The Tests</h2>
+                <p>23 tests cover the structured logging system:</p>
+
+                <ul>
+                    <li><strong>TestJSONFormatter</strong>: Basic formatting, trace IDs, agent names, performance metrics, exceptions, all log levels, custom service name, source location</li>
+                    <li><strong>TestLogContext</strong>: Empty context, setting fields, token return, context manager, nested contexts, clearing, JSON output integration</li>
+                    <li><strong>TestNauticalFormatter</strong>: Color disabled, trace ID inclusion, agent name inclusion</li>
+                    <li><strong>TestSetupLogger</strong>: Logger creation, JSON output, log level, LOG_FORMAT env var</li>
+                    <li><strong>TestIntegration</strong>: End-to-end JSON logging flow</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>175 lines added to <code>src/klabautermann/core/logger.py</code></li>
+                    <li>4 new functions: <code>log_context()</code>, <code>get_log_context()</code>, <code>set_log_context()</code>, <code>clear_log_context()</code></li>
+                    <li>Enhanced <code>JSONFormatter</code> with static field caching</li>
+                    <li>23 new unit tests</li>
+                    <li>All 1674 tests pass</li>
+                </ul>
+
+                <p>Issue #272, closed. The ship's logs are now machine-readable.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
