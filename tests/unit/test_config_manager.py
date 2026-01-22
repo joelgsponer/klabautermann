@@ -12,14 +12,20 @@ import pytest
 
 from klabautermann.config.manager import (
     AgentConfigBase,
+    BardConfig,
     ConfigManager,
     ExecutorConfig,
     IngestorConfig,
     IntentConfig,
+    LoreConfig,
+    LoreDisplayConfig,
     ModelConfig,
     OrchestratorConfig,
     ResearcherConfig,
     RetryConfig,
+    SagaRulesConfig,
+    SelectionWeightsConfig,
+    StormModeConfig,
     TimeoutConfig,
 )
 
@@ -270,6 +276,88 @@ model:
             RetryConfig(jitter=1.5)
 
 
+class TestBardConfig:
+    """Tests for BardConfig validation (#116, #117)."""
+
+    def test_bard_config_defaults(self) -> None:
+        """BardConfig has sensible defaults."""
+        config = BardConfig()
+        assert config.name == "bard"
+        assert config.tidbit_probability == 0.07
+        assert config.saga_continuation_probability == 0.3
+        assert isinstance(config.saga_rules, SagaRulesConfig)
+        assert isinstance(config.storm_mode, StormModeConfig)
+        assert isinstance(config.display, LoreDisplayConfig)
+
+    def test_saga_rules_defaults(self) -> None:
+        """SagaRulesConfig has correct defaults from spec."""
+        config = SagaRulesConfig()
+        assert config.max_chapters == 5
+        assert config.max_active == 3
+        assert config.timeout_days == 30
+        assert config.min_interval_hours == 1.0
+
+    def test_saga_rules_validation(self) -> None:
+        """SagaRulesConfig validates bounds."""
+        config = SagaRulesConfig(max_chapters=10, max_active=5)
+        assert config.max_chapters == 10
+        assert config.max_active == 5
+
+        with pytest.raises(ValueError):
+            SagaRulesConfig(max_chapters=0)  # Must be >= 1
+
+        with pytest.raises(ValueError):
+            SagaRulesConfig(max_active=0)  # Must be >= 1
+
+    def test_selection_weights_defaults(self) -> None:
+        """SelectionWeightsConfig has correct defaults."""
+        config = SelectionWeightsConfig()
+        assert config.continue_saga == 0.3
+        assert config.start_saga == 0.2
+        assert config.standalone == 0.5
+
+    def test_selection_weights_validation(self) -> None:
+        """SelectionWeightsConfig validates probability bounds."""
+        with pytest.raises(ValueError):
+            SelectionWeightsConfig(continue_saga=-0.1)  # Must be >= 0
+
+        with pytest.raises(ValueError):
+            SelectionWeightsConfig(start_saga=1.5)  # Must be <= 1
+
+    def test_storm_mode_defaults(self) -> None:
+        """StormModeConfig has correct defaults."""
+        config = StormModeConfig()
+        assert config.enabled is True
+        assert "urgent" in config.keywords
+        assert "emergency" in config.keywords
+
+    def test_lore_display_defaults(self) -> None:
+        """LoreDisplayConfig has correct defaults."""
+        config = LoreDisplayConfig()
+        assert config.format == "italic"
+        assert config.separator == "\n\n"
+
+    def test_lore_config_defaults(self) -> None:
+        """LoreConfig (personality-level) has correct defaults."""
+        config = LoreConfig()
+        assert config.enabled is True
+        assert config.tidbit_frequency == 0.07
+        assert config.saga_continuation_chance == 0.3
+        assert config.new_saga_chance == 0.2
+        assert config.display_format == "italic"
+
+    def test_tidbit_probability_validation(self) -> None:
+        """Tidbit probability must be between 0 and 1."""
+        config = BardConfig(tidbit_probability=0.15)
+        assert config.tidbit_probability == 0.15
+
+        with pytest.raises(ValueError):
+            BardConfig(tidbit_probability=-0.1)
+
+        with pytest.raises(ValueError):
+            BardConfig(tidbit_probability=1.5)
+
+
 class TestIntegrationWithRealConfigs:
     """Tests using the actual config files."""
 
@@ -288,3 +376,19 @@ class TestIntegrationWithRealConfigs:
             assert orchestrator.model.primary is not None
             assert orchestrator.intent_classification.model is not None
             assert orchestrator.intent_classification.timeout > 0
+
+    def test_loads_bard_config_from_file(self) -> None:
+        """ConfigManager loads bard.yaml correctly."""
+        # Use the real config directory
+        config_dir = Path(__file__).parent.parent.parent / "config" / "agents"
+        if not config_dir.exists():
+            pytest.skip("Real config directory not found")
+
+        manager = ConfigManager(config_dir)
+
+        # Should load bard config
+        bard = manager.get_typed("bard", BardConfig)
+        if bard:
+            assert bard.name == "bard"
+            assert 0 <= bard.tidbit_probability <= 1
+            assert bard.saga_rules is not None

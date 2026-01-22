@@ -232,6 +232,89 @@ class OrchestratorV2Config(BaseModel):
 
 
 # ===========================================================================
+# Bard Configuration (#116, #117)
+# ===========================================================================
+
+
+class SagaRulesConfig(BaseModel):
+    """Saga lifecycle rules configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_chapters: int = Field(default=5, ge=1, le=20)
+    max_active: int = Field(default=3, ge=1, le=10)
+    timeout_days: int = Field(default=30, ge=1, le=365)
+    min_interval_hours: float = Field(default=1.0, ge=0.0, le=24.0)
+
+
+class SelectionWeightsConfig(BaseModel):
+    """Tidbit selection weights configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    continue_saga: float = Field(default=0.3, ge=0.0, le=1.0)
+    start_saga: float = Field(default=0.2, ge=0.0, le=1.0)
+    standalone: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class StormModeConfig(BaseModel):
+    """Storm mode configuration - disable tidbits during urgent responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    keywords: list[str] = Field(default_factory=lambda: ["urgent", "emergency", "critical", "asap"])
+
+
+class LoreDisplayConfig(BaseModel):
+    """Lore display formatting configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    format: str = "italic"  # italic, bold, plain
+    separator: str = "\n\n"
+
+
+class BardConfig(BaseModel):
+    """Bard of the Bilge configuration - lore and storytelling agent."""
+
+    model_config = ConfigDict(extra="allow")
+
+    name: str = "bard"
+    model: ModelConfig = Field(default_factory=ModelConfig)
+
+    # Probability that a response gets "salted" with a tidbit (5-10%)
+    tidbit_probability: float = Field(default=0.07, ge=0.0, le=1.0)
+
+    # Probability of continuing existing saga vs starting new one
+    saga_continuation_probability: float = Field(default=0.3, ge=0.0, le=1.0)
+
+    # Saga lifecycle rules
+    saga_rules: SagaRulesConfig = Field(default_factory=SagaRulesConfig)
+
+    # Selection weights for tidbit types
+    selection_weights: SelectionWeightsConfig = Field(default_factory=SelectionWeightsConfig)
+
+    # Storm mode - disable tidbits during urgent responses
+    storm_mode: StormModeConfig = Field(default_factory=StormModeConfig)
+
+    # Display formatting
+    display: LoreDisplayConfig = Field(default_factory=LoreDisplayConfig)
+
+
+class LoreConfig(BaseModel):
+    """Personality-level lore configuration (#117)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    tidbit_frequency: float = Field(default=0.07, ge=0.0, le=1.0)
+    saga_continuation_chance: float = Field(default=0.3, ge=0.0, le=1.0)
+    new_saga_chance: float = Field(default=0.2, ge=0.0, le=1.0)
+    display_format: str = "italic"  # italic, bold, plain
+
+
+# ===========================================================================
 # Configuration Manager
 # ===========================================================================
 
@@ -257,6 +340,7 @@ class ConfigManager:
         "ingestor": IngestorConfig,
         "researcher": ResearcherConfig,
         "executor": ExecutorConfig,
+        "bard": BardConfig,
     }
 
     def __init__(self, config_dir: Path | str | None = None) -> None:

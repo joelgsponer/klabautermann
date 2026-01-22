@@ -18,6 +18,8 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from klabautermann.agents.bard import BardConfig as BardAgentConfig
+from klabautermann.agents.bard import BardOfTheBilge
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.agents.executor import Executor
 from klabautermann.agents.ingestor import Ingestor
@@ -99,6 +101,7 @@ class Orchestrator(BaseAgent):
         thread_manager: ThreadManager | None = None,
         neo4j_client: Any | None = None,
         config: dict[str, Any] | None = None,
+        captain_uuid: str | None = None,
     ) -> None:
         """
         Initialize the Orchestrator.
@@ -108,11 +111,13 @@ class Orchestrator(BaseAgent):
             thread_manager: ThreadManager for conversation persistence.
             neo4j_client: Neo4jClient for direct graph queries (context building).
             config: Agent configuration.
+            captain_uuid: UUID of the Captain (user) for Bard personalization.
         """
         super().__init__(name="orchestrator", config=config)
         self.graphiti = graphiti
         self.thread_manager = thread_manager
         self.neo4j_client = neo4j_client
+        self.captain_uuid = captain_uuid
 
         # Anthropic client (lazy initialization)
         self._anthropic = None
@@ -156,6 +161,33 @@ class Orchestrator(BaseAgent):
 
         # Initialize skill-aware planner for Claude Code skill integration
         self._skill_planner = SkillAwarePlanner()
+
+        # Initialize Bard for response salting (#109)
+        self._bard: BardOfTheBilge | None = None
+        self._bard_config = self._load_bard_config()
+        if neo4j_client and captain_uuid and self._bard_config.get("enabled", True):
+            bard_agent_config = BardAgentConfig(
+                tidbit_probability=self._bard_config.get("tidbit_probability", 0.07),
+                saga_continuation_probability=self._bard_config.get(
+                    "saga_continuation_probability", 0.3
+                ),
+                max_saga_chapters=self._bard_config.get("saga_rules", {}).get("max_chapters", 5),
+                max_active_sagas=self._bard_config.get("saga_rules", {}).get("max_active", 3),
+                saga_timeout_days=self._bard_config.get("saga_rules", {}).get("timeout_days", 30),
+                min_chapter_interval_hours=self._bard_config.get("saga_rules", {}).get(
+                    "min_interval_hours", 1.0
+                ),
+            )
+            self._bard = BardOfTheBilge(
+                neo4j_client=neo4j_client,
+                captain_uuid=captain_uuid,
+                config=bard_agent_config,
+            )
+            self._agent_registry["bard"] = self._bard
+            logger.info(
+                "[CHART] Bard initialized for response salting",
+                extra={"agent_name": self.name, "captain_uuid": captain_uuid},
+            )
 
     @property
     def anthropic(self) -> Any:
@@ -1189,6 +1221,65 @@ class Orchestrator(BaseAgent):
 
         return response
 
+    def _load_bard_config(self) -> dict[str, Any]:
+        """
+        Load Bard configuration from config manager.
+
+        Returns:
+            Bard configuration dictionary with defaults if not available.
+        """
+        try:
+            from klabautermann.config.manager import ConfigManager
+
+            config_manager = ConfigManager()
+            bard_config = config_manager.get("bard")
+            if bard_config:
+                return bard_config.model_dump()
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Could not load bard config: {e}",
+                extra={"agent_name": self.name},
+            )
+
+        # Return sensible defaults if config not available
+        return {
+            "enabled": True,
+            "tidbit_probability": 0.07,
+            "saga_continuation_probability": 0.3,
+            "saga_rules": {
+                "max_chapters": 5,
+                "max_active": 3,
+                "timeout_days": 30,
+                "min_interval_hours": 1.0,
+            },
+            "storm_mode": {
+                "enabled": True,
+                "keywords": ["urgent", "emergency", "critical", "asap"],
+            },
+            "display": {
+                "format": "italic",
+                "separator": "\n\n",
+            },
+        }
+
+    def _detect_storm_mode(self, response: str) -> bool:
+        """
+        Detect if response should be in "storm mode" (urgent, no tidbits).
+
+        Args:
+            response: Response text to analyze.
+
+        Returns:
+            True if storm mode should be active.
+        """
+        storm_config = self._bard_config.get("storm_mode", {})
+        if not storm_config.get("enabled", True):
+            return False
+
+        keywords = storm_config.get("keywords", ["urgent", "emergency", "critical", "asap"])
+        response_lower = response.lower()
+        return any(keyword.lower() in response_lower for keyword in keywords)
+
     async def _apply_personality(
         self,
         response: str,
@@ -1197,24 +1288,62 @@ class Orchestrator(BaseAgent):
         """
         Apply Klabautermann personality formatting to response.
 
-        Currently a pass-through. In future sprints, this could invoke
-        The Bard for response "salting" with nautical flair.
+        Invokes the Bard for response "salting" with nautical flair.
+        The Bard may add tidbits or continue sagas based on probability
+        and configuration.
 
         Args:
             response: Raw response text.
             trace_id: Request trace ID.
 
         Returns:
-            Response with personality applied.
+            Response with personality applied (possibly with tidbit).
         """
-        # Future: Invoke The Bard for response salting via self.bard.salt_response()
+        # If Bard is not initialized, pass through
+        if self._bard is None:
+            logger.debug(
+                "[WHISPER] Personality applied (pass-through, no Bard)",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return response
 
-        logger.debug(
-            "[WHISPER] Personality applied (pass-through)",
-            extra={"trace_id": trace_id, "agent_name": self.name},
-        )
+        # Check storm mode - no tidbits during urgent responses
+        storm_mode = self._detect_storm_mode(response)
 
-        return response
+        try:
+            # Invoke the Bard for response salting
+            salt_result = await self._bard.salt_response(
+                clean_response=response,
+                storm_mode=storm_mode,
+                trace_id=trace_id,
+            )
+
+            if salt_result.tidbit_added:
+                logger.info(
+                    f"[BEACON] Bard added tidbit (saga={salt_result.saga_id or 'standalone'})",
+                    extra={
+                        "trace_id": trace_id,
+                        "agent_name": self.name,
+                        "tidbit_added": True,
+                        "is_continuation": salt_result.is_continuation,
+                        "chapter": salt_result.chapter,
+                    },
+                )
+                return salt_result.salted_response
+
+            logger.debug(
+                "[WHISPER] Personality applied (Bard skipped tidbit)",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return response
+
+        except Exception as e:
+            # Log error but don't fail the response
+            logger.warning(
+                f"[SWELL] Bard error, using unsalted response: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return response
 
     # =========================================================================
     # Orchestrator v2 Context Building (T053)
