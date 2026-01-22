@@ -1,0 +1,100 @@
+# Alertmanager Configuration for Klabautermann
+#
+# Reference: specs/infrastructure/DEPLOYMENT.md
+#
+# This is a minimal configuration that groups alerts and routes them
+# to a default receiver. Customize receivers for your notification channels
+# (Slack, PagerDuty, email, etc.).
+#
+# Documentation: https://prometheus.io/docs/alerting/latest/configuration/
+
+# Global configuration
+global:
+  # How long to wait before sending a notification again if it has already been sent
+  resolve_timeout: 5m
+
+# The root route for all alerts
+route:
+  # The default receiver
+  receiver: 'default-receiver'
+
+  # How long to initially wait before sending a notification for a group
+  group_wait: 30s
+
+  # How long to wait before sending a notification about new alerts
+  # that are added to a group of alerts that have already been sent
+  group_interval: 5m
+
+  # How long to wait before re-sending a notification
+  repeat_interval: 4h
+
+  # Group alerts by these labels
+  group_by: ['alertname', 'severity']
+
+  # Child routes for specific alert handling
+  routes:
+    # Critical alerts get sent immediately
+    - match:
+        severity: critical
+      receiver: 'critical-receiver'
+      group_wait: 10s
+      repeat_interval: 1h
+
+    # Warning alerts use default timing
+    - match:
+        severity: warning
+      receiver: 'warning-receiver'
+
+    # Info alerts are batched more aggressively
+    - match:
+        severity: info
+      receiver: 'info-receiver'
+      group_wait: 5m
+      repeat_interval: 24h
+
+# Inhibition rules to prevent redundant notifications
+inhibit_rules:
+  # If a critical alert is firing, inhibit warning alerts for the same alertname
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname']
+
+# Receiver definitions
+receivers:
+  # Default receiver - logs to stdout (visible in docker logs)
+  - name: 'default-receiver'
+    # No notification config = silent (for development)
+
+  # Critical alerts receiver
+  # Configure with your notification service (Slack, PagerDuty, etc.)
+  - name: 'critical-receiver'
+    # Example Slack configuration (uncomment and configure):
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+    #     channel: '#alerts-critical'
+    #     title: '{{ .CommonAnnotations.summary }}'
+    #     text: '{{ .CommonAnnotations.description }}'
+    #     send_resolved: true
+    #
+    # Example PagerDuty configuration:
+    # pagerduty_configs:
+    #   - service_key: 'YOUR_PAGERDUTY_SERVICE_KEY'
+    #     description: '{{ .CommonAnnotations.summary }}'
+
+  # Warning alerts receiver
+  - name: 'warning-receiver'
+    # Example email configuration:
+    # email_configs:
+    #   - to: 'alerts@example.com'
+    #     from: 'alertmanager@example.com'
+    #     smarthost: 'smtp.example.com:587'
+    #     auth_username: 'alertmanager'
+    #     auth_password: 'password'
+    #     send_resolved: true
+
+  # Info alerts receiver
+  - name: 'info-receiver'
+    # Info alerts typically don't need notification
+    # Configure if you want a digest of informational alerts
