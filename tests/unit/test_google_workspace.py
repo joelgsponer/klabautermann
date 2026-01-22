@@ -1689,3 +1689,345 @@ class TestEmailAttachments:
             attachment_id="test", filename="large.pdf", mime_type="application/pdf", size=5242880
         )
         assert attachment.size_human == "5.0 MB"
+
+
+# ===========================================================================
+# Calendar Search Tests
+# ===========================================================================
+
+
+class TestCalendarSearch:
+    """Test calendar event search functionality."""
+
+    @pytest.mark.asyncio
+    async def test_search_events_by_title(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test searching events by title."""
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": [
+                {
+                    "id": "event-1",
+                    "summary": "Team Standup",
+                    "start": {"dateTime": "2026-01-22T09:00:00Z"},
+                    "end": {"dateTime": "2026-01-22T09:30:00Z"},
+                },
+                {
+                    "id": "event-2",
+                    "summary": "Standup Review",
+                    "start": {"dateTime": "2026-01-22T10:00:00Z"},
+                    "end": {"dateTime": "2026-01-22T10:30:00Z"},
+                },
+            ]
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        events = await bridge.search_events("standup")
+
+        assert len(events) == 2
+        assert events[0].title == "Team Standup"
+        assert events[1].title == "Standup Review"
+
+        # Verify query parameter was passed
+        call_args = mock_calendar_service.events.return_value.list.call_args
+        assert call_args[1]["q"] == "standup"
+
+    @pytest.mark.asyncio
+    async def test_search_events_with_date_range(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test searching events within a date range."""
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": []
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        start = datetime(2026, 1, 22, 0, 0, 0)
+        end = datetime(2026, 1, 29, 23, 59, 59)
+
+        await bridge.search_events("meeting", start=start, end=end)
+
+        # Verify time range was passed
+        call_args = mock_calendar_service.events.return_value.list.call_args
+        assert "timeMin" in call_args[1]
+        assert "timeMax" in call_args[1]
+        assert "2026-01-22" in call_args[1]["timeMin"]
+        assert "2026-01-29" in call_args[1]["timeMax"]
+
+    @pytest.mark.asyncio
+    async def test_search_events_no_results(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test search returning no results."""
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": []
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        events = await bridge.search_events("nonexistent-event-xyz")
+
+        assert len(events) == 0
+
+    @pytest.mark.asyncio
+    async def test_search_events_default_date_range(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test search uses 30 day default range when not specified."""
+        mock_calendar_service.events.return_value.list.return_value.execute.return_value = {
+            "items": []
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        await bridge.search_events("test")
+
+        # Should use 30 day range by default
+        call_args = mock_calendar_service.events.return_value.list.call_args
+        assert call_args[1]["maxResults"] == 25  # Default max results
+
+
+# ===========================================================================
+# Calendar Free Slot Tests
+# ===========================================================================
+
+
+class TestCalendarFreeSlots:
+    """Test calendar free slot finder functionality."""
+
+    @pytest.mark.asyncio
+    async def test_find_free_slots_basic(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test finding free slots with no busy periods."""
+        mock_calendar_service.freebusy.return_value.query.return_value.execute.return_value = {
+            "calendars": {
+                "primary": {
+                    "busy": []  # No busy periods
+                }
+            }
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        # Search for 30-minute slots on a Monday
+        start = datetime(2026, 1, 26, 9, 0)  # Monday
+        end = datetime(2026, 1, 26, 17, 0)
+
+        slots = await bridge.find_free_slots(
+            duration_minutes=30,
+            start=start,
+            end=end,
+            working_hours_start=9,
+            working_hours_end=17,
+        )
+
+        # Should find 1 slot covering the entire day (9am-5pm)
+        assert len(slots) == 1
+        assert slots[0].start == datetime(2026, 1, 26, 9, 0)
+        assert slots[0].end == datetime(2026, 1, 26, 17, 0)
+
+    @pytest.mark.asyncio
+    async def test_find_free_slots_with_busy_periods(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test finding free slots around busy periods."""
+        mock_calendar_service.freebusy.return_value.query.return_value.execute.return_value = {
+            "calendars": {
+                "primary": {
+                    "busy": [
+                        {"start": "2026-01-26T10:00:00Z", "end": "2026-01-26T11:00:00Z"},
+                        {"start": "2026-01-26T14:00:00Z", "end": "2026-01-26T15:00:00Z"},
+                    ]
+                }
+            }
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        start = datetime(2026, 1, 26, 9, 0)  # Monday
+        end = datetime(2026, 1, 26, 17, 0)
+
+        slots = await bridge.find_free_slots(
+            duration_minutes=30,
+            start=start,
+            end=end,
+            working_hours_start=9,
+            working_hours_end=17,
+        )
+
+        # Should find 3 slots:
+        # 9am-10am, 11am-2pm, 3pm-5pm
+        assert len(slots) == 3
+        assert slots[0].start.hour == 9
+        assert slots[0].end.hour == 10
+        assert slots[1].start.hour == 11
+        assert slots[1].end.hour == 14
+        assert slots[2].start.hour == 15
+        assert slots[2].end.hour == 17
+
+    @pytest.mark.asyncio
+    async def test_find_free_slots_skips_weekends(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test that free slots finder skips weekends."""
+        mock_calendar_service.freebusy.return_value.query.return_value.execute.return_value = {
+            "calendars": {"primary": {"busy": []}}
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        # Saturday and Sunday
+        start = datetime(2026, 1, 24, 9, 0)  # Saturday
+        end = datetime(2026, 1, 25, 17, 0)  # Sunday
+
+        slots = await bridge.find_free_slots(
+            duration_minutes=30,
+            start=start,
+            end=end,
+        )
+
+        # Should find no slots on weekends
+        assert len(slots) == 0
+
+    @pytest.mark.asyncio
+    async def test_find_free_slots_minimum_duration(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test that slots shorter than duration are excluded."""
+        mock_calendar_service.freebusy.return_value.query.return_value.execute.return_value = {
+            "calendars": {
+                "primary": {
+                    "busy": [
+                        # 20-minute gap at 10am
+                        {"start": "2026-01-26T09:00:00Z", "end": "2026-01-26T10:00:00Z"},
+                        {"start": "2026-01-26T10:20:00Z", "end": "2026-01-26T17:00:00Z"},
+                    ]
+                }
+            }
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        start = datetime(2026, 1, 26, 9, 0)
+        end = datetime(2026, 1, 26, 17, 0)
+
+        # Looking for 30-minute slots
+        slots = await bridge.find_free_slots(
+            duration_minutes=30,
+            start=start,
+            end=end,
+        )
+
+        # 20-minute gap should be excluded
+        assert len(slots) == 0
+
+    @pytest.mark.asyncio
+    async def test_find_free_slots_multiple_calendars(
+        self, mock_env, mock_credentials, mock_build, mock_calendar_service
+    ):
+        """Test finding free slots across multiple calendars."""
+        mock_calendar_service.freebusy.return_value.query.return_value.execute.return_value = {
+            "calendars": {
+                "primary": {
+                    "busy": [
+                        {"start": "2026-01-26T09:00:00Z", "end": "2026-01-26T10:00:00Z"},
+                    ]
+                },
+                "work@example.com": {
+                    "busy": [
+                        {"start": "2026-01-26T11:00:00Z", "end": "2026-01-26T12:00:00Z"},
+                    ]
+                },
+            }
+        }
+
+        bridge = GoogleWorkspaceBridge()
+        await bridge.start()
+
+        start = datetime(2026, 1, 26, 9, 0)
+        end = datetime(2026, 1, 26, 17, 0)
+
+        slots = await bridge.find_free_slots(
+            duration_minutes=30,
+            start=start,
+            end=end,
+            calendar_ids=["primary", "work@example.com"],
+        )
+
+        # Should account for busy times from both calendars
+        # Free: 10-11, 12-17
+        assert len(slots) == 2
+
+
+# ===========================================================================
+# FreeSlot Model Tests
+# ===========================================================================
+
+
+class TestFreeSlotModel:
+    """Test FreeSlot model functionality."""
+
+    def test_duration_minutes(self):
+        """Test duration calculation in minutes."""
+        from klabautermann.mcp.google_workspace import FreeSlot
+
+        slot = FreeSlot(
+            start=datetime(2026, 1, 26, 9, 0),
+            end=datetime(2026, 1, 26, 10, 30),
+        )
+        assert slot.duration_minutes == 90
+
+    def test_duration_human_minutes_only(self):
+        """Test human-readable duration for minutes only."""
+        from klabautermann.mcp.google_workspace import FreeSlot
+
+        slot = FreeSlot(
+            start=datetime(2026, 1, 26, 9, 0),
+            end=datetime(2026, 1, 26, 9, 45),
+        )
+        assert slot.duration_human == "45 min"
+
+    def test_duration_human_hours_only(self):
+        """Test human-readable duration for whole hours."""
+        from klabautermann.mcp.google_workspace import FreeSlot
+
+        slot = FreeSlot(
+            start=datetime(2026, 1, 26, 9, 0),
+            end=datetime(2026, 1, 26, 11, 0),
+        )
+        assert slot.duration_human == "2 hr"
+
+    def test_duration_human_hours_and_minutes(self):
+        """Test human-readable duration for hours and minutes."""
+        from klabautermann.mcp.google_workspace import FreeSlot
+
+        slot = FreeSlot(
+            start=datetime(2026, 1, 26, 9, 0),
+            end=datetime(2026, 1, 26, 10, 30),
+        )
+        assert slot.duration_human == "1 hr 30 min"
+
+    def test_format_display(self):
+        """Test display formatting of slot."""
+        from klabautermann.mcp.google_workspace import FreeSlot
+
+        slot = FreeSlot(
+            start=datetime(2026, 1, 26, 9, 0),
+            end=datetime(2026, 1, 26, 10, 0),
+        )
+        display = slot.format_display()
+        assert "Mon Jan 26" in display
+        assert "09:00 AM" in display
+        assert "10:00 AM" in display
+        assert "1 hr" in display

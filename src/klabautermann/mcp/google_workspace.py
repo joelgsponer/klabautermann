@@ -98,6 +98,36 @@ class CalendarEvent(BaseModel):
     recurring_event_id: str | None = None  # ID of parent recurring event (for instances)
 
 
+class FreeSlot(BaseModel):
+    """A free time slot in the calendar."""
+
+    start: datetime
+    end: datetime
+
+    @property
+    def duration_minutes(self) -> int:
+        """Duration of the slot in minutes."""
+        return int((self.end - self.start).total_seconds() / 60)
+
+    @property
+    def duration_human(self) -> str:
+        """Human-readable duration."""
+        minutes = self.duration_minutes
+        if minutes < 60:
+            return f"{minutes} min"
+        hours = minutes // 60
+        mins = minutes % 60
+        if mins == 0:
+            return f"{hours} hr"
+        return f"{hours} hr {mins} min"
+
+    def format_display(self) -> str:
+        """Format slot for display."""
+        start_str = self.start.strftime("%a %b %d, %I:%M %p")
+        end_str = self.end.strftime("%I:%M %p")
+        return f"{start_str} - {end_str} ({self.duration_human})"
+
+
 class RecurrenceBuilder:
     """
     Build RFC 5545 RRULE strings for common recurrence patterns.
@@ -1682,6 +1712,212 @@ class GoogleWorkspaceBridge:
         end = tomorrow.replace(hour=23, minute=59, second=59, microsecond=999999)
         return await self.list_events(start, end, max_results=50)
 
+    async def search_events(
+        self,
+        query: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        max_results: int = 25,
+        calendar_id: str = "primary",
+        context: Any = None,  # noqa: ARG002
+    ) -> list[CalendarEvent]:
+        """
+        Search calendar events by title/description.
+
+        Args:
+            query: Search query to match against event title/description
+            start: Start of time range (default: now)
+            end: End of time range (default: 30 days from start)
+            max_results: Maximum number of events to return (default: 25)
+            calendar_id: Calendar ID to search in (default: "primary")
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            List of matching calendar events sorted by start time
+
+        Raises:
+            ExternalServiceError: If search fails
+        """
+        await self.start()
+
+        if start is None:
+            start = datetime.now()
+        if end is None:
+            end = start + timedelta(days=30)
+
+        # Capture for closure
+        search_query = query
+        start_time = start
+        end_time = end
+
+        def do_search() -> list[dict[str, Any]]:
+            # Format as RFC3339 for Google Calendar API
+            time_min = start_time.replace(tzinfo=None).isoformat() + "Z"
+            time_max = end_time.replace(tzinfo=None).isoformat() + "Z"
+            results = (
+                self._calendar_service.events()
+                .list(
+                    calendarId=calendar_id,
+                    timeMin=time_min,
+                    timeMax=time_max,
+                    maxResults=max_results,
+                    singleEvents=True,
+                    orderBy="startTime",
+                    q=search_query,  # Google Calendar's query parameter
+                )
+                .execute()
+            )
+            items: list[dict[str, Any]] = results.get("items", [])
+            return items
+
+        try:
+            raw_events = await self._rate_limited_call("calendar", do_search)
+            events = self._parse_calendar_events(raw_events, calendar_id, None)
+            logger.info(
+                f"[BEACON] Calendar search found {len(events)} events",
+                extra={"query": query, "results": len(events)},
+            )
+            return events
+        except HttpError as e:
+            logger.error(
+                f"[STORM] Calendar search failed: {e}",
+                extra={"query": query},
+            )
+            raise ExternalServiceError("calendar", f"Search failed: {e}") from e
+
+    async def find_free_slots(
+        self,
+        duration_minutes: int,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        working_hours_start: int = 9,
+        working_hours_end: int = 17,
+        calendar_ids: list[str] | None = None,
+        context: Any = None,  # noqa: ARG002
+    ) -> list[FreeSlot]:
+        """
+        Find free time slots in the calendar.
+
+        Queries the FreeBusy API to find available meeting times within
+        working hours.
+
+        Args:
+            duration_minutes: Required meeting duration in minutes
+            start: Start of search range (default: now)
+            end: End of search range (default: 7 days from start)
+            working_hours_start: Start of working hours, 0-23 (default: 9)
+            working_hours_end: End of working hours, 0-23 (default: 17)
+            calendar_ids: List of calendar IDs to check (default: ["primary"])
+            context: Ignored (kept for interface compatibility)
+
+        Returns:
+            List of FreeSlot objects representing available time slots
+
+        Raises:
+            ExternalServiceError: If FreeBusy query fails
+        """
+        await self.start()
+
+        if start is None:
+            start = datetime.now()
+        if end is None:
+            end = start + timedelta(days=7)
+        if calendar_ids is None:
+            calendar_ids = ["primary"]
+
+        # Capture for closure
+        search_start = start
+        search_end = end
+        cal_ids = calendar_ids
+
+        def do_freebusy() -> dict[str, Any]:
+            time_min = search_start.replace(tzinfo=None).isoformat() + "Z"
+            time_max = search_end.replace(tzinfo=None).isoformat() + "Z"
+            body = {
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "items": [{"id": cal_id} for cal_id in cal_ids],
+            }
+            result: dict[str, Any] = self._calendar_service.freebusy().query(body=body).execute()
+            return result
+
+        try:
+            freebusy_result = await self._rate_limited_call("calendar", do_freebusy)
+        except HttpError as e:
+            logger.error(f"[STORM] FreeBusy query failed: {e}")
+            raise ExternalServiceError("calendar", f"FreeBusy query failed: {e}") from e
+
+        # Collect all busy periods across all calendars
+        busy_periods: list[tuple[datetime, datetime]] = []
+        calendars = freebusy_result.get("calendars", {})
+        for cal_id in calendar_ids:
+            cal_data = calendars.get(cal_id, {})
+            for busy in cal_data.get("busy", []):
+                busy_start = datetime.fromisoformat(busy["start"].replace("Z", "+00:00"))
+                busy_end = datetime.fromisoformat(busy["end"].replace("Z", "+00:00"))
+                # Convert to naive datetime for comparison
+                busy_periods.append(
+                    (busy_start.replace(tzinfo=None), busy_end.replace(tzinfo=None))
+                )
+
+        # Sort busy periods by start time
+        busy_periods.sort(key=lambda x: x[0])
+
+        # Find free slots
+        free_slots: list[FreeSlot] = []
+        duration = timedelta(minutes=duration_minutes)
+
+        # Iterate through each day in the range
+        current_day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+        while current_day < end:
+            # Working hours for this day
+            day_start = current_day.replace(hour=working_hours_start, minute=0, second=0)
+            day_end = current_day.replace(hour=working_hours_end, minute=0, second=0)
+
+            # Skip if day_start is in the past
+            if day_start < start:
+                day_start = start
+            # Skip weekends (Saturday=5, Sunday=6)
+            if current_day.weekday() >= 5:
+                current_day += timedelta(days=1)
+                continue
+            # Skip if day has already ended
+            if day_end <= start:
+                current_day += timedelta(days=1)
+                continue
+
+            # Find free slots within working hours for this day
+            slot_start = day_start
+            for busy_start, busy_end in busy_periods:
+                # Skip busy periods outside this day
+                if busy_end <= day_start or busy_start >= day_end:
+                    continue
+
+                # If there's a gap before this busy period
+                if busy_start > slot_start:
+                    gap_end = min(busy_start, day_end)
+                    # Check if gap is long enough
+                    if gap_end - slot_start >= duration:
+                        free_slots.append(FreeSlot(start=slot_start, end=gap_end))
+
+                # Move slot_start past this busy period
+                slot_start = max(slot_start, busy_end)
+
+            # Check for free time after the last busy period
+            if slot_start < day_end and day_end - slot_start >= duration:
+                free_slots.append(FreeSlot(start=slot_start, end=day_end))
+
+            current_day += timedelta(days=1)
+
+        logger.info(
+            f"[BEACON] Found {len(free_slots)} free slots",
+            extra={
+                "duration_minutes": duration_minutes,
+                "slots_found": len(free_slots),
+            },
+        )
+        return free_slots
+
     # ===========================================================================
     # Helper Methods
     # ===========================================================================
@@ -1854,6 +2090,7 @@ __all__ = [
     "CreateEventResult",
     "EmailAttachment",
     "EmailMessage",
+    "FreeSlot",
     "GoogleWorkspaceBridge",
     "RecurrenceBuilder",
     "SendEmailResult",
