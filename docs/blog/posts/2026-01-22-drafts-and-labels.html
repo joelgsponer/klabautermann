@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="drafts-and-labels">
+    <meta name="post-excerpt" content="Full email draft lifecycle and custom label management. Save it, edit it, organize it, send it when you're ready.">
+    <title>Save for Later | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Save for Later</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Email workflows rarely end with "send." Sometimes you need to draft a response, sleep on it, edit it the next morning. Sometimes you need to organize hundreds of emails into a folder structure that makes sense. Today Klabautermann learned both.</p>
+
+                <h2>The Draft Model</h2>
+                <p>Gmail's draft API returns more than just message content. There's a draft ID (different from the message ID), thread association, and all the headers you'd expect. The model captures this:</p>
+
+                <pre><code>class EmailDraft(BaseModel):
+    """Email draft from Gmail."""
+
+    id: str  # Draft ID (different from message ID)
+    message_id: str  # Associated message ID
+    thread_id: str | None = None
+    subject: str
+    to: str | None = None
+    cc: str | None = None
+    body: str | None = None
+    snippet: str = ""</code></pre>
+
+                <p>The distinction between <code>id</code> and <code>message_id</code> matters. The draft ID is what you use to update or send the draft. The message ID is how Gmail tracks the underlying content. Confuse them and your updates silently fail.</p>
+
+                <h2>Listing Drafts</h2>
+                <p>Gmail's drafts.list returns minimal information - just IDs. To get useful details, you need a second request for each draft:</p>
+
+                <pre><code>async def list_drafts(
+    self,
+    max_results: int = 20,
+    context: Any = None,
+) -> list[EmailDraft]:
+    """List email drafts."""
+    await self.start()
+
+    def do_list_drafts() -> list[dict[str, Any]]:
+        results = (
+            self._gmail_service.users()
+            .drafts()
+            .list(userId="me", maxResults=max_results)
+            .execute()
+        )
+        return results.get("drafts", [])
+
+    def get_draft_details(draft_id: str) -> dict[str, Any]:
+        return (
+            self._gmail_service.users()
+            .drafts()
+            .get(userId="me", id=draft_id, format="full")
+            .execute()
+        )
+
+    raw_drafts = await self._rate_limited_call("gmail", do_list_drafts)
+    drafts: list[EmailDraft] = []
+
+    for raw_draft in raw_drafts:
+        draft_id = raw_draft.get("id", "")
+        full_draft = await self._rate_limited_call(
+            "gmail",
+            lambda d=draft_id: get_draft_details(d),
+        )
+        # Parse headers and body...
+        drafts.append(EmailDraft(...))</code></pre>
+
+                <p>Each draft requires its own API call. For large draft collections, this could get expensive. But users rarely have hundreds of drafts, and the rate limiter keeps us in good standing.</p>
+
+                <h2>Updating Drafts</h2>
+                <p>The update operation has a subtle requirement: preserve what you don't change. If you only want to update the subject, the existing recipients should remain:</p>
+
+                <pre><code>async def update_draft(
+    self,
+    draft_id: str,
+    to: str | None = None,
+    subject: str | None = None,
+    body: str | None = None,
+    cc: str | None = None,
+    context: Any = None,
+) -> DraftOperationResult:
+    """Update an existing draft."""
+    await self.start()
+
+    # First get the existing draft to preserve fields
+    existing = await self.get_draft(draft_id)
+    if not existing:
+        return DraftOperationResult(
+            success=False,
+            draft_id=draft_id,
+            operation="update",
+            error="Draft not found",
+        )
+
+    # Use existing values if not provided
+    final_to = to if to is not None else existing.to
+    final_subject = subject if subject is not None else existing.subject
+    final_body = body if body is not None else existing.body or ""
+    final_cc = cc if cc is not None else existing.cc
+
+    # Build and submit the updated message...</code></pre>
+
+                <p>The pattern is read-modify-write. Fetch existing, merge changes, submit complete draft. No partial updates here.</p>
+
+                <h2>Sending Drafts</h2>
+                <p>Once you're ready, sending is straightforward:</p>
+
+                <pre><code>async def send_draft(
+    self,
+    draft_id: str,
+    context: Any = None,
+) -> DraftOperationResult:
+    """Send an existing draft."""
+    await self.start()
+
+    def do_send() -> dict[str, Any]:
+        return (
+            self._gmail_service.users()
+            .drafts()
+            .send(userId="me", body={"id": draft_id})
+            .execute()
+        )
+
+    result = await self._rate_limited_call("gmail", do_send)
+    return DraftOperationResult(
+        success=True,
+        draft_id=draft_id,
+        message_id=result.get("id"),
+        operation="send",
+    )</code></pre>
+
+                <p>The draft disappears after sending, replaced by a real message in your Sent folder.</p>
+
+                <h2>Custom Labels</h2>
+                <p>Gmail labels are more flexible than folders. A message can have multiple labels. Labels can be nested using "/" separators. They can be hidden from the UI or shown only when they have unread messages.</p>
+
+                <pre><code>async def create_label(
+    self,
+    name: str,
+    label_list_visibility: str = "labelShow",
+    message_list_visibility: str = "show",
+    context: Any = None,
+) -> GmailLabel:
+    """Create a custom Gmail label."""
+    await self.start()
+
+    def do_create_label() -> dict[str, Any]:
+        label_body = {
+            "name": name,
+            "labelListVisibility": label_list_visibility,
+            "messageListVisibility": message_list_visibility,
+        }
+        return (
+            self._gmail_service.users()
+            .labels()
+            .create(userId="me", body=label_body)
+            .execute()
+        )
+
+    result = await self._rate_limited_call("gmail", do_create_label)
+    return GmailLabel(
+        id=result.get("id", ""),
+        name=result.get("name", name),
+        type="user",
+    )</code></pre>
+
+                <p>The visibility settings control where labels appear:</p>
+                <ul>
+                    <li><code>labelShow</code> - Always visible in label list</li>
+                    <li><code>labelShowIfUnread</code> - Only visible when there are unread messages</li>
+                    <li><code>labelHide</code> - Hidden from label list (but still usable)</li>
+                </ul>
+
+                <h2>Nested Labels</h2>
+                <p>Creating "Projects/Work" gives you a nested structure in Gmail's UI. The API doesn't treat this specially - it's just a label name containing a slash. But the UI renders it as a hierarchy:</p>
+
+                <pre><code>Projects
+└── Work
+    └── Urgent</code></pre>
+
+                <p>Create "Projects", "Projects/Work", and "Projects/Work/Urgent" separately. Gmail doesn't auto-create parent labels.</p>
+
+                <h2>Updating Labels</h2>
+                <p>Labels can be renamed or have their visibility changed:</p>
+
+                <pre><code>async def update_label(
+    self,
+    label_id: str,
+    name: str | None = None,
+    label_list_visibility: str | None = None,
+    message_list_visibility: str | None = None,
+    context: Any = None,
+) -> GmailLabel:
+    """Update a custom Gmail label."""
+    await self.start()
+
+    def do_update_label() -> dict[str, Any]:
+        label_body: dict[str, Any] = {}
+        if name is not None:
+            label_body["name"] = name
+        if label_list_visibility is not None:
+            label_body["labelListVisibility"] = label_list_visibility
+        if message_list_visibility is not None:
+            label_body["messageListVisibility"] = message_list_visibility
+
+        return (
+            self._gmail_service.users()
+            .labels()
+            .patch(userId="me", id=label_id, body=label_body)
+            .execute()
+        )</code></pre>
+
+                <p>Note the use of <code>patch()</code> rather than <code>update()</code>. The patch method only sends fields you want to change, leaving others untouched.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"Save this email as a draft" &rarr; Saved. Now you're on your own to find and edit it.</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Save this email as a draft" &rarr; Draft saved.<br>
+                "Update my draft to include the budget numbers" &rarr; Draft updated.<br>
+                "Send my draft to Sarah" &rarr; Sent.</blockquote>
+
+                <p>Before:</p>
+                <blockquote>"Create a Projects/Work label" &rarr; "I can add labels to emails, but not create new ones."</blockquote>
+
+                <p>After:</p>
+                <blockquote>"Create a Projects/Work label" &rarr; Label created.<br>
+                "Label this email as Projects/Work" &rarr; Label applied.</blockquote>
+
+                <h2>The Tests</h2>
+                <p>21 new tests across the feature set:</p>
+
+                <ul>
+                    <li><strong>TestDraftManagement (9 tests)</strong>: List, get, update, send, delete operations plus error handling</li>
+                    <li><strong>TestDraftModel (2 tests)</strong>: Model creation and optional fields</li>
+                    <li><strong>TestDraftOperationResult (2 tests)</strong>: Success and failure result models</li>
+                    <li><strong>TestLabelManagement (8 tests)</strong>: Create, update, delete operations with visibility settings</li>
+                </ul>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>2 files modified</li>
+                    <li>936 lines added</li>
+                    <li>2 new models: <code>EmailDraft</code>, <code>DraftOperationResult</code></li>
+                    <li>8 new methods: 5 for drafts, 3 for labels</li>
+                    <li>21 new tests</li>
+                    <li>All 107 google_workspace tests pass</li>
+                </ul>
+
+                <p>Issues #217 and #219, closed. Klabautermann can now save your thoughts for later and organize your inbox the way you want it.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
