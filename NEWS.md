@@ -9,6 +9,7 @@ User-visible changes to Klabautermann.
 - **Response Synthesis with Opus**: Orchestrator now uses Claude Opus to synthesize coherent responses from multiple subagent results, with proactive suggestions based on configuration
 - **Gmail & Calendar Integration**: Check emails and calendar events via natural language ("any unread emails?", "what's on my calendar today?")
 - **Google OAuth Helper**: `scripts/get_google_token.py` for easy OAuth credential setup
+- **Email Reply-to-Thread**: Reply to email threads with proper threading ("reply to that email from Sarah saying I'll attend")
 - **Daily Journal Generation**: Klabautermann generates daily reflections with personality (VOYAGE SUMMARY, KEY INTERACTIONS, PROGRESS REPORT, WORKFLOW OBSERVATIONS, SAILOR'S THINKING)
 - **CLI Interface**: Interactive command-line REPL for conversations with the knowledge assistant
 - **Knowledge Graph**: Neo4j-based temporal knowledge graph for storing entities and relationships

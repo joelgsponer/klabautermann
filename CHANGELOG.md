@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GraphitiClient.get_entities_from_episode()` to query entities after ingestion (#350)
 - Entity-to-message linking after Graphiti ingestion via MENTIONED_IN relationships (#350)
 - `neo4j_client` parameter to Ingestor agent for v2 workflow entity linking (#350)
+- `reply_to_email()` method in GoogleWorkspaceBridge for email thread replies (#207)
+- Email threading headers (In-Reply-To, References) for proper Gmail thread context (#207)
+- Reply-all support with original CC recipients (#207)
 
 ### Fixed
 - CLI output readability and ANSI rendering issues (#311)
