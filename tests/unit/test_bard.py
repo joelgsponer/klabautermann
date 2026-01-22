@@ -298,12 +298,37 @@ class TestSagaManagement:
         call_args = mock_neo4j.execute_query.call_args
         query = call_args[0][0]
 
-        # Verify query creates proper relationships
+        # Verify query creates proper relationships (#98, #99, #100)
         assert "CREATE (le:LoreEpisode" in query
-        assert "TOLD_TO" in query
-        assert "EXPANDS_UPON" in query
+        assert "TOLD_TO" in query  # #98
+        assert "EXPANDS_UPON" in query  # #99
+        assert "SAGA_STARTED_BY" in query  # #100
         assert call_args[0][1]["saga_id"] == "saga-test"
         assert call_args[0][1]["chapter"] == 2
+
+    @pytest.mark.asyncio
+    async def test_save_episode_chapter_one_has_saga_started_by(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Chapter 1 should create SAGA_STARTED_BY relationship (#100)."""
+        mock_neo4j.execute_query.return_value = [{"uuid": "episode-ch1"}]
+
+        await bard._save_episode(
+            saga_id="saga-origin",
+            saga_name="The Origin Story",
+            chapter=1,  # First chapter
+            content="It all began...",
+            trace_id="test-origin",
+        )
+
+        call_args = mock_neo4j.execute_query.call_args
+        query = call_args[0][0]
+        params = call_args[0][1]
+
+        # SAGA_STARTED_BY is in the query (conditional FOREACH)
+        assert "SAGA_STARTED_BY" in query
+        # Chapter is 1, so the FOREACH condition will create the relationship
+        assert params["chapter"] == 1
 
 
 # =============================================================================
@@ -1609,6 +1634,54 @@ class TestGetSagaStatisticsByCaptain:
         assert stats == []
 
 
+class TestGetSagaOrigins:
+    """Tests for get_saga_origins method (#100)."""
+
+    @pytest.mark.asyncio
+    async def test_get_saga_origins_returns_initiator_info(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should return saga initiator information via SAGA_STARTED_BY relationship."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-origin-1",
+                "saga_name": "The First Voyage",
+                "captain_uuid": "captain-alice",
+                "captain_name": "Alice",
+                "started_at": now_ms - 86400000,  # 1 day ago
+                "started_channel": "cli",
+            },
+            {
+                "saga_id": "saga-origin-2",
+                "saga_name": "The Second Tale",
+                "captain_uuid": "captain-bob",
+                "captain_name": "Bob",
+                "started_at": now_ms,
+                "started_channel": "telegram",
+            },
+        ]
+
+        origins = await bard.get_saga_origins(trace_id="test-100")
+
+        assert len(origins) == 2
+        assert origins[0]["saga_id"] == "saga-origin-1"
+        assert origins[0]["captain_uuid"] == "captain-alice"
+        assert origins[0]["started_channel"] == "cli"
+        assert origins[1]["saga_id"] == "saga-origin-2"
+        assert origins[1]["started_channel"] == "telegram"
+
+    @pytest.mark.asyncio
+    async def test_get_saga_origins_empty(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return empty list when no sagas exist."""
+        mock_neo4j.execute_query.return_value = []
+
+        origins = await bard.get_saga_origins(trace_id="test-100")
+
+        assert origins == []
+
+
 class TestProcessMessageLoreQueries:
     """Tests for process_message handling of new lore query operations."""
 
@@ -1734,6 +1807,38 @@ class TestProcessMessageLoreQueries:
         assert response is not None
         assert response.payload["captain_count"] == 1
         assert len(response.payload["statistics"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_get_saga_origins_operation(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should handle get_saga_origins operation (#100)."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "saga_id": "saga-origin-1",
+                "saga_name": "The Origin Saga",
+                "captain_uuid": "captain-1",
+                "captain_name": "Alice",
+                "started_at": now_ms,
+                "started_channel": "cli",
+            },
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_saga_origins"},
+            trace_id="test-100",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert len(response.payload["origins"]) == 1
+        assert response.payload["origins"][0]["saga_id"] == "saga-origin-1"
+        assert response.payload["origins"][0]["captain_uuid"] == "captain-1"
 
 
 class TestLoreEpisodeChannelField:
