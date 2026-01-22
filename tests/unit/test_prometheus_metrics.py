@@ -22,6 +22,13 @@ from klabautermann.core.metrics import (
     AGENT_SUCCESSES_TOTAL,
     API_REQUESTS_TOTAL,
     API_WEBSOCKET_CONNECTIONS,
+    CHANNEL_ACTIVE_COUNT,
+    CHANNEL_BROADCAST_DELIVERIES_TOTAL,
+    CHANNEL_BROADCASTS_TOTAL,
+    CHANNEL_ERRORS_TOTAL,
+    CHANNEL_HEALTHY,
+    CHANNEL_MESSAGES_TOTAL,
+    CHANNEL_STATUS,
     GRAPH_OPERATIONS_TOTAL,
     LLM_CALLS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -35,6 +42,11 @@ from klabautermann.core.metrics import (
     record_agent_success,
     record_api_latency,
     record_api_request,
+    record_channel_broadcast,
+    record_channel_broadcast_delivery,
+    record_channel_error,
+    record_channel_latency,
+    record_channel_message,
     record_graph_latency,
     record_graph_operation,
     record_llm_call,
@@ -42,6 +54,9 @@ from klabautermann.core.metrics import (
     record_llm_tokens,
     set_agent_inbox_size,
     set_agent_running,
+    set_channel_active_count,
+    set_channel_healthy,
+    set_channel_status,
     set_websocket_connections,
     timed_operation,
 )
@@ -387,3 +402,135 @@ class TestIntegration:
         # Both should appear in output
         assert 'agent_name="agent_a"' in metrics
         assert 'agent_name="agent_b"' in metrics
+
+
+# ===========================================================================
+# Channel Metrics Tests
+# ===========================================================================
+
+
+class TestChannelMetrics:
+    """Tests for channel metrics recording."""
+
+    def test_record_channel_message(self):
+        """Should increment channel message counter."""
+        initial = CHANNEL_MESSAGES_TOTAL.labels(channel_name="test_channel")._value.get()
+        record_channel_message("test_channel")
+        after = CHANNEL_MESSAGES_TOTAL.labels(channel_name="test_channel")._value.get()
+        assert after == initial + 1
+
+    def test_record_channel_latency(self):
+        """Should record channel response latency."""
+        record_channel_latency("latency_channel", 150.0)
+        metrics = get_metrics().decode("utf-8")
+        assert 'channel_name="latency_channel"' in metrics
+        assert "klabautermann_channel_response_latency_ms" in metrics
+
+    def test_record_channel_error(self):
+        """Should increment channel error counter with error type."""
+        initial = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="error_channel", error_type="connection"
+        )._value.get()
+        record_channel_error("error_channel", "connection")
+        after = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="error_channel", error_type="connection"
+        )._value.get()
+        assert after == initial + 1
+
+    def test_record_channel_error_different_types(self):
+        """Should track different error types separately."""
+        initial_conn = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="multi_error_channel", error_type="connection"
+        )._value.get()
+        initial_timeout = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="multi_error_channel", error_type="timeout"
+        )._value.get()
+
+        record_channel_error("multi_error_channel", "connection")
+        record_channel_error("multi_error_channel", "timeout")
+
+        after_conn = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="multi_error_channel", error_type="connection"
+        )._value.get()
+        after_timeout = CHANNEL_ERRORS_TOTAL.labels(
+            channel_name="multi_error_channel", error_type="timeout"
+        )._value.get()
+
+        assert after_conn == initial_conn + 1
+        assert after_timeout == initial_timeout + 1
+
+    def test_set_channel_status_running(self):
+        """Should set channel status gauge to 1 when running."""
+        set_channel_status("status_channel", running=True)
+        value = CHANNEL_STATUS.labels(channel_name="status_channel")._value.get()
+        assert value == 1
+
+    def test_set_channel_status_stopped(self):
+        """Should set channel status gauge to 0 when stopped."""
+        set_channel_status("status_channel", running=False)
+        value = CHANNEL_STATUS.labels(channel_name="status_channel")._value.get()
+        assert value == 0
+
+    def test_set_channel_healthy_true(self):
+        """Should set channel health gauge to 1 when healthy."""
+        set_channel_healthy("health_channel", healthy=True)
+        value = CHANNEL_HEALTHY.labels(channel_name="health_channel")._value.get()
+        assert value == 1
+
+    def test_set_channel_healthy_false(self):
+        """Should set channel health gauge to 0 when unhealthy."""
+        set_channel_healthy("health_channel", healthy=False)
+        value = CHANNEL_HEALTHY.labels(channel_name="health_channel")._value.get()
+        assert value == 0
+
+    def test_record_channel_broadcast(self):
+        """Should increment broadcast counter."""
+        initial = CHANNEL_BROADCASTS_TOTAL._value.get()
+        record_channel_broadcast()
+        after = CHANNEL_BROADCASTS_TOTAL._value.get()
+        assert after == initial + 1
+
+    def test_record_channel_broadcast_delivery_success(self):
+        """Should track successful broadcast deliveries."""
+        initial = CHANNEL_BROADCAST_DELIVERIES_TOTAL.labels(
+            channel_name="delivery_channel", status="success"
+        )._value.get()
+        record_channel_broadcast_delivery("delivery_channel", success=True)
+        after = CHANNEL_BROADCAST_DELIVERIES_TOTAL.labels(
+            channel_name="delivery_channel", status="success"
+        )._value.get()
+        assert after == initial + 1
+
+    def test_record_channel_broadcast_delivery_failure(self):
+        """Should track failed broadcast deliveries."""
+        initial = CHANNEL_BROADCAST_DELIVERIES_TOTAL.labels(
+            channel_name="delivery_channel", status="failure"
+        )._value.get()
+        record_channel_broadcast_delivery("delivery_channel", success=False)
+        after = CHANNEL_BROADCAST_DELIVERIES_TOTAL.labels(
+            channel_name="delivery_channel", status="failure"
+        )._value.get()
+        assert after == initial + 1
+
+    def test_set_channel_active_count(self):
+        """Should set active channel count gauge."""
+        set_channel_active_count(3)
+        value = CHANNEL_ACTIVE_COUNT._value.get()
+        assert value == 3
+
+    def test_channel_metrics_in_output(self):
+        """Channel metrics should appear in Prometheus output."""
+        # Record some channel metrics
+        record_channel_message("output_test_channel")
+        record_channel_error("output_test_channel", "test_error")
+        set_channel_status("output_test_channel", running=True)
+
+        metrics = get_metrics().decode("utf-8")
+
+        # Verify channel metrics are present
+        assert "klabautermann_channel_messages_total" in metrics
+        assert "klabautermann_channel_errors_total" in metrics
+        assert "klabautermann_channel_status" in metrics
+        assert "klabautermann_channel_healthy" in metrics
+        assert "klabautermann_channel_broadcasts_total" in metrics
+        assert "klabautermann_channel_active_count" in metrics

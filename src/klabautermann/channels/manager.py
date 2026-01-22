@@ -21,6 +21,16 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 from klabautermann.core.logger import logger
+from klabautermann.core.metrics import (
+    record_channel_broadcast,
+    record_channel_broadcast_delivery,
+    record_channel_error,
+    record_channel_latency,
+    record_channel_message,
+    set_channel_active_count,
+    set_channel_healthy,
+    set_channel_status,
+)
 
 
 if TYPE_CHECKING:
@@ -353,6 +363,8 @@ class ChannelManager:
         await channel.start()
         self._status[name] = ChannelStatus.RUNNING
         self._started_at[name] = datetime.now()
+        set_channel_status(name, running=True)
+        set_channel_active_count(len(self.active_channels))
         logger.info(f"[CHART] Channel started: {name}")
 
     async def stop_all(self) -> dict[str, bool]:
@@ -390,10 +402,13 @@ class ChannelManager:
             try:
                 await channel.stop()
                 self._status[name] = ChannelStatus.STOPPED
+                set_channel_status(name, running=False)
                 results[name] = True
                 logger.debug(f"[WHISPER] Stopped channel: {name}")
             except Exception as e:
                 self._status[name] = ChannelStatus.ERROR
+                set_channel_status(name, running=False)
+                record_channel_error(name, "stop_failure")
                 results[name] = False
                 logger.error(
                     f"[STORM] Failed to stop channel {name}: {e}",
@@ -402,6 +417,7 @@ class ChannelManager:
                 )
 
         success_count = sum(results.values())
+        set_channel_active_count(len(self.active_channels))
         logger.info(
             f"[BEACON] Stopped {success_count}/{len(results)} channel(s)",
             extra={"results": results},
@@ -445,12 +461,16 @@ class ChannelManager:
             await channel.start()
             self._status[name] = ChannelStatus.RUNNING
             self._started_at[name] = datetime.now()
+            set_channel_status(name, running=True)
+            set_channel_active_count(len(self.active_channels))
             # Reset restart attempts on success
             self._restart_attempts[name] = 0
             logger.info(f"[BEACON] Channel restarted: {name}")
             return True
         except Exception as e:
             self._status[name] = ChannelStatus.ERROR
+            set_channel_status(name, running=False)
+            record_channel_error(name, "restart_failure")
             error_msg = str(e)
             logger.error(f"[STORM] Failed to restart channel {name}: {error_msg}")
             # Notify failure callbacks
@@ -575,6 +595,7 @@ class ChannelManager:
                 error=error,
                 message_count=self._message_counts.get(name, 0),
             )
+            set_channel_healthy(name, is_healthy)
 
             if not is_healthy:
                 logger.warning(
@@ -639,16 +660,20 @@ class ChannelManager:
     # Message Tracking
     # =========================================================================
 
-    def record_message(self, channel_name: str) -> None:
+    def record_message(self, channel_name: str, latency_ms: float | None = None) -> None:
         """
         Record that a message was processed.
 
         Args:
             channel_name: Name of the channel that processed the message.
+            latency_ms: Optional response latency in milliseconds.
         """
         if channel_name in self._message_counts:
             self._message_counts[channel_name] += 1
             self._last_message_at[channel_name] = datetime.now()
+            record_channel_message(channel_name)
+            if latency_ms is not None:
+                record_channel_latency(channel_name, latency_ms)
 
     # =========================================================================
     # Cross-Channel Messaging
@@ -685,6 +710,7 @@ class ChannelManager:
             f"[CHART] Broadcasting message to {len(self.active_channels)} channels",
             extra={"content_length": len(content), "exclude": exclude},
         )
+        record_channel_broadcast()
 
         for name in self.active_channels:
             if name in exclude:
@@ -705,10 +731,13 @@ class ChannelManager:
                     metadata=metadata,
                 )
                 results[name] = True
+                record_channel_broadcast_delivery(name, success=True)
                 logger.debug(f"[WHISPER] Broadcast delivered to: {name}")
             except Exception as e:
                 results[name] = False
                 errors[name] = str(e)
+                record_channel_broadcast_delivery(name, success=False)
+                record_channel_error(name, "broadcast_failure")
                 logger.error(
                     f"[STORM] Broadcast failed for {name}: {e}",
                     extra={"channel": name},
