@@ -18,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Optimized relationship traversal utilities (#201)
+  - `TraversalDirection` enum for directional traversal control (outgoing, incoming, both)
+  - `TraversalConfig` for configurable traversal parameters (max_depth, direction, relationship_types, include_expired, limit)
+  - `TraversalStats` and `TraversalResult` for structured traversal responses
+  - `BenchmarkResult` for performance measurement
+  - Index hint mappings for relationship types (`RELATIONSHIP_INDEXES`) and node labels (`NODE_SEARCH_INDEXES`)
+  - `traverse_from_node()` for general graph exploration with temporal filtering
+  - `find_shortest_path()` for path finding between nodes
+  - `traverse_dependency_chain()` for task BLOCKS relationships
+  - `find_connected_entities()` for N-hop neighborhood discovery (capped at 3 hops for performance)
+  - `benchmark_traversal()` for performance measurement
+  - 30 new unit tests for comprehensive coverage
 - Semantic query caching with TTL and LRU eviction (#197)
   - `SemanticCache` class with hash-based query lookup
   - TTL expiration (default 5 minutes, configurable via `SEMANTIC_CACHE_TTL`)

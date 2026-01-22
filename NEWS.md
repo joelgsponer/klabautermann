@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Optimized Graph Traversal**: Navigate your knowledge graph efficiently with new traversal utilities. Find shortest paths between entities, explore connected neighborhoods within N hops, and trace task dependency chains. Traversal is configurable - control direction (outgoing, incoming, both), depth limits, and temporal filtering. Performance benchmarking built-in for tuning complex queries.
 - **Semantic Query Caching**: Search results are now cached based on query similarity. Similar queries return cached results instead of re-running expensive graph traversals. Cache entries expire after 5 minutes (configurable). Track cache performance with hit rate statistics. Configure with `SEMANTIC_CACHE_TTL` and `SEMANTIC_CACHE_MAX_ENTRIES`.
 - **Graph Backup & Restore**: Export your knowledge graph to JSON and restore it later. Create backups with `create_backup()`, save to file with timestamps and metadata. Restore with optional `clear_existing` mode. Validates integrity before restore - checks counts, orphan relationships, and duplicate UUIDs.
 - **Channel Auto-Recovery**: Channels now automatically restart when they fail. If Telegram drops, it restarts with exponential backoff. After 3 failed attempts, it stops retrying and notifies you. Broadcast messages to all channels at once with `broadcast()`.
