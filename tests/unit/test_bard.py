@@ -1333,3 +1333,457 @@ class TestLifecycleExceptionExports:
 
         for item in expected:
             assert item in __all__
+
+
+# =============================================================================
+# Lore Query Tests (#112, #113, #114, #115)
+# =============================================================================
+
+
+class TestGetRecentLore:
+    """Tests for get_recent_lore query (#112)."""
+
+    @pytest.mark.asyncio
+    async def test_get_recent_lore_returns_episodes(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should return recent episodes ordered by told_at DESC."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "ep-3",
+                "saga_id": "saga-123",
+                "saga_name": "Recent Saga",
+                "chapter": 3,
+                "content": "Most recent",
+                "channel": "telegram",
+                "told_at": now_ms,
+                "created_at": now_ms,
+                "captain_uuid": "captain-123",
+            },
+            {
+                "uuid": "ep-2",
+                "saga_id": "saga-123",
+                "saga_name": "Recent Saga",
+                "chapter": 2,
+                "content": "Second most recent",
+                "channel": "cli",
+                "told_at": now_ms - 1000,
+                "created_at": now_ms - 1000,
+                "captain_uuid": "captain-123",
+            },
+        ]
+
+        episodes = await bard.get_recent_lore(limit=5, trace_id="test-123")
+
+        assert len(episodes) == 2
+        assert episodes[0].content == "Most recent"
+        assert episodes[0].channel == "telegram"
+        assert episodes[1].content == "Second most recent"
+
+    @pytest.mark.asyncio
+    async def test_get_recent_lore_empty(self, bard: BardOfTheBilge, mock_neo4j: MagicMock) -> None:
+        """Should return empty list when no lore exists."""
+        mock_neo4j.execute_query.return_value = []
+
+        episodes = await bard.get_recent_lore(limit=5, trace_id="test-123")
+
+        assert episodes == []
+
+    @pytest.mark.asyncio
+    async def test_get_recent_lore_respects_limit(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should pass limit to query."""
+        mock_neo4j.execute_query.return_value = []
+
+        await bard.get_recent_lore(limit=3, trace_id="test-123")
+
+        call_args = mock_neo4j.execute_query.call_args
+        assert call_args[0][1]["limit"] == 3
+
+
+class TestGetSagaChain:
+    """Tests for get_saga_chain query (#113)."""
+
+    @pytest.mark.asyncio
+    async def test_get_saga_chain_returns_chapters_in_order(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should return all saga chapters ordered by chapter ASC."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "ep-1",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 1,
+                "content": "Chapter one",
+                "channel": "cli",
+                "told_at": now_ms - 2000,
+                "created_at": now_ms - 2000,
+                "captain_uuid": "captain-123",
+            },
+            {
+                "uuid": "ep-2",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 2,
+                "content": "Chapter two",
+                "channel": "telegram",
+                "told_at": now_ms - 1000,
+                "created_at": now_ms - 1000,
+                "captain_uuid": "captain-123",
+            },
+            {
+                "uuid": "ep-3",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 3,
+                "content": "Chapter three",
+                "channel": "cli",
+                "told_at": now_ms,
+                "created_at": now_ms,
+                "captain_uuid": "captain-123",
+            },
+        ]
+
+        chapters = await bard.get_saga_chain(saga_id="saga-123", trace_id="test-123")
+
+        assert len(chapters) == 3
+        assert chapters[0].chapter == 1
+        assert chapters[1].chapter == 2
+        assert chapters[2].chapter == 3
+
+    @pytest.mark.asyncio
+    async def test_get_saga_chain_includes_all_metadata(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should include channel and all metadata."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "ep-1",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 1,
+                "content": "Content",
+                "channel": "telegram",
+                "told_at": now_ms,
+                "created_at": now_ms,
+                "captain_uuid": "captain-123",
+            },
+        ]
+
+        chapters = await bard.get_saga_chain(saga_id="saga-123", trace_id="test-123")
+
+        assert chapters[0].channel == "telegram"
+        assert chapters[0].saga_name == "Test Saga"
+
+
+class TestGetCrossChannelStory:
+    """Tests for get_cross_channel_story query (#114)."""
+
+    @pytest.mark.asyncio
+    async def test_get_cross_channel_story_shows_channel_travel(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should show how story traveled across channels."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "chapter": 1,
+                "content": "Started on CLI",
+                "channel": "cli",
+                "told_at": now_ms - 2000,
+                "saga_name": "Traveling Tale",
+            },
+            {
+                "chapter": 2,
+                "content": "Continued on Telegram",
+                "channel": "telegram",
+                "told_at": now_ms - 1000,
+                "saga_name": "Traveling Tale",
+            },
+            {
+                "chapter": 3,
+                "content": "Back to CLI",
+                "channel": "cli",
+                "told_at": now_ms,
+                "saga_name": "Traveling Tale",
+            },
+        ]
+
+        chapters = await bard.get_cross_channel_story(saga_id="saga-123", trace_id="test-123")
+
+        assert len(chapters) == 3
+        assert chapters[0]["channel"] == "cli"
+        assert chapters[1]["channel"] == "telegram"
+        assert chapters[2]["channel"] == "cli"
+
+    @pytest.mark.asyncio
+    async def test_get_cross_channel_story_empty_saga(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return empty list for nonexistent saga."""
+        mock_neo4j.execute_query.return_value = []
+
+        chapters = await bard.get_cross_channel_story(saga_id="nonexistent", trace_id="test-123")
+
+        assert chapters == []
+
+
+class TestGetSagaStatisticsByCaptain:
+    """Tests for get_saga_statistics_by_captain query (#115)."""
+
+    @pytest.mark.asyncio
+    async def test_get_saga_statistics_by_captain_returns_grouped_stats(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return statistics grouped by Captain."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "captain_uuid": "captain-1",
+                "captain_name": "Alice",
+                "total_sagas": 5,
+                "total_chapters": 15,
+            },
+            {
+                "captain_uuid": "captain-2",
+                "captain_name": "Bob",
+                "total_sagas": 3,
+                "total_chapters": 9,
+            },
+        ]
+
+        stats = await bard.get_saga_statistics_by_captain(trace_id="test-123")
+
+        assert len(stats) == 2
+        assert stats[0]["captain_uuid"] == "captain-1"
+        assert stats[0]["captain_name"] == "Alice"
+        assert stats[0]["total_sagas"] == 5
+        assert stats[0]["total_chapters"] == 15
+        assert stats[1]["captain_uuid"] == "captain-2"
+
+    @pytest.mark.asyncio
+    async def test_get_saga_statistics_by_captain_empty(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return empty list when no lore exists."""
+        mock_neo4j.execute_query.return_value = []
+
+        stats = await bard.get_saga_statistics_by_captain(trace_id="test-123")
+
+        assert stats == []
+
+
+class TestProcessMessageLoreQueries:
+    """Tests for process_message handling of new lore query operations."""
+
+    @pytest.mark.asyncio
+    async def test_process_get_recent_lore_operation(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should handle get_recent_lore operation (#112)."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "ep-1",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 1,
+                "content": "Content",
+                "channel": "cli",
+                "told_at": now_ms,
+                "created_at": now_ms,
+                "captain_uuid": "captain-123",
+            },
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_recent_lore", "limit": 5},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert len(response.payload["episodes"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_get_saga_chain_operation(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should handle get_saga_chain operation (#113)."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "uuid": "ep-1",
+                "saga_id": "saga-123",
+                "saga_name": "Test Saga",
+                "chapter": 1,
+                "content": "Content",
+                "channel": "cli",
+                "told_at": now_ms,
+                "created_at": now_ms,
+                "captain_uuid": "captain-123",
+            },
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_saga_chain", "saga_id": "saga-123"},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert len(response.payload["chapters"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_get_cross_channel_story_operation(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """Should handle get_cross_channel_story operation (#114)."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "chapter": 1,
+                "content": "Content",
+                "channel": "cli",
+                "told_at": now_ms,
+                "saga_name": "Test Saga",
+            },
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_cross_channel_story", "saga_id": "saga-123"},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["count"] == 1
+        assert len(response.payload["chapters"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_process_get_saga_statistics_by_captain_operation(
+        self, bard: BardOfTheBilge, mock_neo4j: MagicMock
+    ) -> None:
+        """Should handle get_saga_statistics_by_captain operation (#115)."""
+        mock_neo4j.execute_query.return_value = [
+            {
+                "captain_uuid": "captain-1",
+                "captain_name": "Alice",
+                "total_sagas": 5,
+                "total_chapters": 15,
+            },
+        ]
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="bard_of_the_bilge",
+            intent="query",
+            payload={"operation": "get_saga_statistics_by_captain"},
+            trace_id="test-123",
+        )
+
+        response = await bard.process_message(msg)
+
+        assert response is not None
+        assert response.payload["captain_count"] == 1
+        assert len(response.payload["statistics"]) == 1
+
+
+class TestLoreEpisodeChannelField:
+    """Tests for LoreEpisode channel field."""
+
+    def test_lore_episode_with_channel(self, now_ms: int) -> None:
+        """LoreEpisode should store channel."""
+        episode = LoreEpisode(
+            uuid="ep-123",
+            saga_id="saga-456",
+            saga_name="Test Saga",
+            chapter=1,
+            content="Content",
+            told_at=now_ms,
+            created_at=now_ms,
+            captain_uuid="captain-789",
+            channel="telegram",
+        )
+
+        assert episode.channel == "telegram"
+
+    def test_lore_episode_channel_in_to_dict(self, now_ms: int) -> None:
+        """LoreEpisode.to_dict should include channel."""
+        episode = LoreEpisode(
+            uuid="ep-123",
+            saga_id="saga-456",
+            saga_name="Test Saga",
+            chapter=1,
+            content="Content",
+            told_at=now_ms,
+            created_at=now_ms,
+            captain_uuid="captain-789",
+            channel="cli",
+        )
+
+        d = episode.to_dict()
+
+        assert "channel" in d
+        assert d["channel"] == "cli"
+
+    def test_lore_episode_channel_defaults_to_none(self, now_ms: int) -> None:
+        """LoreEpisode channel should default to None."""
+        episode = LoreEpisode(
+            uuid="ep-123",
+            saga_id="saga-456",
+            saga_name="Test Saga",
+            chapter=1,
+            content="Content",
+            told_at=now_ms,
+            created_at=now_ms,
+        )
+
+        assert episode.channel is None
+
+
+class TestSaltResponseChannel:
+    """Tests for salt_response channel parameter."""
+
+    @pytest.mark.asyncio
+    async def test_salt_response_passes_channel_to_continue_saga(
+        self, mock_neo4j: MagicMock, captain_uuid: str, now_ms: int
+    ) -> None:
+        """Should pass channel when continuing a saga."""
+        config = BardConfig(
+            tidbit_probability=1.0,
+            saga_continuation_probability=1.0,
+            min_chapter_interval_hours=0,
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        mock_neo4j.execute_query.side_effect = [
+            # _get_active_saga
+            [
+                {
+                    "saga_id": "saga-123",
+                    "saga_name": "Test Saga",
+                    "last_chapter": 2,
+                    "last_told": now_ms - 1000,
+                }
+            ],
+            # _save_episode
+            [{"uuid": "ep-new"}],
+        ]
+
+        await bard.salt_response("Hello", channel="telegram", trace_id="test-123")
+
+        # Verify channel was passed to _save_episode
+        save_call = mock_neo4j.execute_query.call_args_list[1]
+        assert save_call[0][1]["channel"] == "telegram"

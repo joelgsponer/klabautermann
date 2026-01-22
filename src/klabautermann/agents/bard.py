@@ -155,6 +155,7 @@ class LoreEpisode:
     told_at: int  # Unix timestamp (milliseconds)
     created_at: int  # Unix timestamp (milliseconds)
     captain_uuid: str | None = None  # The Person this was told to
+    channel: str | None = None  # Channel where this was told (cli, telegram, etc.)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -167,6 +168,7 @@ class LoreEpisode:
             "told_at": self.told_at,
             "created_at": self.created_at,
             "captain_uuid": self.captain_uuid,
+            "channel": self.channel,
         }
 
 
@@ -368,6 +370,39 @@ class BardOfTheBilge(BaseAgent):
                 "count": len(active),
                 "max_active": self.bard_config.max_active_sagas,
             }
+        elif operation == "get_recent_lore":
+            # #112: Get recent lore episodes
+            limit = payload.get("limit", 5)
+            episodes = await self.get_recent_lore(limit=limit, trace_id=trace_id)
+            result_payload = {
+                "episodes": [e.to_dict() for e in episodes],
+                "count": len(episodes),
+            }
+        elif operation == "get_saga_chain":
+            # #113: Get all chapters of a saga
+            saga_id_param = payload.get("saga_id", "")
+            episodes = await self.get_saga_chain(saga_id=saga_id_param, trace_id=trace_id)
+            result_payload = {
+                "chapters": [e.to_dict() for e in episodes],
+                "count": len(episodes),
+            }
+        elif operation == "get_cross_channel_story":
+            # #114: Show story travel across channels
+            saga_id_param = payload.get("saga_id", "")
+            cross_channel_chapters = await self.get_cross_channel_story(
+                saga_id=saga_id_param, trace_id=trace_id
+            )
+            result_payload = {
+                "chapters": cross_channel_chapters,
+                "count": len(cross_channel_chapters),
+            }
+        elif operation == "get_saga_statistics_by_captain":
+            # #115: Get saga stats grouped by Captain
+            stats = await self.get_saga_statistics_by_captain(trace_id=trace_id)
+            result_payload = {
+                "statistics": stats,
+                "captain_count": len(stats),
+            }
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -387,6 +422,7 @@ class BardOfTheBilge(BaseAgent):
         self,
         clean_response: str,
         storm_mode: bool = False,
+        channel: str | None = None,
         trace_id: str | None = None,
     ) -> SaltResult:
         """
@@ -399,6 +435,7 @@ class BardOfTheBilge(BaseAgent):
         Args:
             clean_response: The response to potentially salt with a tidbit.
             storm_mode: If True, never add tidbits (urgent situation).
+            channel: Optional channel where this is being told (cli, telegram, etc.).
             trace_id: Optional trace ID for logging.
 
         Returns:
@@ -435,7 +472,9 @@ class BardOfTheBilge(BaseAgent):
         if active_saga and random.random() < self.bard_config.saga_continuation_probability:
             # Try to continue the saga (may fail due to lifecycle rules)
             try:
-                tidbit, chapter = await self._continue_saga(active_saga, trace_id=trace_id)
+                tidbit, chapter = await self._continue_saga(
+                    active_saga, channel=channel, trace_id=trace_id
+                )
                 salted = f"{clean_response}\n\n_{tidbit}_"
 
                 logger.info(
@@ -709,7 +748,7 @@ class BardOfTheBilge(BaseAgent):
         query = """
         MATCH (le:LoreEpisode {saga_id: $saga_id})-[:TOLD_TO]->(p:Person)
         RETURN le.uuid as uuid, le.saga_id as saga_id, le.saga_name as saga_name,
-               le.chapter as chapter, le.content as content,
+               le.chapter as chapter, le.content as content, le.channel as channel,
                le.told_at as told_at, le.created_at as created_at,
                p.uuid as captain_uuid
         ORDER BY le.chapter ASC
@@ -732,6 +771,7 @@ class BardOfTheBilge(BaseAgent):
                 told_at=row["told_at"],
                 created_at=row["created_at"],
                 captain_uuid=row.get("captain_uuid"),
+                channel=row.get("channel"),
             )
             for row in results
         ]
@@ -739,6 +779,7 @@ class BardOfTheBilge(BaseAgent):
     async def _continue_saga(
         self,
         saga: ActiveSaga,
+        channel: str | None = None,
         trace_id: str | None = None,
     ) -> tuple[str, int]:
         """
@@ -754,6 +795,7 @@ class BardOfTheBilge(BaseAgent):
 
         Args:
             saga: The active saga to continue.
+            channel: Optional channel where this chapter is told.
             trace_id: Optional trace ID for logging.
 
         Returns:
@@ -792,6 +834,7 @@ class BardOfTheBilge(BaseAgent):
             saga_name=saga.saga_name,
             chapter=new_chapter,
             content=content,
+            channel=channel,
             trace_id=trace_id,
         )
 
@@ -799,6 +842,7 @@ class BardOfTheBilge(BaseAgent):
 
     async def start_new_saga(
         self,
+        channel: str | None = None,
         trace_id: str | None = None,
     ) -> tuple[str, str, int]:
         """
@@ -808,6 +852,7 @@ class BardOfTheBilge(BaseAgent):
         - Maximum active sagas limit must not be exceeded (#119)
 
         Args:
+            channel: Optional channel where this saga starts.
             trace_id: Optional trace ID for logging.
 
         Returns:
@@ -834,6 +879,7 @@ class BardOfTheBilge(BaseAgent):
             saga_name=saga_name,
             chapter=1,
             content=content,
+            channel=channel,
             trace_id=trace_id,
         )
 
@@ -850,6 +896,7 @@ class BardOfTheBilge(BaseAgent):
         saga_name: str,
         chapter: int,
         content: str,
+        channel: str | None = None,
         trace_id: str | None = None,
     ) -> str:
         """
@@ -864,6 +911,7 @@ class BardOfTheBilge(BaseAgent):
             saga_name: Human-readable name of the saga.
             chapter: Chapter number (1-indexed).
             content: The story content.
+            channel: Optional channel where this was told (cli, telegram, etc.).
             trace_id: Optional trace ID for logging.
 
         Returns:
@@ -880,6 +928,7 @@ class BardOfTheBilge(BaseAgent):
             saga_name: $saga_name,
             chapter: $chapter,
             content: $content,
+            channel: $channel,
             told_at: $now_ms,
             created_at: $now_ms
         })
@@ -902,6 +951,7 @@ class BardOfTheBilge(BaseAgent):
                 "saga_name": saga_name,
                 "chapter": chapter,
                 "content": content,
+                "channel": channel,
                 "now_ms": now_ms,
                 "captain_uuid": self.captain_uuid,
                 "prev_chapter": chapter - 1,
@@ -926,8 +976,177 @@ class BardOfTheBilge(BaseAgent):
         return random.choice(self.CANONICAL_TIDBITS)
 
     # =========================================================================
-    # Query Operations
+    # Query Operations (#112, #113, #114, #115)
     # =========================================================================
+
+    async def get_recent_lore(
+        self,
+        limit: int = 5,
+        trace_id: str | None = None,
+    ) -> list[LoreEpisode]:
+        """
+        Get the most recent story episodes told to this Captain (#112).
+
+        Retrieves lore episodes ordered by told_at descending, allowing
+        the Bard to see what stories were recently told.
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 6.1
+
+        Args:
+            limit: Maximum number of episodes to return.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of LoreEpisode objects ordered by told_at DESC.
+        """
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        RETURN le.uuid as uuid, le.saga_id as saga_id, le.saga_name as saga_name,
+               le.chapter as chapter, le.content as content, le.channel as channel,
+               le.told_at as told_at, le.created_at as created_at,
+               p.uuid as captain_uuid
+        ORDER BY le.told_at DESC
+        LIMIT $limit
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"captain_uuid": self.captain_uuid, "limit": limit},
+            trace_id=trace_id,
+        )
+
+        return [
+            LoreEpisode(
+                uuid=row["uuid"],
+                saga_id=row["saga_id"],
+                saga_name=row["saga_name"],
+                chapter=row["chapter"],
+                content=row["content"],
+                told_at=row["told_at"],
+                created_at=row["created_at"],
+                captain_uuid=row.get("captain_uuid"),
+                channel=row.get("channel"),
+            )
+            for row in results
+        ]
+
+    async def get_saga_chain(
+        self,
+        saga_id: str,
+        trace_id: str | None = None,
+    ) -> list[LoreEpisode]:
+        """
+        Get all chapters of a saga in order (#113).
+
+        Retrieves the complete saga chain with all chapters and metadata,
+        ordered by chapter number ascending.
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 6.2
+
+        Args:
+            saga_id: The saga ID to retrieve.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of LoreEpisode objects ordered by chapter ASC.
+        """
+        # Use existing _get_saga_chapters with a high limit
+        return await self._get_saga_chapters(
+            saga_id,
+            limit=self.bard_config.max_saga_chapters,
+            trace_id=trace_id,
+        )
+
+    async def get_cross_channel_story(
+        self,
+        saga_id: str,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Show how a story traveled across channels (#114).
+
+        Retrieves saga chapters with channel information, showing
+        how the narrative progressed across different communication
+        channels (CLI, Telegram, etc.).
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 6.3
+
+        Args:
+            saga_id: The saga ID to analyze.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of chapter info dicts with channel details.
+        """
+        query = """
+        MATCH (le:LoreEpisode {saga_id: $saga_id})-[:TOLD_TO]->(p:Person {uuid: $captain_uuid})
+        WITH le ORDER BY le.chapter ASC
+        RETURN le.chapter as chapter, le.content as content,
+               le.channel as channel, le.told_at as told_at,
+               le.saga_name as saga_name
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {"saga_id": saga_id, "captain_uuid": self.captain_uuid},
+            trace_id=trace_id,
+        )
+
+        return [
+            {
+                "chapter": row["chapter"],
+                "content": row["content"],
+                "channel": row.get("channel"),
+                "told_at": row["told_at"],
+                "saga_name": row.get("saga_name"),
+            }
+            for row in results
+        ]
+
+    async def get_saga_statistics_by_captain(
+        self,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get saga statistics grouped by Captain (#115).
+
+        Counts total sagas and chapters for each Captain who has
+        received lore episodes. Useful for admin/analytics views.
+
+        Reference: specs/architecture/LORE_SYSTEM.md Section 6.4
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of statistics dicts grouped by captain_uuid.
+        """
+        query = """
+        MATCH (le:LoreEpisode)-[:TOLD_TO]->(p:Person)
+        WITH p.uuid as captain_uuid, p.name as captain_name,
+             le.saga_id as saga_id, count(le) as chapter_count
+        WITH captain_uuid, captain_name,
+             count(DISTINCT saga_id) as total_sagas,
+             sum(chapter_count) as total_chapters
+        RETURN captain_uuid, captain_name, total_sagas, total_chapters
+        ORDER BY total_chapters DESC
+        """
+
+        results = await self.neo4j.execute_query(
+            query,
+            {},
+            trace_id=trace_id,
+        )
+
+        return [
+            {
+                "captain_uuid": row["captain_uuid"],
+                "captain_name": row.get("captain_name"),
+                "total_sagas": row["total_sagas"],
+                "total_chapters": row["total_chapters"],
+            }
+            for row in results
+        ]
 
     async def get_all_sagas(
         self,
