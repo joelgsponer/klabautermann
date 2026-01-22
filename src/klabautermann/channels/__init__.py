@@ -9,6 +9,7 @@ Contains:
 - sanitization: Input sanitization for security
 - manager: Channel lifecycle management
 - rate_limiter: Per-channel rate limiting
+- message_queue: Message queuing for resilience
 
 Future channels (Sprint 4+):
 - discord_driver: Discord bot interface
@@ -27,6 +28,15 @@ from klabautermann.channels.manager import (
     HealthStatus,
     get_channel_manager,
     reset_channel_manager,
+)
+from klabautermann.channels.message_queue import (
+    EnqueueResult,
+    MessageQueue,
+    MessageQueueConfig,
+    OverflowAction,
+    QueueItem,
+    QueueItemStatus,
+    QueueStats,
 )
 from klabautermann.channels.rate_limiter import (
     RateLimitConfig,
@@ -61,6 +71,14 @@ __all__ = [
     "ChannelStatus",
     "ChannelStatusReport",
     "HealthStatus",
+    # Message Queue
+    "EnqueueResult",
+    "MessageQueue",
+    "MessageQueueConfig",
+    "OverflowAction",
+    "QueueItem",
+    "QueueItemStatus",
+    "QueueStats",
     # Sanitization
     "InputSanitizer",
     # Rate Limiting
