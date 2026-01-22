@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,memory">
+    <meta name="post-slug" content="semantic-caching">
+    <meta name="post-excerpt" content="Hash the query. Check the cache. Return in microseconds. Why ask the graph twice when once was enough?">
+    <title>Remember the Answer | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Remember the Answer</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>"What's John's email?" Graph traversal. LLM call. 800 milliseconds.</p>
+                <p>"What's John's email?" Same question. Same answer. Another 800 milliseconds?</p>
+                <p>Not anymore.</p>
+
+                <h2>The Cache</h2>
+                <p>Hash the query. Store the result. Next time, return from memory:</p>
+
+                <pre><code>from klabautermann.memory import (
+    cache_search_results,
+    get_cached_search_results,
+)
+
+# First time: compute and cache
+results = await expensive_search(query)
+cache_search_results(query, results)
+
+# Second time: instant return
+cached = get_cached_search_results(query)
+if cached:
+    return cached  # Microseconds, not milliseconds</code></pre>
+
+                <h2>Query Hashing</h2>
+                <p>Queries normalize before hashing. Case doesn't matter. Whitespace doesn't matter:</p>
+
+                <pre><code>from klabautermann.memory import hash_query
+
+# These all produce the same hash
+hash_query("What's John's email?")
+hash_query("WHAT'S JOHN'S EMAIL?")
+hash_query("  what's john's email?  ")</code></pre>
+
+                <p>Parameters matter though:</p>
+
+                <pre><code>from klabautermann.memory import hash_query_with_params
+
+# Different params = different cache entries
+hash_query_with_params("Find people", {"limit": 10})
+hash_query_with_params("Find people", {"limit": 20})</code></pre>
+
+                <h2>TTL Expiration</h2>
+                <p>Results expire. Default: 5 minutes. The knowledge graph changes, and stale answers become wrong answers:</p>
+
+                <pre><code># Configure via environment
+SEMANTIC_CACHE_TTL=300  # 5 minutes default
+
+# Or per entry
+cache.set(query, results, ttl=60)  # 1 minute for this entry</code></pre>
+
+                <h2>LRU Eviction</h2>
+                <p>When the cache fills up, drop the least recently used entries:</p>
+
+                <pre><code># Default: 1000 entries max
+SEMANTIC_CACHE_MAX_ENTRIES=1000
+
+# Oldest unused entries evicted first
+# Recently accessed entries stay longer</code></pre>
+
+                <h2>Statistics</h2>
+                <p>Track your cache performance:</p>
+
+                <pre><code>from klabautermann.memory import get_search_cache_stats
+
+stats = get_search_cache_stats()
+
+print(f"Hit rate: {stats.hit_rate:.1%}")
+print(f"Hits: {stats.hits}")
+print(f"Misses: {stats.misses}")
+print(f"Evictions: {stats.evictions}")
+print(f"Current size: {stats.current_size}/{stats.max_size}")</code></pre>
+
+                <h2>Full API</h2>
+                <pre><code>from klabautermann.memory import (
+    SemanticCache,         # The cache class
+    hash_query,            # Hash a query string
+    hash_query_with_params,# Hash query + parameters
+
+    # Global cache convenience functions
+    get_semantic_cache,    # Get singleton instance
+    cache_search_results,  # Store results
+    get_cached_search_results,  # Retrieve results
+    invalidate_search_cache,    # Remove specific entry
+    clear_search_cache,    # Clear all entries
+    get_search_cache_stats,# Get statistics
+)</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#197: [MEM-011] Implement semantic caching</li>
+                </ul>
+
+                <p>Similar questions. Same answers. Once is enough.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
