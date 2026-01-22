@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,memory">
+    <meta name="post-slug" content="backup-restore">
+    <meta name="post-excerpt" content="Export your knowledge graph to JSON. Restore it later. Validate before you commit. Because data without backups is just hopes and dreams.">
+    <title>Saving the Graph | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Saving the Graph</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The shell scripts exist. They use <code>neo4j-admin dump</code> at the Docker level. But what about Python-level exports? What about JSON you can inspect, version, and move between environments?</p>
+
+                <p>Now you can.</p>
+
+                <h2>The Backup</h2>
+                <p>Create a snapshot of your entire knowledge graph:</p>
+
+                <pre><code>from klabautermann.memory import create_backup, save_backup_to_file
+
+# Create snapshot
+snapshot = await create_backup(neo4j_client)
+
+# Check what we got
+print(f"Nodes: {snapshot.metadata.node_count}")
+print(f"Relationships: {snapshot.metadata.relationship_count}")
+print(f"Labels: {snapshot.metadata.node_labels}")
+
+# Save to file
+await save_backup_to_file(snapshot, "backups/knowledge-2026-01-22.json")</code></pre>
+
+                <p>The snapshot captures everything: all nodes with their labels and properties, all relationships with their types and endpoints, plus metadata about when it was created and what version format it uses.</p>
+
+                <h2>The Restore</h2>
+                <p>Bring your data back:</p>
+
+                <pre><code>from klabautermann.memory import load_backup_from_file, restore_backup
+
+# Load snapshot
+snapshot = await load_backup_from_file("backups/knowledge-2026-01-22.json")
+
+# Restore to database
+result = await restore_backup(
+    neo4j_client,
+    snapshot,
+    clear_existing=True,  # Start fresh
+)
+
+print(f"Restored {result.nodes_restored} nodes")
+print(f"Restored {result.relationships_restored} relationships")
+
+if result.errors:
+    print(f"Errors: {result.errors}")</code></pre>
+
+                <p>The <code>clear_existing</code> option removes all existing data first. Useful for migrations, test environments, or disaster recovery.</p>
+
+                <h2>Validation</h2>
+                <p>Before you restore, validate:</p>
+
+                <pre><code>from klabautermann.memory import validate_backup
+
+errors = await validate_backup(snapshot)
+
+if errors:
+    for error in errors:
+        print(f"Problem: {error}")
+else:
+    print("Backup is consistent")</code></pre>
+
+                <p>Validation checks:</p>
+                <ul>
+                    <li>Node count matches metadata</li>
+                    <li>Relationship count matches metadata</li>
+                    <li>All relationships reference existing nodes</li>
+                    <li>No duplicate UUIDs within the same label</li>
+                </ul>
+
+                <h2>The JSON Format</h2>
+                <p>Readable, portable, versionable:</p>
+
+                <pre><code>{
+  "metadata": {
+    "created_at": "2026-01-22T14:30:00+00:00",
+    "version": "1.0",
+    "node_count": 247,
+    "relationship_count": 312,
+    "node_labels": ["Person", "Organization", "Project"],
+    "relationship_types": ["WORKS_AT", "KNOWS", "CONTRIBUTES_TO"]
+  },
+  "nodes": [
+    {
+      "element_id": "4:abc:0",
+      "labels": ["Person"],
+      "properties": {
+        "uuid": "person-123",
+        "name": "John Doe",
+        "email": "john@example.com"
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "type": "WORKS_AT",
+      "from_uuid": "person-123",
+      "to_uuid": "org-456",
+      "properties": {"title": "Engineer"}
+    }
+  ]
+}</code></pre>
+
+                <h2>Clear Database</h2>
+                <p>When you need a clean slate:</p>
+
+                <pre><code>from klabautermann.memory import clear_database
+
+deleted = await clear_database(neo4j_client)
+print(f"Deleted {deleted} nodes")</code></pre>
+
+                <p>Deletes in batches of 1000 to avoid memory issues. Relationships are removed automatically when their nodes go.</p>
+
+                <h2>Use Cases</h2>
+                <ul>
+                    <li><strong>Disaster Recovery</strong>: Regular JSON backups alongside neo4j-admin dumps</li>
+                    <li><strong>Environment Migration</strong>: Export from dev, import to staging</li>
+                    <li><strong>Testing</strong>: Snapshot known state, run tests, restore</li>
+                    <li><strong>Debugging</strong>: Inspect the JSON to understand graph structure</li>
+                    <li><strong>Version Control</strong>: Track knowledge graph changes over time</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#203: [MEM-017] Implement backup snapshot</li>
+                    <li>#204: [MEM-018] Add restore from backup</li>
+                </ul>
+
+                <p>Your knowledge graph is now portable. Export it. Move it. Restore it. The data stays yours.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
