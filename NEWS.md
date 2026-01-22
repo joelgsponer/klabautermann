@@ -6,6 +6,7 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Smart Duplicate Detection**: Klabautermann now detects and merges duplicate entities using fuzzy matching. High-confidence duplicates (like "John Doe" and "John D." with matching emails) are auto-merged. Medium-confidence matches are flagged for your review - you can merge them with a simple confirm or dismiss if they're actually different people.
 - **Telegram Bot Support**: Access Klabautermann from your phone via Telegram. Create a bot with @BotFather, set `TELEGRAM_BOT_TOKEN`, and chat with your knowledge assistant from anywhere. Supports text messages and voice transcription with commands `/start`, `/help`, `/status`.
 - **Grafana Dashboard**: Pre-built dashboard for visualizing Klabautermann metrics. Monitor agent performance, API latency, error rates, LLM usage, and graph operations. Start with `docker-compose -f docker-compose.monitoring.yml up -d` and visit http://localhost:3000.
 - **Prometheus Metrics**: Export application metrics to Prometheus via `/metrics` endpoint. Track agent performance (requests, successes, errors, latency), API health (request counts, latency, WebSocket connections), graph operations, and LLM usage (calls, tokens, latency). Scrape with Prometheus, visualize with Grafana.

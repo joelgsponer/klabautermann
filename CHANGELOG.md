@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Fuzzy entity deduplication with user review workflow (#35)
+  - Wire `deduplication.py` module to Archivist (replaces simple `entity_merge.py`)
+  - Use `rapidfuzz` for fuzzy name similarity scoring
+  - Auto-merge high-confidence duplicates (>= 0.9 similarity)
+  - Flag medium-confidence duplicates (0.7-0.9) via `POTENTIAL_DUPLICATE` relationships
+  - `get_flagged_duplicates()` retrieves pending review items
+  - `resolve_flagged_duplicate()` merges or dismisses flagged pairs
+  - 10 new unit tests for deduplication integration
 - TelegramDriver for Telegram bot integration (#129, #130, #131, #132, #133, #134)
   - `TelegramDriver` class extending `BaseChannel`
   - Bot token configuration via `TELEGRAM_BOT_TOKEN` env or config
