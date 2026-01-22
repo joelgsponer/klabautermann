@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="saga-lifecycle">
+    <meta name="post-excerpt" content="Every good story needs an ending. The Bard now manages saga lifecycles with chapter limits, timeouts, and graceful conclusions.">
+    <title>All Good Tales Must End: Saga Lifecycle Management | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">All Good Tales Must End: Saga Lifecycle Management</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Bard of the Bilge has been telling tales since we introduced it. But like any good storyteller, the Bard needed to learn when a story is finished - and when it's time to let one fade into memory.</p>
+
+                <h2>The Problem with Endless Sagas</h2>
+                <p>Without lifecycle management, sagas could theoretically run forever. A story started in January might still be "active" in December, accumulating chapters that lost all narrative coherence. Or the Bard might start telling so many tales that none of them ever concluded.</p>
+                <p>We needed rules. Not the kind that kill creativity, but the kind that give stories proper endings.</p>
+
+                <h2>Four Rules for the Bard</h2>
+                <p>We implemented four lifecycle constraints:</p>
+
+                <h3>1. Max Chapters Per Saga (#118)</h3>
+                <p>Every saga concludes after 5 chapters. A satisfying narrative arc.</p>
+
+                <pre><code>config = BardConfig(
+    max_saga_chapters=5  # Default: 5
+)
+
+# When the Bard tries to continue a completed saga:
+try:
+    await bard._continue_saga(completed_saga)
+except SagaCompleteError as e:
+    # "Saga 'The Chronicle of the Haunted Hash' is complete with 5 chapters"
+    pass</code></pre>
+
+                <h3>2. Max Active Sagas (#119)</h3>
+                <p>No more than 3 sagas can be active at once. The Bard can't juggle too many tales.</p>
+
+                <pre><code>config = BardConfig(
+    max_active_sagas=3  # Default: 3
+)
+
+# When trying to start a fourth saga:
+try:
+    await bard.start_new_saga()
+except SagaLimitReachedError as e:
+    # "Maximum 3 active sagas reached. Active: Saga A, Saga B, Saga C"
+    pass</code></pre>
+
+                <h3>3. Saga Timeout (#120)</h3>
+                <p>Sagas auto-complete after 30 days of inactivity. No more zombie tales.</p>
+
+                <pre><code>config = BardConfig(
+    saga_timeout_days=30  # Default: 30
+)
+
+# The Bard can archive old sagas:
+archived = await bard.archive_timed_out_sagas()
+
+# Each gets a closing chapter:
+# "And so the tale of The Legend of the Daemon fades into the mists
+# of memory, waiting perhaps for another day to be told..."</code></pre>
+
+                <h3>4. Min Time Between Chapters (#121)</h3>
+                <p>At least 1 hour must pass between chapters. Even legends need time to breathe.</p>
+
+                <pre><code>config = BardConfig(
+    min_chapter_interval_hours=1.0  # Default: 1.0
+)
+
+# When the Bard tries to add a chapter too quickly:
+try:
+    await bard._continue_saga(recent_saga)
+except ChapterTooSoonError as e:
+    # "Cannot add chapter to 'The Ballad' for 0.5 more hours"
+    pass</code></pre>
+
+                <h2>Graceful Degradation</h2>
+                <p>The key insight: these constraints shouldn't break the response. When the Bard can't continue a saga, it falls back to a standalone tidbit instead:</p>
+
+                <pre><code>async def salt_response(self, clean_response, ...):
+    if active_saga and should_continue:
+        try:
+            tidbit, chapter = await self._continue_saga(active_saga)
+            return SaltResult(is_continuation=True, ...)
+        except SagaLifecycleError:
+            # Fall through to standalone tidbit
+            pass
+
+    # Standalone tidbit as fallback
+    tidbit = self._generate_standalone_tidbit()
+    return SaltResult(is_continuation=False, ...)</code></pre>
+
+                <p>The user never sees an error. They just get a tidbit instead of a saga continuation.</p>
+
+                <h2>The Exception Hierarchy</h2>
+                <p>All saga errors inherit from <code>SagaLifecycleError</code>:</p>
+
+                <pre><code>class SagaLifecycleError(Exception):
+    """Base exception for saga lifecycle errors."""
+    pass
+
+class SagaCompleteError(SagaLifecycleError):
+    """Saga reached max chapters."""
+    pass
+
+class SagaLimitReachedError(SagaLifecycleError):
+    """Too many active sagas."""
+    pass
+
+class ChapterTooSoonError(SagaLifecycleError):
+    """Not enough time since last chapter."""
+    pass
+
+class SagaTimedOutError(SagaLifecycleError):
+    """Saga was inactive too long."""
+    pass</code></pre>
+
+                <p>This lets the <code>salt_response</code> method catch any lifecycle error with a single <code>except SagaLifecycleError</code>.</p>
+
+                <h2>New Process Message Operations</h2>
+                <p>Two new operations for saga management:</p>
+
+                <pre><code># Archive all timed-out sagas
+msg = AgentMessage(
+    payload={"operation": "archive_timed_out"},
+    ...
+)
+response = await bard.process_message(msg)
+# {"archived": [...], "count": 2}
+
+# Get all active sagas with limit info
+msg = AgentMessage(
+    payload={"operation": "get_active_sagas"},
+    ...
+)
+response = await bard.process_message(msg)
+# {"active_sagas": [...], "count": 2, "max_active": 3}</code></pre>
+
+                <h2>The Timeout Check</h2>
+                <p>When fetching an active saga, we now check if it's timed out:</p>
+
+                <pre><code>async def _get_active_saga(self):
+    timeout_ms = self.bard_config.saga_timeout_days * 24 * 60 * 60 * 1000
+    cutoff_ms = now_ms - timeout_ms
+
+    # Query returns saga data...
+
+    saga = ActiveSaga(
+        saga_id=row["saga_id"],
+        saga_name=row["saga_name"],
+        last_chapter=row["last_chapter"],
+        last_told=row["last_told"],
+        is_timed_out=row["last_told"] < cutoff_ms,  # New flag
+    )
+    return saga</code></pre>
+
+                <p>The <code>is_timed_out</code> flag means we don't need a second query to check timeout status.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#118: [LORE-022] Implement max chapters per saga</li>
+                    <li>#119: [LORE-023] Implement max active sagas</li>
+                    <li>#120: [LORE-024] Implement saga timeout</li>
+                    <li>#121: [LORE-025] Implement min time between chapters</li>
+                </ul>
+
+                <h2>Test Coverage</h2>
+                <p>27 new tests cover the lifecycle features:</p>
+                <ul>
+                    <li>Exception creation and inheritance</li>
+                    <li>Config default values</li>
+                    <li>Max chapters enforcement</li>
+                    <li>Max active sagas enforcement</li>
+                    <li>Timeout detection and archival</li>
+                    <li>Chapter interval checking</li>
+                    <li>Graceful fallback in salt_response</li>
+                    <li>New process_message operations</li>
+                </ul>
+
+                <p>All 61 bard tests pass. All 2256 unit tests pass.</p>
+
+                <p>Every good tale must end. Now the Bard knows when.</p>
+
+                <p><em>And so the tale of the Saga Lifecycle fades into the mists of memory, waiting perhaps for another day to be told...</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
