@@ -13,6 +13,7 @@ Contains:
 - officer: Proactive alerts (The Officer of the Watch)
 - purser: State synchronization (The Purser)
 - bard: Lore and storytelling (The Bard of the Bilge)
+- cartographer: Community detection (The Cartographer)
 """
 
 from klabautermann.agents.bard import (
@@ -23,6 +24,15 @@ from klabautermann.agents.bard import (
     LoreEpisode,
     SaltResult,
     generate_saga_name,
+)
+from klabautermann.agents.cartographer import (
+    Cartographer,
+    CartographerConfig,
+    Community,
+    CommunityMember,
+    CommunityTheme,
+    DetectionResult,
+    classify_theme,
 )
 from klabautermann.agents.executor import Executor
 from klabautermann.agents.hull_cleaner import (
@@ -64,6 +74,12 @@ __all__ = [
     "BardConfig",
     "BardOfTheBilge",
     "CANONICAL_TIDBITS",
+    "Cartographer",
+    "CartographerConfig",
+    "Community",
+    "CommunityMember",
+    "CommunityTheme",
+    "DetectionResult",
     "EmailManifest",
     "Executor",
     "HullCleaner",
@@ -83,5 +99,6 @@ __all__ = [
     "SyncService",
     "SyncState",
     "TheSieve",
+    "classify_theme",
     "generate_saga_name",
 ]
