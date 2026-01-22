@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Channel auto-restart with exponential backoff (#154)
+  - Auto-restart unhealthy channels during health monitoring
+  - Configurable `max_restart_attempts` and `restart_backoff_seconds`
+  - Track restart attempts per channel with exponential backoff
+  - Failure callbacks for notifications (sync and async supported)
+  - `reset_restart_attempts()` and `get_restart_attempts()` methods
+  - Environment variables: `CHANNEL_AUTO_RESTART`, `CHANNEL_MAX_RESTART_ATTEMPTS`, `CHANNEL_RESTART_BACKOFF`
+- Cross-channel broadcast messaging (#156)
+  - `broadcast()` method sends message to all active channels
+  - Support for custom `thread_ids` per channel
+  - `exclude_channels` parameter to skip specific channels
+  - `BroadcastResult` with delivery tracking and error details
+  - `send_to_channel()` for targeted messaging
+  - 15 new unit tests for auto-restart and broadcast
 - Fuzzy entity deduplication with user review workflow (#35)
   - Wire `deduplication.py` module to Archivist (replaces simple `entity_merge.py`)
   - Use `rapidfuzz` for fuzzy name similarity scoring
