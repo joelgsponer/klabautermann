@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,deep-dive">
+    <meta name="post-slug" content="calendar-search-slots">
+    <meta name="post-excerpt" content="Finding that meeting with Sarah and discovering when you're actually free. Calendar search and the FreeBusy API join the fleet.">
+    <title>Finding Time | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">deep-dive</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Finding Time</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Two questions that should be simple: "When did I meet with Sarah about the budget?" and "When am I free for a 30-minute call this week?" Klabautermann could already create events and list them. But finding specific events by content? Discovering open slots? Not until now.</p>
+
+                <h2>Calendar Search</h2>
+                <p>Google Calendar has a search API. It's just hidden behind a single query parameter that does all the heavy lifting:</p>
+
+                <pre><code>async def search_events(
+    self,
+    query: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    max_results: int = 25,
+    calendar_id: str = "primary",
+    context: Any = None,
+) -> list[CalendarEvent]:
+    """Search calendar events by title/description."""
+    await self.start()
+
+    if start is None:
+        start = datetime.now()
+    if end is None:
+        end = start + timedelta(days=30)
+
+    def do_search() -> list[dict[str, Any]]:
+        time_min = start_time.replace(tzinfo=None).isoformat() + "Z"
+        time_max = end_time.replace(tzinfo=None).isoformat() + "Z"
+        results = (
+            self._calendar_service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+                q=search_query,  # The magic parameter
+            )
+            .execute()
+        )
+        return results.get("items", [])
+
+    raw_events = await self._rate_limited_call("calendar", do_search)
+    return self._parse_calendar_events(raw_events, calendar_id, None)</code></pre>
+
+                <p>The <code>q</code> parameter performs full-text search across event titles and descriptions. "Sarah budget" finds "Budget Review with Sarah." "standup" finds every "Daily Standup" across the time range. Google handles the fuzzy matching.</p>
+
+                <p>We reuse the existing <code>_parse_calendar_events()</code> parser and <code>CalendarEvent</code> model. No new structures needed. Events come back sorted by start time.</p>
+
+                <h2>The Free Slots Problem</h2>
+                <p>Finding availability is more interesting. The naive approach: list all events, find gaps. But that fails immediately with multiple calendars. You might be free on your primary calendar but have a dentist appointment on your personal one.</p>
+
+                <p>Google's FreeBusy API solves this. Query multiple calendars at once, get back consolidated busy periods:</p>
+
+                <pre><code>def do_freebusy() -> dict[str, Any]:
+    body = {
+        "timeMin": time_min,
+        "timeMax": time_max,
+        "items": [{"id": cal_id} for cal_id in calendar_ids],
+    }
+    return self._calendar_service.freebusy().query(body=body).execute()</code></pre>
+
+                <p>The response groups busy periods by calendar. We flatten them into a single sorted list:</p>
+
+                <pre><code>busy_periods: list[tuple[datetime, datetime]] = []
+calendars = freebusy_result.get("calendars", {})
+for cal_id in calendar_ids:
+    cal_data = calendars.get(cal_id, {})
+    for busy in cal_data.get("busy", []):
+        busy_start = datetime.fromisoformat(busy["start"].replace("Z", "+00:00"))
+        busy_end = datetime.fromisoformat(busy["end"].replace("Z", "+00:00"))
+        busy_periods.append(
+            (busy_start.replace(tzinfo=None), busy_end.replace(tzinfo=None))
+        )
+
+busy_periods.sort(key=lambda x: x[0])</code></pre>
+
+                <h2>Working Hours Matter</h2>
+                <p>A free slot at 3am isn't useful. The algorithm respects working hours (configurable, defaulting to 9-5) and skips weekends:</p>
+
+                <pre><code>current_day = start.replace(hour=0, minute=0, second=0, microsecond=0)
+while current_day < end:
+    day_start = current_day.replace(hour=working_hours_start, minute=0, second=0)
+    day_end = current_day.replace(hour=working_hours_end, minute=0, second=0)
+
+    # Skip weekends (Saturday=5, Sunday=6)
+    if current_day.weekday() >= 5:
+        current_day += timedelta(days=1)
+        continue
+
+    # Find gaps between busy periods within working hours
+    slot_start = day_start
+    for busy_start, busy_end in busy_periods:
+        if busy_end <= day_start or busy_start >= day_end:
+            continue
+
+        if busy_start > slot_start:
+            gap_end = min(busy_start, day_end)
+            if gap_end - slot_start >= duration:
+                free_slots.append(FreeSlot(start=slot_start, end=gap_end))
+
+        slot_start = max(slot_start, busy_end)
+
+    # Free time after last meeting
+    if slot_start < day_end and day_end - slot_start >= duration:
+        free_slots.append(FreeSlot(start=slot_start, end=day_end))
+
+    current_day += timedelta(days=1)</code></pre>
+
+                <p>The algorithm walks through each working day, identifying gaps between busy periods. Only gaps at least as long as the requested duration make the cut.</p>
+
+                <h2>The FreeSlot Model</h2>
+                <p>Results need to be human-readable:</p>
+
+                <pre><code>class FreeSlot(BaseModel):
+    """A free time slot in the calendar."""
+
+    start: datetime
+    end: datetime
+
+    @property
+    def duration_minutes(self) -> int:
+        """Duration of the slot in minutes."""
+        return int((self.end - self.start).total_seconds() / 60)
+
+    @property
+    def duration_human(self) -> str:
+        """Human-readable duration."""
+        minutes = self.duration_minutes
+        if minutes < 60:
+            return f"{minutes} min"
+        hours = minutes // 60
+        mins = minutes % 60
+        if mins == 0:
+            return f"{hours} hr"
+        return f"{hours} hr {mins} min"
+
+    def format_display(self) -> str:
+        """Format slot for display."""
+        start_str = self.start.strftime("%a %b %d, %I:%M %p")
+        end_str = self.end.strftime("%I:%M %p")
+        return f"{start_str} - {end_str} ({self.duration_human})"</code></pre>
+
+                <p>"Mon Jan 22, 2:00 PM - 5:00 PM (3 hr)" reads better than raw ISO timestamps.</p>
+
+                <h2>What's Different Now</h2>
+                <p>Before:</p>
+                <blockquote>"When did I meet with Sarah about the budget?" &rarr; Lists all calendar events (good luck scrolling)</blockquote>
+
+                <p>After:</p>
+                <blockquote>"When did I meet with Sarah about the budget?" &rarr; "Budget Review with Sarah - Wed Jan 15, 2:00 PM"</blockquote>
+
+                <p>Before:</p>
+                <blockquote>"When am I free for a 30-minute call this week?" &rarr; "I can't determine availability."</blockquote>
+
+                <p>After:</p>
+                <blockquote>"When am I free for a 30-minute call this week?" &rarr; "Here are your available slots: Mon 9:00 AM - 10:30 AM (1 hr 30 min), Mon 3:00 PM - 5:00 PM (2 hr)..."</blockquote>
+
+                <h2>The Tests</h2>
+                <p>14 new tests across three categories:</p>
+
+                <ul>
+                    <li><strong>TestCalendarSearch (4 tests)</strong>: Basic search, search with no results, time range handling, search errors</li>
+                    <li><strong>TestCalendarFreeSlots (5 tests)</strong>: Finding slots with events, working hours filtering, weekend skipping, multiple calendars, error handling</li>
+                    <li><strong>TestFreeSlotModel (5 tests)</strong>: Duration calculation, human-readable formatting, display output</li>
+                </ul>
+
+                <p>The FreeBusy tests mock realistic Google Calendar API responses with overlapping meetings and cross-day events.</p>
+
+                <h2>The Stats</h2>
+                <ul>
+                    <li>2 files modified</li>
+                    <li>~400 lines added</li>
+                    <li>1 new model: <code>FreeSlot</code></li>
+                    <li>2 new methods: <code>search_events()</code>, <code>find_free_slots()</code></li>
+                    <li>14 new tests</li>
+                    <li>All tests pass</li>
+                </ul>
+
+                <p>Issues #218 and #220, closed. Klabautermann can now find both what happened and when things can happen.</p>
+
+                <p>The voyage continues.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
