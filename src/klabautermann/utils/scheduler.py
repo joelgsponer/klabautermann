@@ -196,6 +196,60 @@ def register_scheduled_jobs(
         )
 
     # ========================================================================
+    # Cartographer: Detect communities (Knowledge Islands)
+    # Issue: #76 - [AGT-S-040] Add scheduled community detection
+    # ========================================================================
+    cartographer_config = config.get("cartographer", {})
+    cartographer_enabled = cartographer_config.get("enabled", True)
+    # Default: Sunday midnight (0 0 * * 0)
+    cartographer_cron = cartographer_config.get("cron", "0 0 * * 0")
+
+    if cartographer_enabled and "cartographer" in agents:
+        cartographer = agents["cartographer"]
+
+        # Wrap the job to pass trace_id
+        async def cartographer_job() -> None:
+            job_trace_id = str(uuid.uuid4())
+            logger.info(
+                "[BEACON] Scheduled Cartographer community detection triggered",
+                extra={"trace_id": job_trace_id, "agent_name": "cartographer"},
+            )
+            try:
+                await cartographer.detect_communities(trace_id=job_trace_id)  # type: ignore[attr-defined]
+                logger.info(
+                    "[BEACON] Community detection completed successfully",
+                    extra={"trace_id": job_trace_id, "agent_name": "cartographer"},
+                )
+            except Exception as e:
+                logger.error(
+                    f"[STORM] Community detection failed: {e}",
+                    extra={"trace_id": job_trace_id, "agent_name": "cartographer"},
+                )
+                # Don't re-raise - let scheduler continue
+
+        scheduler.add_job(
+            cartographer_job,
+            trigger=CronTrigger.from_crontab(cartographer_cron),
+            id="cartographer_communities",
+            name="Cartographer Community Detection",
+            replace_existing=True,
+        )
+        logger.info(
+            f"[CHART] Registered Cartographer community detection job (cron: {cartographer_cron})",
+            extra={"trace_id": trace_id},
+        )
+    elif not cartographer_enabled:
+        logger.info(
+            "[CHART] Cartographer community detection job disabled by config",
+            extra={"trace_id": trace_id},
+        )
+    else:
+        logger.warning(
+            "[SWELL] Cartographer agent not available, skipping scheduled job",
+            extra={"trace_id": trace_id},
+        )
+
+    # ========================================================================
     # Scribe: Generate daily reflection
     # ========================================================================
     scribe_config = config.get("scribe", {})
