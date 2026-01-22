@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Community summary generation for Knowledge Islands (#75)
+  - `generate_summaries()` method to find and update communities needing summaries
+  - `_generate_summary()` helper for rule-based summary generation
+  - Process message handler for "generate_summaries" operation
+  - Support `force_regenerate` flag to regenerate all summaries
+  - Summary format: "Knowledge Island containing {theme}. Includes {composition}. Total: {count} nodes."
+  - 6 new tests for summary generation functionality
 - Saga progress in daily journal reflections (#110)
   - `SagaProgress` model for tracking saga episodes told during the day
   - `get_daily_saga_progress()` query function in analytics.py

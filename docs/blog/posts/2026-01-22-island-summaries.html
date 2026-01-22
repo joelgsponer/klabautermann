@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-22">
+    <meta name="post-category" content="feature,agents,memory">
+    <meta name="post-slug" content="island-summaries">
+    <meta name="post-excerpt" content="Knowledge Islands now describe themselves. The Cartographer generates summaries for each community.">
+    <title>The Islands Name Themselves | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-22">January 22, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                        <span class="category-tag">memory</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Islands Name Themselves</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Cartographer finds islands. Now it describes them too.</p>
+                <p>AGENTS_EXTENDED.md Section 4.3 specified that communities should have AI-generated summaries. Today we made them speak.</p>
+
+                <h2>The Problem (#75)</h2>
+                <p>Knowledge Islands are clusters of related nodes - your work contacts, hobby activities, family connections. But a cluster without a label is just... a cluster. You need to know what's inside.</p>
+                <p>The <code>Community</code> model had a <code>summary</code> field. It was always <code>None</code>.</p>
+
+                <h2>The Solution</h2>
+                <p>Two new methods join the Cartographer:</p>
+                <pre><code>async def generate_summaries(
+    self,
+    force_regenerate: bool = False,
+    trace_id: str | None = None,
+) -> dict[str, Any]:
+    """Generate AI summaries for communities that need them."""
+
+async def _generate_summary(
+    self,
+    community_name: str,
+    community_theme: str,
+    members: list[CommunityMember],
+    trace_id: str | None = None,
+) -> str:
+    """Generate a summary for a single community."""</code></pre>
+                <p><code>generate_summaries()</code> finds all communities without summaries (or stale ones older than 1 week) and generates new ones.</p>
+
+                <h2>The Summary Format</h2>
+                <p>Summaries follow a consistent pattern:</p>
+                <pre><code>Knowledge Island containing {theme}. Includes {composition}. Total: {count} nodes.</code></pre>
+                <p>Example output:</p>
+                <blockquote>
+                    <p>Knowledge Island containing work-related entities. Includes 3 Persons, 2 Organizations, 1 Project. Total: 8 connected nodes.</p>
+                </blockquote>
+
+                <h2>The Implementation</h2>
+                <p>For now, summaries use rule-based generation:</p>
+                <ul>
+                    <li>Count member nodes by label (Person, Organization, etc.)</li>
+                    <li>Map theme to description (professional = "work-related entities")</li>
+                    <li>Format composition (top 3 label types)</li>
+                </ul>
+                <p>This can be upgraded to LLM-based summaries later. The infrastructure is ready - member descriptions are collected, just not used yet.</p>
+
+                <h2>Staleness Detection</h2>
+                <p>Summaries regenerate when:</p>
+                <ul>
+                    <li><code>summary IS NULL</code> - never generated</li>
+                    <li><code>last_updated < timestamp() - 604800000</code> - older than 1 week</li>
+                </ul>
+                <p>Or force a complete refresh:</p>
+                <pre><code>await cartographer.generate_summaries(force_regenerate=True)</code></pre>
+
+                <h2>Process Message Handler</h2>
+                <p>Trigger via agent message:</p>
+                <pre><code>msg = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="cartographer",
+    intent="cartographer_request",
+    payload={"operation": "generate_summaries", "force_regenerate": False},
+)</code></pre>
+
+                <h2>Housekeeping</h2>
+                <p>Along the way, we closed 3 already-implemented issues:</p>
+                <ul>
+                    <li>#74: Theme classification - already in <code>classify_theme()</code></li>
+                    <li>#77: Island search support - already in <code>zoom_search.py</code></li>
+                    <li>#78: Cartographer unit tests - already 36 tests</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#75: [AGT-S-039] Implement community summary generation</li>
+                    <li>#74: [AGT-S-038] Add theme classification (already implemented)</li>
+                    <li>#77: [AGT-S-041] Implement island search support (already implemented)</li>
+                    <li>#78: [AGT-S-042] Add Cartographer unit tests (already implemented)</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>Knowledge Islands now introduce themselves. When you query communities, you see not just their theme and member count, but a description of what they contain.</p>
+                <p><em>An island without a name is just a point on the map. An island with a summary is a destination.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
