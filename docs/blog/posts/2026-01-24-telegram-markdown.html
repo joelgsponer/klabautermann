@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,channel">
+    <meta name="post-slug" content="telegram-markdown">
+    <meta name="post-excerpt" content="Telegram messages now escape special characters and fall back gracefully when formatting fails.">
+    <title>Smooth Sailing on Telegram | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">channel</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Smooth Sailing on Telegram</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Telegram's Markdown parser is strict. Special characters can break it. A response containing <code>[0]</code> or <code>2+2=4</code> would fail with "Can't parse entities."</p>
+                <p>Not anymore.</p>
+
+                <h2>The Problem</h2>
+                <p>Telegram supports Markdown formatting for messages. But its parser treats certain characters as formatting markers:</p>
+                <ul>
+                    <li><code>[ ]</code> - link text markers</li>
+                    <li><code>( )</code> - link URL markers</li>
+                    <li><code>*</code> - bold markers</li>
+                    <li><code>_</code> - italic markers</li>
+                    <li><code>` </code> - code markers</li>
+                    <li><code>. + = > # -</code> and more</li>
+                </ul>
+                <p>An unescaped bracket or mismatched asterisk causes the whole message to fail.</p>
+
+                <h2>The Solution</h2>
+                <p>Escape special characters before sending:</p>
+
+                <pre><code>from klabautermann.channels.markdown_formatter import escape_markdown
+
+text = "Array [0] + Array [1] = Result"
+safe = escape_markdown(text)
+# "Array \\[0\\] \\+ Array \\[1\\] \\= Result"</code></pre>
+
+                <h2>Preserving Intentional Formatting</h2>
+                <p>Not all special characters should be escaped. If the response contains intentional formatting:</p>
+
+                <pre><code>*bold* and _italic_ and `code`</code></pre>
+
+                <p>We want to keep that. The formatter detects formatting patterns and protects them:</p>
+
+                <pre><code>text = "*Bold* text with [array] value"
+safe = escape_markdown(text)
+# "*Bold* text with \\[array\\] value"</code></pre>
+
+                <p>Bold stays bold. Brackets get escaped.</p>
+
+                <h2>Graceful Fallback</h2>
+                <p>Sometimes formatting still fails - malformed responses, edge cases. Instead of crashing:</p>
+
+                <pre><code>async def _safe_reply(self, message, text):
+    try:
+        await message.reply_text(formatted, parse_mode="Markdown")
+    except Exception as e:
+        if "parse" in str(e).lower():
+            # Markdown failed, send plain text
+            await message.reply_text(text)
+        else:
+            raise</code></pre>
+
+                <p>Users see the message either way. Formatting is nice-to-have, not must-have.</p>
+
+                <h2>What Gets Escaped</h2>
+                <pre><code>[ ] ( ) ~ ` > # + - = | { } . !</code></pre>
+
+                <p>Each becomes <code>\[</code>, <code>\]</code>, etc.</p>
+
+                <h2>What Gets Preserved</h2>
+                <ul>
+                    <li><code>*bold text*</code></li>
+                    <li><code>_italic text_</code></li>
+                    <li><code>`inline code`</code></li>
+                    <li><code>```code blocks```</code></li>
+                    <li><code>[link text](url)</code></li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#139: [CHAN-013] Implement Markdown formatting</li>
+                </ul>
+
+                <p>Telegram messages now sail through without parsing errors.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
