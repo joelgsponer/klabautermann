@@ -22,7 +22,9 @@ Issues: #11 LLM-based pre-extraction, #13 Ontology validation
 
 from __future__ import annotations
 
+import asyncio
 import re
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from klabautermann.agents.base_agent import BaseAgent
@@ -40,6 +42,80 @@ if TYPE_CHECKING:
     from klabautermann.core.models import AgentMessage
     from klabautermann.memory.graphiti_client import GraphitiClient
     from klabautermann.memory.neo4j_client import Neo4jClient
+
+
+# ===========================================================================
+# Batch Ingestion Data Classes (Issue #17)
+# ===========================================================================
+
+
+@dataclass
+class BatchEpisode:
+    """
+    Represents a single episode for batch ingestion.
+
+    Issue: #17
+    """
+
+    content: str
+    message_uuid: str | None = None
+    captain_uuid: str | None = None
+    source: str = "conversation"
+
+
+@dataclass
+class EpisodeResult:
+    """
+    Result of ingesting a single episode in a batch.
+
+    Issue: #17
+    """
+
+    index: int
+    success: bool
+    episode_name: str | None = None
+    error: str | None = None
+    entities_linked: int = 0
+
+
+@dataclass
+class BatchIngestionResult:
+    """
+    Summary result of batch episode ingestion.
+
+    Issue: #17
+    """
+
+    total: int
+    successful: int
+    failed: int
+    results: list[EpisodeResult] = field(default_factory=list)
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate as percentage."""
+        if self.total == 0:
+            return 100.0
+        return (self.successful / self.total) * 100.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "total": self.total,
+            "successful": self.successful,
+            "failed": self.failed,
+            "success_rate": round(self.success_rate, 2),
+            "results": [
+                {
+                    "index": r.index,
+                    "success": r.success,
+                    "episode_name": r.episode_name,
+                    "error": r.error,
+                    "entities_linked": r.entities_linked,
+                }
+                for r in self.results
+            ],
+        }
 
 
 class Ingestor(BaseAgent):
@@ -463,9 +539,181 @@ class Ingestor(BaseAgent):
                 },
             )
 
+    # ===========================================================================
+    # Batch Ingestion (Issue #17)
+    # ===========================================================================
+
+    async def batch_ingest(
+        self,
+        episodes: list[BatchEpisode],
+        max_concurrent: int = 5,
+        trace_id: str | None = None,
+    ) -> BatchIngestionResult:
+        """
+        Ingest multiple episodes in parallel.
+
+        Processes episodes concurrently using asyncio.gather with a semaphore
+        to limit concurrent operations. Each episode is processed independently,
+        so failures in one don't affect others.
+
+        Args:
+            episodes: List of BatchEpisode objects to ingest.
+            max_concurrent: Maximum number of concurrent ingestion operations.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            BatchIngestionResult with summary and per-episode results.
+
+        Issue: #17
+        """
+        if not episodes:
+            return BatchIngestionResult(total=0, successful=0, failed=0)
+
+        trace_id = trace_id or "batch"
+
+        logger.info(
+            f"[CHART] Starting batch ingestion of {len(episodes)} episodes",
+            extra={
+                "trace_id": trace_id,
+                "agent_name": self.name,
+                "episode_count": len(episodes),
+                "max_concurrent": max_concurrent,
+            },
+        )
+
+        # Use semaphore to limit concurrent operations
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def process_episode(index: int, episode: BatchEpisode) -> EpisodeResult:
+            """Process a single episode with semaphore control."""
+            async with semaphore:
+                return await self._ingest_single_episode(index, episode, trace_id)
+
+        # Process all episodes concurrently
+        tasks = [process_episode(i, ep) for i, ep in enumerate(episodes)]
+        results = await asyncio.gather(*tasks, return_exceptions=False)
+
+        # Aggregate results
+        successful = sum(1 for r in results if r.success)
+        failed = len(results) - successful
+
+        batch_result = BatchIngestionResult(
+            total=len(episodes),
+            successful=successful,
+            failed=failed,
+            results=list(results),
+        )
+
+        logger.info(
+            f"[BEACON] Batch ingestion complete: {successful}/{len(episodes)} successful",
+            extra={
+                "trace_id": trace_id,
+                "agent_name": self.name,
+                "total": len(episodes),
+                "successful": successful,
+                "failed": failed,
+                "success_rate": batch_result.success_rate,
+            },
+        )
+
+        return batch_result
+
+    async def _ingest_single_episode(
+        self,
+        index: int,
+        episode: BatchEpisode,
+        trace_id: str,
+    ) -> EpisodeResult:
+        """
+        Ingest a single episode and return the result.
+
+        Args:
+            index: Index of episode in batch (for result tracking).
+            episode: BatchEpisode to ingest.
+            trace_id: Trace ID for logging.
+
+        Returns:
+            EpisodeResult with success/failure information.
+
+        Issue: #17
+        """
+        episode_trace = f"{trace_id}-{index}"
+
+        try:
+            # Clean and ingest the episode
+            cleaned = self.clean_input(episode.content)
+
+            if not cleaned.strip():
+                return EpisodeResult(
+                    index=index,
+                    success=False,
+                    error="Empty content after cleaning",
+                )
+
+            # Perform pre-extraction if available
+            if hasattr(self, "pre_extraction_engine") and self.pre_extraction_engine:
+                extraction_result, validation = await self.pre_extraction_engine.extract(
+                    cleaned, episode_trace
+                )
+                if validation and not validation.is_valid:
+                    logger.debug(
+                        f"[WHISPER] Batch episode {index} has validation issues",
+                        extra={
+                            "trace_id": episode_trace,
+                            "agent_name": self.name,
+                            "issues": len(validation.issues),
+                        },
+                    )
+
+            # Ingest to Graphiti
+            episode_name = await self._ingest_to_graphiti(
+                content=cleaned,
+                captain_uuid=episode.captain_uuid,
+                trace_id=episode_trace,
+            )
+
+            if not episode_name:
+                return EpisodeResult(
+                    index=index,
+                    success=False,
+                    error="Graphiti ingestion returned no episode name",
+                )
+
+            # Link entities to message if message_uuid provided
+            entities_linked = 0
+            if episode.message_uuid:
+                await self._link_entities_to_message(
+                    episode_name=episode_name,
+                    message_uuid=episode.message_uuid,
+                    trace_id=episode_trace,
+                )
+                # Note: We don't track exact count here, just mark as attempted
+
+            return EpisodeResult(
+                index=index,
+                success=True,
+                episode_name=episode_name,
+                entities_linked=entities_linked,
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"[SWELL] Batch episode {index} failed: {e}",
+                extra={
+                    "trace_id": episode_trace,
+                    "agent_name": self.name,
+                    "error": str(e),
+                },
+            )
+            return EpisodeResult(
+                index=index,
+                success=False,
+                error=str(e),
+            )
+
 
 # ===========================================================================
 # Export
 # ===========================================================================
 
-__all__ = ["Ingestor"]
+__all__ = ["BatchEpisode", "BatchIngestionResult", "EpisodeResult", "Ingestor"]

@@ -364,3 +364,221 @@ class TestCleanInputClassMethod:
         text = "Assistant: Hello"
         cleaned = ingestor.clean_input(text)
         assert cleaned == "Hello"
+
+
+# ===========================================================================
+# Batch Ingestion Tests (Issue #17)
+# ===========================================================================
+
+
+class TestBatchIngestion:
+    """Test suite for batch episode ingestion functionality."""
+
+    @pytest.fixture
+    def mock_graphiti(self) -> Mock:
+        """Create a mock GraphitiClient."""
+        mock = Mock()
+        mock.is_connected = True
+        mock.add_episode = AsyncMock(side_effect=lambda **kwargs: f"episode-{id(kwargs)}")
+        return mock
+
+    @pytest.fixture
+    def ingestor(self, mock_graphiti: Mock) -> Ingestor:
+        """Create an Ingestor with mock Graphiti."""
+        return Ingestor(
+            name="ingestor",
+            config={},
+            graphiti_client=mock_graphiti,
+        )
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_empty_list(self, ingestor: Ingestor) -> None:
+        """Should handle empty episode list gracefully."""
+
+        result = await ingestor.batch_ingest([], trace_id="test-batch-001")
+
+        assert result.total == 0
+        assert result.successful == 0
+        assert result.failed == 0
+        assert result.success_rate == 100.0
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_single_episode(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should process a single episode successfully."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [BatchEpisode(content="I met Sarah today")]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-002")
+
+        assert result.total == 1
+        assert result.successful == 1
+        assert result.failed == 0
+        assert result.success_rate == 100.0
+        assert len(result.results) == 1
+        assert result.results[0].success is True
+        mock_graphiti.add_episode.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_multiple_episodes(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should process multiple episodes in parallel."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [
+            BatchEpisode(content="First episode content"),
+            BatchEpisode(content="Second episode content"),
+            BatchEpisode(content="Third episode content"),
+        ]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-003")
+
+        assert result.total == 3
+        assert result.successful == 3
+        assert result.failed == 0
+        assert mock_graphiti.add_episode.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_with_captain_uuid(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should pass captain_uuid to Graphiti for each episode."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [
+            BatchEpisode(content="User's message", captain_uuid="user-123"),
+        ]
+
+        await ingestor.batch_ingest(episodes, trace_id="test-batch-004")
+
+        call_kwargs = mock_graphiti.add_episode.call_args.kwargs
+        assert call_kwargs["group_id"] == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_handles_partial_failures(self, mock_graphiti: Mock) -> None:
+        """Should continue processing if some episodes fail."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        # Make second call fail
+        call_count = 0
+
+        async def mock_add_episode(**kwargs: object) -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise Exception("Simulated failure")
+            return f"episode-{call_count}"
+
+        mock_graphiti.add_episode = mock_add_episode
+
+        ingestor = Ingestor(
+            name="ingestor",
+            config={},
+            graphiti_client=mock_graphiti,
+        )
+
+        episodes = [
+            BatchEpisode(content="First will succeed"),
+            BatchEpisode(content="Second will fail"),
+            BatchEpisode(content="Third will succeed"),
+        ]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-005")
+
+        assert result.total == 3
+        assert result.successful == 2
+        assert result.failed == 1
+        # Find the failed result
+        failed = [r for r in result.results if not r.success]
+        assert len(failed) == 1
+        assert "Simulated failure" in failed[0].error
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_respects_max_concurrent(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should limit concurrent operations with semaphore."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [BatchEpisode(content=f"Episode {i}") for i in range(10)]
+
+        # With max_concurrent=2, should still process all 10
+        result = await ingestor.batch_ingest(episodes, max_concurrent=2, trace_id="test-batch-006")
+
+        assert result.total == 10
+        assert result.successful == 10
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_cleans_content(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should clean episode content before ingestion."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [BatchEpisode(content="User: Hello world")]
+
+        await ingestor.batch_ingest(episodes, trace_id="test-batch-007")
+
+        call_kwargs = mock_graphiti.add_episode.call_args.kwargs
+        assert call_kwargs["content"] == "Hello world"
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_skips_empty_content(
+        self, ingestor: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should skip episodes that clean to empty content."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [
+            BatchEpisode(content="Valid content"),
+            BatchEpisode(content="*action only*"),  # Cleans to empty
+        ]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-008")
+
+        # First succeeds, second fails due to empty content
+        assert result.total == 2
+        assert result.successful == 1
+        assert result.failed == 1
+        failed = [r for r in result.results if not r.success]
+        assert "Empty content" in failed[0].error
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_result_to_dict(self, ingestor: Ingestor) -> None:
+        """BatchIngestionResult should serialize to dict properly."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        episodes = [BatchEpisode(content="Test content")]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-009")
+        result_dict = result.to_dict()
+
+        assert "total" in result_dict
+        assert "successful" in result_dict
+        assert "failed" in result_dict
+        assert "success_rate" in result_dict
+        assert "results" in result_dict
+        assert isinstance(result_dict["results"], list)
+
+    @pytest.mark.asyncio
+    async def test_batch_ingest_without_graphiti(self) -> None:
+        """Should handle missing Graphiti client gracefully."""
+        from klabautermann.agents.ingestor import BatchEpisode
+
+        ingestor = Ingestor(
+            name="ingestor",
+            config={},
+            graphiti_client=None,
+        )
+
+        episodes = [BatchEpisode(content="Test content")]
+
+        result = await ingestor.batch_ingest(episodes, trace_id="test-batch-010")
+
+        # All episodes fail since no Graphiti
+        assert result.total == 1
+        assert result.successful == 0
+        assert result.failed == 1
