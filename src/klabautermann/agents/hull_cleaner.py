@@ -1338,12 +1338,12 @@ class HullCleaner(BaseAgent):
                     DELETE r
                     RETURN count(r) as deleted
                     """
-                    result = await self.neo4j.execute_query(
+                    query_result = await self.neo4j.execute_query(
                         delete_query,
                         {"rel_id": path.redundant_rel_id},
                         trace_id=trace_id,
                     )
-                    if result and result[0].get("deleted", 0) > 0:
+                    if query_result and query_result[0].get("deleted", 0) > 0:
                         paths_reduced += 1
                 except Exception as e:
                     errors.append(f"Failed to delete relationship {path.redundant_rel_id}: {e}")
