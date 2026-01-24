@@ -2,14 +2,16 @@
 Unit tests for OfficerOfTheWatch agent.
 
 Tests proactive alert functionality including deadline warnings,
-meeting reminders, deep work detection, and alert filtering.
+meeting reminders, deep work detection, alert filtering, and
+alert debouncing.
 
-Issues: #59, #60, #61
+Issues: #59, #60, #61, #66
 """
 
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -445,6 +447,180 @@ class TestAlertFiltering:
 
         officer.clear_recent_alerts()
         assert len(officer._recent_alerts) == 0
+
+
+# =============================================================================
+# Alert Debouncing Tests (Issue #66)
+# =============================================================================
+
+
+class TestAlertDebouncing:
+    """Tests for alert debouncing functionality.
+
+    Verifies that the same alert isn't re-sent within the debounce window.
+    Issue: #66
+    """
+
+    @pytest.fixture
+    def officer_with_short_debounce(self, mock_neo4j: MagicMock) -> OfficerOfTheWatch:
+        """Create officer with short debounce window for testing."""
+        config = OfficerConfig(alert_debounce_minutes=1)  # 1 minute
+        return OfficerOfTheWatch(neo4j_client=mock_neo4j, config=config)
+
+    def test_recently_sent_returns_false_for_new_alert(self, officer: OfficerOfTheWatch) -> None:
+        """_recently_sent should return False for never-sent alert."""
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="New alert",
+            entity_uuid="task-new",
+        )
+
+        assert officer._recently_sent(alert) is False
+
+    def test_recently_sent_returns_true_after_mark(self, officer: OfficerOfTheWatch) -> None:
+        """_recently_sent should return True after mark_alert_sent."""
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Test",
+            entity_uuid="task-123",
+        )
+
+        officer._mark_alert_sent(alert)
+        assert officer._recently_sent(alert) is True
+
+    def test_debounce_key_uses_type_and_entity(self, officer: OfficerOfTheWatch) -> None:
+        """Debounce key should be alert_type:entity_uuid."""
+        alert = Alert(
+            alert_type=AlertType.MEETING_REMINDER,
+            priority=AlertPriority.INFO,
+            message="Meeting soon",
+            entity_uuid="event-456",
+        )
+
+        officer._mark_alert_sent(alert)
+
+        # Key should be "meeting_reminder:event-456"
+        expected_key = "meeting_reminder:event-456"
+        assert expected_key in officer._recent_alerts
+
+    def test_debounce_key_handles_none_entity(self, officer: OfficerOfTheWatch) -> None:
+        """Debounce key should handle None entity_uuid."""
+        alert = Alert(
+            alert_type=AlertType.ANOMALY,
+            priority=AlertPriority.CRITICAL,
+            message="System anomaly",
+            entity_uuid=None,
+        )
+
+        officer._mark_alert_sent(alert)
+
+        # Key should be "anomaly:none"
+        expected_key = "anomaly:none"
+        assert expected_key in officer._recent_alerts
+
+    def test_different_alert_type_not_debounced(self, officer: OfficerOfTheWatch) -> None:
+        """Different alert type for same entity should not be debounced."""
+        alert1 = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Deadline warning",
+            entity_uuid="task-123",
+        )
+        alert2 = Alert(
+            alert_type=AlertType.OVERDUE_TASK,
+            priority=AlertPriority.ERROR,
+            message="Task overdue",
+            entity_uuid="task-123",
+        )
+
+        officer._mark_alert_sent(alert1)
+
+        # Different type should not be blocked
+        assert officer._recently_sent(alert2) is False
+
+    def test_configurable_debounce_window(self, mock_neo4j: MagicMock) -> None:
+        """Debounce window should use config value."""
+        config = OfficerConfig(alert_debounce_minutes=30)
+        officer = OfficerOfTheWatch(neo4j_client=mock_neo4j, config=config)
+
+        assert officer.officer_config.alert_debounce_minutes == 30
+
+    def test_debounce_respects_time_window(
+        self, officer_with_short_debounce: OfficerOfTheWatch
+    ) -> None:
+        """Alert should be allowed after debounce window expires."""
+        from datetime import timedelta
+
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Test",
+            entity_uuid="task-123",
+        )
+
+        # Mark as sent
+        officer_with_short_debounce._mark_alert_sent(alert)
+
+        # Verify blocked immediately
+        assert officer_with_short_debounce._recently_sent(alert) is True
+
+        # Manually set the timestamp to 2 minutes ago (past 1-minute window)
+        key = "deadline_warning:task-123"
+        officer_with_short_debounce._recent_alerts[key] = datetime.now() - timedelta(minutes=2)
+
+        # Should now be allowed
+        assert officer_with_short_debounce._recently_sent(alert) is False
+
+    @pytest.mark.asyncio
+    async def test_check_conditions_applies_debouncing(
+        self, officer: OfficerOfTheWatch, mock_neo4j: MagicMock, now_ms: int
+    ) -> None:
+        """check_conditions should apply debouncing to alerts."""
+        # Setup mock to return same task twice
+        task_data = {
+            "uuid": "task-debounce-test",
+            "action": "Test Task",
+            "due_date": now_ms + (10 * 60 * 60 * 1000),  # 10 hours
+            "priority": "high",
+            "status": "todo",
+            "project_name": None,
+        }
+
+        async def mock_execute(query: str, params: dict, **kwargs: Any) -> list:
+            # Return task for deadline check
+            if "t.due_date" in query and "t.due_date > timestamp()" in query:
+                return [task_data]
+            return []
+
+        mock_neo4j.execute_query.side_effect = mock_execute
+
+        # First check - should generate alert
+        result1 = await officer.check_conditions()
+        alerts_sent_first = result1.alerts_sent
+
+        # Second check - same alert should be debounced
+        result2 = await officer.check_conditions()
+        alerts_sent_second = result2.alerts_sent
+
+        # First check should send, second should be debounced
+        assert alerts_sent_first >= alerts_sent_second
+
+    def test_clear_recent_alerts_enables_resend(self, officer: OfficerOfTheWatch) -> None:
+        """Clearing recent alerts should allow re-sending."""
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Test",
+            entity_uuid="task-123",
+        )
+
+        officer._mark_alert_sent(alert)
+        assert officer._recently_sent(alert) is True
+
+        officer.clear_recent_alerts()
+        assert officer._recently_sent(alert) is False
 
 
 # =============================================================================
@@ -1194,9 +1370,7 @@ class TestSendAlertsToChannels:
     """Tests for send_alerts_to_channels method."""
 
     @pytest.mark.asyncio
-    async def test_send_without_channel_manager(
-        self, mock_neo4j: MagicMock
-    ) -> None:
+    async def test_send_without_channel_manager(self, mock_neo4j: MagicMock) -> None:
         """Should return error when no channel manager configured."""
         officer = OfficerOfTheWatch(
             neo4j_client=mock_neo4j,
@@ -1344,9 +1518,7 @@ class TestSendAlertsToChannels:
         """Should handle broadcast exception gracefully."""
         mock_channel_manager = MagicMock()
         mock_channel_manager.active_channels = ["cli"]
-        mock_channel_manager.broadcast = AsyncMock(
-            side_effect=RuntimeError("Network error")
-        )
+        mock_channel_manager.broadcast = AsyncMock(side_effect=RuntimeError("Network error"))
 
         officer = OfficerOfTheWatch(
             neo4j_client=mock_neo4j,
@@ -1372,9 +1544,7 @@ class TestProcessMessageSendAlerts:
     """Tests for process_message with send_alerts operation."""
 
     @pytest.mark.asyncio
-    async def test_process_send_alerts_operation(
-        self, mock_neo4j: MagicMock
-    ) -> None:
+    async def test_process_send_alerts_operation(self, mock_neo4j: MagicMock) -> None:
         """Should process send_alerts operation."""
         from datetime import datetime
 
