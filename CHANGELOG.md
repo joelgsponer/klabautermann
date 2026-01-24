@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Channel Manager integration for Officer of the Watch (#67)
+  - `AlertSendResult` dataclass for tracking per-channel delivery status
+  - `format_alert_for_channel()` method with channel-specific formatting:
+    - Telegram: Markdown with emoji prefixes
+    - CLI: Rich Markdown with emoji prefixes
+    - Generic: Bracketed format for unknown channels
+  - `send_alerts_to_channels()` method using `ChannelManager.broadcast()`
+  - `send_alerts` operation in `process_message()` for alert broadcasting
+  - Optional `channel_manager` parameter in OfficerOfTheWatch constructor
+  - 14 new tests for channel integration functionality
 - Transitive redundancy detection for HullCleaner (#86)
   - `TransitivePath` and `TransitiveResult` dataclasses
   - `TRANSITIVE_REDUCTION` and `TRANSITIVE_PREVIEW` actions in PruningAction enum
