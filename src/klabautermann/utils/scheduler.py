@@ -250,6 +250,59 @@ def register_scheduled_jobs(
         )
 
     # ========================================================================
+    # Purser: Scheduled sync for Gmail and Calendar
+    # Issue: #55 - [AGT-S-019] Implement scheduled sync job
+    # ========================================================================
+    purser_config = config.get("purser", {})
+    purser_enabled = purser_config.get("enabled", True)
+    purser_interval = purser_config.get("interval_minutes", 15)
+
+    if purser_enabled and "purser" in agents:
+        purser = agents["purser"]
+
+        # Wrap the job to pass trace_id
+        async def purser_job() -> None:
+            job_trace_id = str(uuid.uuid4())
+            logger.info(
+                "[BEACON] Scheduled Purser sync triggered",
+                extra={"trace_id": job_trace_id, "agent_name": "purser"},
+            )
+            try:
+                await purser.sync_all(trace_id=job_trace_id)  # type: ignore[attr-defined]
+                logger.info(
+                    "[BEACON] Purser sync completed successfully",
+                    extra={"trace_id": job_trace_id, "agent_name": "purser"},
+                )
+            except Exception as e:
+                logger.error(
+                    f"[STORM] Purser sync failed: {e}",
+                    extra={"trace_id": job_trace_id, "agent_name": "purser"},
+                )
+                # Don't re-raise - let scheduler continue
+
+        scheduler.add_job(
+            purser_job,
+            trigger=IntervalTrigger(minutes=purser_interval),
+            id="purser_sync",
+            name="Purser Gmail/Calendar Sync",
+            replace_existing=True,
+        )
+        logger.info(
+            f"[CHART] Registered Purser sync job (interval: {purser_interval} minutes)",
+            extra={"trace_id": trace_id},
+        )
+    elif not purser_enabled:
+        logger.info(
+            "[CHART] Purser sync job disabled by config",
+            extra={"trace_id": trace_id},
+        )
+    else:
+        logger.warning(
+            "[SWELL] Purser agent not available, skipping scheduled job",
+            extra={"trace_id": trace_id},
+        )
+
+    # ========================================================================
     # Scribe: Generate daily reflection
     # ========================================================================
     scribe_config = config.get("scribe", {})

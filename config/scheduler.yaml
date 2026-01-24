@@ -23,6 +23,18 @@ syncer:
   enabled: true
   interval_minutes: 15  # Sync every 15 minutes
 
+# Purser Configuration
+# Synchronizes Gmail and Calendar via delta-sync (#55)
+purser:
+  enabled: true
+  interval_minutes: 15  # Sync every 15 minutes
+
+# Cartographer Configuration
+# Detects knowledge graph communities (Knowledge Islands)
+cartographer:
+  enabled: true
+  cron: "0 0 * * 0"  # Sunday midnight
+
 # Scheduler Settings
 timezone: UTC  # All jobs run in UTC
 job_store: memory  # Options: 'memory' or 'sqlite'
