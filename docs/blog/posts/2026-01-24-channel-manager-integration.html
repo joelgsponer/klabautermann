@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents,channel">
+    <meta name="post-slug" content="channel-manager-integration">
+    <meta name="post-excerpt" content="The Officer of the Watch now broadcasts alerts to all active channels. CLI, Telegram, wherever you are - you'll hear the alarm.">
+    <title>Hailing All Hands | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                        <span class="category-tag">channel</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Hailing All Hands</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Officer of the Watch has always been vigilant. Deadlines approaching? Warning raised. Meeting in 15 minutes? Reminder sent. Task overdue? Error flagged. But until now, those alerts went... nowhere useful.</p>
+
+                <h2>The Problem (#67)</h2>
+                <p>The Officer generated alerts. The Channel Manager could broadcast to all channels. But they didn't talk to each other. Alerts were returned in API responses, but never actually <em>sent</em> anywhere.</p>
+                <p>If you weren't actively polling the Officer, you'd never know your deadline was approaching. Not very "proactive" for a proactive alert agent.</p>
+
+                <h2>The Bridge Connection</h2>
+                <p>Now the Officer has a direct line to the Channel Manager. When alerts are generated, they can be broadcast to every active channel - CLI, Telegram, whatever's connected.</p>
+
+                <pre><code>officer = OfficerOfTheWatch(
+    neo4j_client=client,
+    channel_manager=get_channel_manager(),  # NEW
+)
+
+# Check conditions and broadcast alerts
+result = await officer.check_conditions()
+if result.alerts:
+    send_result = await officer.send_alerts_to_channels(result.alerts)</code></pre>
+
+                <h2>Channel-Specific Formatting</h2>
+                <p>Different channels need different formats. The Officer now speaks their language:</p>
+
+                <h3>Telegram</h3>
+                <pre><code>⚠️ *Deadline*: Task 'Review PR' is due soon</code></pre>
+                <p>Markdown format with emoji prefixes. Bold labels, clean readability.</p>
+
+                <h3>CLI</h3>
+                <pre><code>⚠️ **Deadline**: Task 'Review PR' is due soon</code></pre>
+                <p>Rich Markdown that renders beautifully in the terminal with emoji and bold text.</p>
+
+                <h3>Priority Indicators</h3>
+                <ul>
+                    <li>🚨 CRITICAL - Something's on fire</li>
+                    <li>❌ ERROR - Something's already burned</li>
+                    <li>⚠️ WARNING - Smoke detected</li>
+                    <li>ℹ️ INFO - Just keeping you informed</li>
+                </ul>
+
+                <h2>Graceful Failure Handling</h2>
+                <p>Networks fail. Channels drop. The Officer handles it gracefully:</p>
+
+                <pre><code>send_result = await officer.send_alerts_to_channels(alerts)
+
+if send_result.all_delivered:
+    print("All hands notified")
+else:
+    print(f"Delivered to: {send_result.channels_delivered}")
+    print(f"Failed for: {send_result.channels_failed}")
+    print(f"Errors: {send_result.errors}")</code></pre>
+
+                <p>If Telegram is down but CLI is up, you still get your alerts on CLI. Partial success is still success.</p>
+
+                <h2>The AlertSendResult</h2>
+                <p>A new dataclass tracks exactly what happened:</p>
+
+                <pre><code>@dataclass
+class AlertSendResult:
+    alerts_sent: int
+    channels_delivered: list[str]
+    channels_failed: list[str]
+    errors: dict[str, str]  # channel_name -> error message
+
+    @property
+    def all_delivered(self) -> bool:
+        return len(self.channels_failed) == 0</code></pre>
+
+                <h2>Message Protocol</h2>
+                <p>You can also send alerts via the message protocol:</p>
+
+                <pre><code>msg = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="officer_of_the_watch",
+    intent="officer_command",
+    payload={
+        "operation": "send_alerts",
+        "alerts": [
+            {
+                "alert_type": "deadline_warning",
+                "priority": "WARNING",
+                "message": "Task 'Submit report' due in 4 hours",
+            }
+        ],
+    },
+    trace_id="trace-123",
+)</code></pre>
+
+                <h2>The Tests</h2>
+                <p>14 new tests ensure the channel integration works correctly:</p>
+                <ul>
+                    <li><code>TestAlertSendResult</code> - Dataclass serialization</li>
+                    <li><code>TestFormatAlertForChannel</code> - Channel-specific formatting</li>
+                    <li><code>TestSendAlertsToChannels</code> - Broadcast scenarios</li>
+                    <li><code>TestProcessMessageSendAlerts</code> - Message protocol handling</li>
+                </ul>
+                <p>All 64 Officer tests pass (50 original + 14 new).</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#67: [AGT-S-031] Integrate with Channel Manager</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Officer can now hail all hands. When deadlines approach or tasks go overdue, every connected channel receives the alert. Whether you're at your terminal or on your phone, you'll hear the alarm.</p>
+                <p><em>A ship with a silent alarm is a ship sailing blind.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
