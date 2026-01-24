@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Scheduled sync job for Purser agent (#55)
+  - Register Purser with APScheduler using IntervalTrigger
+  - Default sync interval: 15 minutes (configurable via `interval_minutes`)
+  - Wrap `sync_all()` with trace_id generation for request tracing
+  - Graceful error handling - failures logged but don't crash scheduler
+  - Add purser config block to `config/scheduler.yaml`
+  - 8 new tests for scheduled sync functionality
 - Sync health monitoring for Purser agent (#57)
   - `SyncHealthMetrics` dataclass tracking sync_count, success_count, failure_count per service
   - `success_rate` property calculating percentage of successful syncs
