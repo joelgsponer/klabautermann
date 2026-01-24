@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="vip-whitelist">
+    <meta name="post-excerpt" content="Important senders now bypass TheSieve's noise filters. Your CEO's emails won't get lost in the filter.">
+    <title>The Guest List | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Guest List</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>TheSieve filters your inbox. It catches noise, blocks spam, and detects prompt injection attempts. But sometimes the filter catches things you actually want.</p>
+                <p>Your CEO sends a one-word email: "Approved." TheSieve sees a short message with no context and flags it as noise.</p>
+                <p>Now there's a guest list.</p>
+
+                <h2>The VIP Whitelist</h2>
+                <p>VIPs bypass TheSieve's noise and content filters. They still go through security checks - even the CEO doesn't get to inject prompts - but their short emails, newsletters, and automated messages all pass through.</p>
+
+                <pre><code>sieve = TheSieve(
+    min_words=5,
+    vip_whitelist=["ceo@company.com", "@company.com"]
+)</code></pre>
+
+                <h2>Matching Logic</h2>
+                <p>Two kinds of matches:</p>
+                <ul>
+                    <li><strong>Exact match</strong>: <code>alice@example.com</code> matches only that address</li>
+                    <li><strong>Domain wildcard</strong>: <code>@company.com</code> matches anyone at that domain</li>
+                </ul>
+                <p>Both are case-insensitive. Both handle "Name &lt;email&gt;" format automatically.</p>
+
+                <pre><code>def _is_vip(self, sender: str) -> bool:
+    if not self._vip_whitelist or not sender:
+        return False
+
+    sender_lower = sender.lower()
+
+    # Handle "Name <email>" format
+    if "<" in sender_lower and ">" in sender_lower:
+        start = sender_lower.find("<") + 1
+        end = sender_lower.find(">")
+        sender_lower = sender_lower[start:end]
+
+    for vip in self._vip_whitelist:
+        if vip.startswith("@") and sender_lower.endswith(vip):
+            return True
+        if sender_lower == vip:
+            return True
+
+    return False</code></pre>
+
+                <h2>Security First</h2>
+                <p>The order matters. In <code>filter_email()</code>:</p>
+                <ol>
+                    <li>Security checks (prompt injection detection)</li>
+                    <li>VIP whitelist check</li>
+                    <li>Noise filters (min words, promotional content)</li>
+                </ol>
+                <p>VIPs skip step 3, never step 1. A compromised VIP account attempting prompt injection still gets blocked.</p>
+
+                <pre><code># 1. Security checks FIRST - VIPs don't bypass these
+if is_prompt_injection:
+    return EmailManifest(
+        is_manifest_worthy=False,
+        risk_level=RiskLevel.CRITICAL,
+        filter_reason="Prompt injection detected",
+    )
+
+# 2. VIP whitelist check - skip noise/content filters but NOT security
+if self._is_vip(sender):
+    return EmailManifest(
+        is_manifest_worthy=True,
+        risk_level=RiskLevel.LOW,
+        filter_reason="VIP whitelist bypass",
+    )</code></pre>
+
+                <h2>Runtime Management</h2>
+                <p>Add and remove VIPs without restarting:</p>
+
+                <pre><code>sieve.add_vip("partner@external.com")
+sieve.remove_vip("former-ceo@company.com")
+print(sieve.vip_whitelist)  # Current list</code></pre>
+
+                <h2>Configuration</h2>
+                <p>Set VIPs in <code>PurserConfig</code>:</p>
+
+                <pre><code>@dataclass
+class PurserConfig:
+    gmail_credentials_path: str | None = None
+    calendar_credentials_path: str | None = None
+    vip_whitelist: list[str] = field(default_factory=list)</code></pre>
+
+                <p>Pass them when creating the Purser, and they flow through to TheSieve.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#53: [AGT-S-017] Implement VIP whitelist</li>
+                </ul>
+
+                <p>The guest list is ready. Important people get through. Security stays tight.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
