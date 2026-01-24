@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Sync health monitoring for Purser agent (#57)
+  - `SyncHealthMetrics` dataclass tracking sync_count, success_count, failure_count per service
+  - `success_rate` property calculating percentage of successful syncs
+  - `is_healthy` property using 90% success rate threshold
+  - `record_success()` and `record_failure()` methods for metric recording
+  - Metrics recorded automatically after `sync_gmail()` and `sync_calendar()` operations
+  - `get_sync_health()` method for programmatic access to health metrics
+  - `get_health` operation in `process_message()` for API access
+  - 16 new tests for health monitoring functionality
 - Telegram channel configuration file (#141)
   - `config/channels/telegram.yaml` with bot_token, allowed_user_ids, enable_voice
   - Connection settings (timeout, retries, backoff)
