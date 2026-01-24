@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents,scheduler">
+    <meta name="post-slug" content="scheduled-sync">
+    <meta name="post-excerpt" content="The Purser now runs on autopilot. Every 15 minutes, your Gmail and Calendar sync automatically.">
+    <title>Running on Autopilot | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                        <span class="category-tag">scheduler</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Running on Autopilot</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Purser keeps your external services in sync. But you shouldn't have to remember to run it.</p>
+                <p>Now you don't.</p>
+
+                <h2>APScheduler Integration</h2>
+                <p>Klabautermann already uses APScheduler for periodic jobs. The Archivist scans for stale threads. The Scribe generates daily journals. The Cartographer maps communities weekly.</p>
+                <p>The Purser joins the crew.</p>
+
+                <h2>The Pattern</h2>
+                <p>All scheduled jobs follow the same pattern:</p>
+
+                <pre><code>from apscheduler.triggers.interval import IntervalTrigger
+
+async def purser_job() -> None:
+    job_trace_id = str(uuid.uuid4())
+    logger.info(
+        "[BEACON] Scheduled Purser sync triggered",
+        extra={"trace_id": job_trace_id, "agent_name": "purser"},
+    )
+    try:
+        await purser.sync_all(trace_id=job_trace_id)
+        logger.info(
+            "[BEACON] Purser sync completed successfully",
+            extra={"trace_id": job_trace_id, "agent_name": "purser"},
+        )
+    except Exception as e:
+        logger.error(
+            f"[STORM] Purser sync failed: {e}",
+            extra={"trace_id": job_trace_id, "agent_name": "purser"},
+        )
+        # Don't re-raise - let scheduler continue
+
+scheduler.add_job(
+    purser_job,
+    trigger=IntervalTrigger(minutes=15),
+    id="purser_sync",
+    name="Purser Gmail/Calendar Sync",
+    replace_existing=True,
+)</code></pre>
+
+                <h2>Key Design Decisions</h2>
+
+                <h3>Trace IDs</h3>
+                <p>Each job execution gets a unique trace ID. When you grep logs for that ID, you see the entire sync operation from start to finish.</p>
+
+                <h3>Error Isolation</h3>
+                <p>If a sync fails, it's logged and forgotten. The scheduler keeps running. The next execution tries again in 15 minutes.</p>
+                <p>No cascading failures. No stuck jobs.</p>
+
+                <h3>Coalescing</h3>
+                <p>APScheduler is configured with <code>coalesce=True</code>. If the system was down and missed three scheduled runs, it only runs once when it comes back up.</p>
+
+                <h2>Configuration</h2>
+                <p>Everything lives in <code>config/scheduler.yaml</code>:</p>
+
+                <pre><code># Purser Configuration
+# Synchronizes Gmail and Calendar via delta-sync (#55)
+purser:
+  enabled: true
+  interval_minutes: 15  # Sync every 15 minutes</code></pre>
+
+                <p>Set <code>enabled: false</code> to disable. Set <code>interval_minutes: 30</code> for half-hour syncs. Whatever works for your workflow.</p>
+
+                <h2>The Full Scheduler Lineup</h2>
+                <p>The scheduler now runs four agents:</p>
+                <ul>
+                    <li><strong>Archivist</strong>: Every 15 minutes - scans for inactive threads</li>
+                    <li><strong>Syncer</strong>: Every 15 minutes - imports from Google Workspace</li>
+                    <li><strong>Purser</strong>: Every 15 minutes - delta-sync Gmail and Calendar</li>
+                    <li><strong>Cartographer</strong>: Weekly (Sunday midnight) - detects communities</li>
+                    <li><strong>Scribe</strong>: Daily (midnight) - generates journal reflections</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#55: [AGT-S-019] Implement scheduled sync job</li>
+                </ul>
+
+                <p>Set it and forget it. The Purser's got the watch.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
