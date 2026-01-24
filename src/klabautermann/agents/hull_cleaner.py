@@ -8,8 +8,11 @@ performant and reduces noise in search results.
 Also handles duplicate entity detection using Levenshtein similarity and
 entity merging using APOC refactor operations.
 
+Audit entries are generated for all pruning operations and can be persisted
+to Neo4j as AuditLog nodes for historical review and compliance.
+
 Reference: specs/architecture/AGENTS_EXTENDED.md Section 5
-Issues: #79, #80, #81, #84, #85, #88
+Issues: #79, #80, #81, #84, #85, #87, #88
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ from klabautermann.memory.weight_decay import (
 
 
 if TYPE_CHECKING:
+    from klabautermann.memory.audit_log import AuditLogStats, StoredAuditEntry
     from klabautermann.memory.neo4j_client import Neo4jClient
 
 
@@ -251,6 +255,7 @@ class HullCleaner(BaseAgent):
 
         operation = payload.get("operation", "scrape_barnacles")
         dry_run = payload.get("dry_run", self.hull_config.dry_run_by_default)
+        persist_audit = payload.get("persist_audit", False)
 
         logger.info(
             f"[CHART] HullCleaner processing {operation} (dry_run={dry_run})",
@@ -258,7 +263,9 @@ class HullCleaner(BaseAgent):
         )
 
         if operation == "scrape_barnacles":
-            result = await self.scrape_barnacles(dry_run=dry_run, trace_id=trace_id)
+            result = await self.scrape_barnacles(
+                dry_run=dry_run, persist_audit=persist_audit, trace_id=trace_id
+            )
             result_payload = result.to_dict()
         elif operation == "find_weak_relationships":
             weak_rels = await self.find_weak_relationships(trace_id=trace_id)
@@ -316,6 +323,18 @@ class HullCleaner(BaseAgent):
         elif operation == "merge_duplicates":
             merge_result = await self.merge_duplicates(dry_run=dry_run, trace_id=trace_id)
             result_payload = merge_result.to_dict()
+        elif operation == "query_stored_audit":
+            # Query persisted audit entries from Neo4j
+            filters = payload.get("filters", {})
+            stored_entries = await self.query_stored_audit(filters=filters, trace_id=trace_id)
+            result_payload = {
+                "entries": [e.to_dict() for e in stored_entries],
+                "count": len(stored_entries),
+            }
+        elif operation == "get_audit_stats":
+            # Get audit log statistics
+            stats = await self.get_audit_stats(trace_id=trace_id)
+            result_payload = stats.to_dict() if stats else {}
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -334,6 +353,7 @@ class HullCleaner(BaseAgent):
     async def scrape_barnacles(
         self,
         dry_run: bool = True,
+        persist_audit: bool = False,
         trace_id: str | None = None,
     ) -> PruningResult:
         """
@@ -343,6 +363,7 @@ class HullCleaner(BaseAgent):
 
         Args:
             dry_run: If True, only preview changes without deleting.
+            persist_audit: If True, save audit entries to Neo4j AuditLog nodes.
             trace_id: Optional trace ID for logging.
 
         Returns:
@@ -415,6 +436,18 @@ class HullCleaner(BaseAgent):
         # Future: Add more pruning operations here
         # - Transitive path reduction
 
+        # Persist audit entries to Neo4j if requested
+        if persist_audit and self._audit_log:
+            try:
+                await self._persist_audit_log(trace_id=trace_id)
+            except Exception as e:
+                error_msg = f"Audit log persistence failed: {e}"
+                logger.error(
+                    f"[STORM] {error_msg}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                errors.append(error_msg)
+
         duration_ms = (time.time() - start_time) * 1000
 
         result = PruningResult(
@@ -433,7 +466,8 @@ class HullCleaner(BaseAgent):
             f"[BEACON] Barnacle scraping complete: "
             f"found {total_rels_found} weak relationships (pruned {total_rels_pruned}), "
             f"found {total_nodes_found} orphan messages (removed {total_nodes_removed}) "
-            f"({'preview' if dry_run else 'actual'})",
+            f"({'preview' if dry_run else 'actual'})"
+            f"{' (audit persisted)' if persist_audit else ''}",
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
@@ -1134,6 +1168,126 @@ class HullCleaner(BaseAgent):
     def clear_audit_log(self) -> None:
         """Clear the current session's audit log."""
         self._audit_log = []
+
+    # =========================================================================
+    # Persistent Audit Log Operations (#87)
+    # =========================================================================
+
+    async def _persist_audit_log(
+        self,
+        trace_id: str | None = None,
+    ) -> list[str]:
+        """
+        Persist the current session's audit entries to Neo4j.
+
+        Creates AuditLog nodes for each entry in the session log.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of created AuditLog node UUIDs.
+        """
+        if not self._audit_log:
+            return []
+
+        # Import here to avoid circular imports
+        from klabautermann.memory.audit_log import save_audit_entries
+
+        uuids = await save_audit_entries(
+            neo4j=self.neo4j,
+            entries=self._audit_log,
+            agent_name=self.name,
+            trace_id=trace_id,
+        )
+
+        logger.info(
+            f"[BEACON] Persisted {len(uuids)} audit entries to graph",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return uuids
+
+    async def query_stored_audit(
+        self,
+        filters: dict[str, Any] | None = None,
+        trace_id: str | None = None,
+    ) -> list[StoredAuditEntry]:
+        """
+        Query persisted audit entries from Neo4j.
+
+        Args:
+            filters: Dictionary with filter parameters:
+                - start_time: ISO format datetime string
+                - end_time: ISO format datetime string
+                - action_types: List of action type strings
+                - entity_types: List of entity type strings
+                - agent_name: Agent name filter
+                - limit: Max entries to return (default 100)
+                - offset: Skip first N entries
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of StoredAuditEntry objects.
+        """
+        from datetime import datetime as dt
+
+        from klabautermann.memory.audit_log import AuditQueryFilter, query_audit_log
+
+        # Build filter from dict
+        filter_obj = AuditQueryFilter()
+
+        if filters:
+            if filters.get("start_time"):
+                filter_obj.start_time = dt.fromisoformat(filters["start_time"])
+            if filters.get("end_time"):
+                filter_obj.end_time = dt.fromisoformat(filters["end_time"])
+            if filters.get("action_types"):
+                filter_obj.action_types = filters["action_types"]
+            if filters.get("entity_types"):
+                filter_obj.entity_types = filters["entity_types"]
+            if filters.get("agent_name"):
+                filter_obj.agent_name = filters["agent_name"]
+            if filters.get("limit"):
+                filter_obj.limit = filters["limit"]
+            if filters.get("offset"):
+                filter_obj.offset = filters["offset"]
+
+        entries = await query_audit_log(
+            neo4j=self.neo4j,
+            filters=filter_obj,
+            trace_id=trace_id,
+        )
+
+        return entries
+
+    async def get_audit_stats(
+        self,
+        trace_id: str | None = None,
+    ) -> AuditLogStats | None:
+        """
+        Get statistics about persisted audit entries.
+
+        Args:
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            AuditLogStats with counts and date ranges, or None if error.
+        """
+        from klabautermann.memory.audit_log import get_audit_stats
+
+        try:
+            stats = await get_audit_stats(
+                neo4j=self.neo4j,
+                trace_id=trace_id,
+            )
+            return stats
+        except Exception as e:
+            logger.error(
+                f"[STORM] Failed to get audit stats: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return None
 
 
 # =============================================================================

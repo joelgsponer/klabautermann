@@ -270,6 +270,7 @@ class NodeLabel(str, Enum):
     JOURNAL_ENTRY = "JournalEntry"
     TAG = "Tag"
     SYNC_STATE = "SyncState"
+    AUDIT_LOG = "AuditLog"
 
 
 class RelationType(str, Enum):
@@ -442,6 +443,8 @@ CONSTRAINTS: list[str] = [
     "CREATE CONSTRAINT preference_uuid IF NOT EXISTS FOR (p:Preference) REQUIRE p.uuid IS UNIQUE",
     "CREATE CONSTRAINT community_uuid IF NOT EXISTS FOR (c:Community) REQUIRE c.uuid IS UNIQUE",
     "CREATE CONSTRAINT loreepisode_uuid IF NOT EXISTS FOR (le:LoreEpisode) REQUIRE le.uuid IS UNIQUE",
+    # Audit log UUID constraint
+    "CREATE CONSTRAINT auditlog_uuid IF NOT EXISTS FOR (al:AuditLog) REQUIRE al.uuid IS UNIQUE",
 ]
 
 # Property existence constraints - require Neo4j Enterprise Edition
