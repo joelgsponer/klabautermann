@@ -133,6 +133,83 @@ class SyncState:
         }
 
 
+@dataclass
+class SyncHealthMetrics:
+    """
+    Health metrics for sync operations.
+
+    Tracks success/failure counts and provides health status calculation.
+    Issue: #57
+    """
+
+    service: SyncService
+    sync_count: int = 0
+    success_count: int = 0
+    failure_count: int = 0
+    last_success: datetime | None = None
+    last_failure: datetime | None = None
+    last_error: str | None = None
+    total_items_synced: int = 0
+    total_items_failed: int = 0
+    avg_duration_ms: float = 0.0
+    _durations: list[float] | None = None  # Internal, not serialized
+
+    @property
+    def success_rate(self) -> float:
+        """Calculate success rate as percentage."""
+        if self.sync_count == 0:
+            return 100.0
+        return (self.success_count / self.sync_count) * 100.0
+
+    @property
+    def is_healthy(self) -> bool:
+        """Determine if sync is healthy (>= 90% success rate)."""
+        return self.success_rate >= 90.0
+
+    def record_success(self, items_synced: int, duration_ms: float) -> None:
+        """Record a successful sync."""
+        self.sync_count += 1
+        self.success_count += 1
+        self.last_success = datetime.now()
+        self.total_items_synced += items_synced
+        self._update_avg_duration(duration_ms)
+
+    def record_failure(self, error: str, duration_ms: float) -> None:
+        """Record a failed sync."""
+        self.sync_count += 1
+        self.failure_count += 1
+        self.last_failure = datetime.now()
+        self.last_error = error
+        self._update_avg_duration(duration_ms)
+
+    def _update_avg_duration(self, duration_ms: float) -> None:
+        """Update rolling average duration."""
+        if self._durations is None:
+            self._durations = []
+        self._durations.append(duration_ms)
+        # Keep last 100 durations for rolling average
+        if len(self._durations) > 100:
+            self._durations = self._durations[-100:]
+        self.avg_duration_ms = sum(self._durations) / len(self._durations)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "service": self.service.value,
+            "sync_count": self.sync_count,
+            "success_count": self.success_count,
+            "failure_count": self.failure_count,
+            "success_rate": round(self.success_rate, 2),
+            "is_healthy": self.is_healthy,
+            "last_success": self.last_success.isoformat() if self.last_success else None,
+            "last_failure": self.last_failure.isoformat() if self.last_failure else None,
+            "last_error": self.last_error,
+            "total_items_synced": self.total_items_synced,
+            "total_items_failed": self.total_items_failed,
+            "avg_duration_ms": round(self.avg_duration_ms, 2),
+        }
+
+
 # =============================================================================
 # TheSieve - Email Filtering
 # =============================================================================
@@ -308,6 +385,12 @@ class Purser(BaseAgent):
             SyncService.CALENDAR: SyncState(service=SyncService.CALENDAR),
         }
 
+        # Health metrics for monitoring (#57)
+        self._health_metrics: dict[SyncService, SyncHealthMetrics] = {
+            SyncService.GMAIL: SyncHealthMetrics(service=SyncService.GMAIL),
+            SyncService.CALENDAR: SyncHealthMetrics(service=SyncService.CALENDAR),
+        }
+
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
         Process an incoming message.
@@ -355,6 +438,22 @@ class Purser(BaseAgent):
             email_data = payload.get("email", {})
             manifest = self.sieve.filter_email(email_data)
             result_payload = manifest.to_dict()
+        elif operation == "get_health":
+            # Health monitoring endpoint (#57)
+            service_name = payload.get("service")
+            if service_name:
+                service = SyncService(service_name)
+                metrics = self._health_metrics.get(service)
+                if metrics:
+                    result_payload = metrics.to_dict()
+                else:
+                    result_payload = {"error": f"Service not found: {service_name}"}
+            else:
+                # Return all health metrics
+                result_payload = {
+                    "health": {s.value: self._health_metrics[s].to_dict() for s in SyncService},
+                    "overall_healthy": all(m.is_healthy for m in self._health_metrics.values()),
+                }
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -513,6 +612,12 @@ class Purser(BaseAgent):
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
+        # Record health metrics (#57)
+        if errors:
+            self._health_metrics[SyncService.GMAIL].record_failure(errors[0], duration_ms)
+        else:
+            self._health_metrics[SyncService.GMAIL].record_success(items_synced, duration_ms)
+
         return result
 
     # =========================================================================
@@ -628,6 +733,12 @@ class Purser(BaseAgent):
             extra={"trace_id": trace_id, "agent_name": self.name},
         )
 
+        # Record health metrics (#57)
+        if errors:
+            self._health_metrics[SyncService.CALENDAR].record_failure(errors[0], duration_ms)
+        else:
+            self._health_metrics[SyncService.CALENDAR].record_success(items_synced, duration_ms)
+
         return result
 
     # =========================================================================
@@ -654,6 +765,32 @@ class Purser(BaseAgent):
             await self._load_sync_state(service, trace_id)
 
         return self._sync_states.get(service)
+
+    def get_sync_health(
+        self,
+        service: SyncService | None = None,
+    ) -> dict[str, Any]:
+        """
+        Get health metrics for sync operations.
+
+        Args:
+            service: Optional service to get metrics for. If None, returns all.
+
+        Returns:
+            Dictionary with health metrics.
+
+        Issue: #57
+        """
+        if service:
+            metrics = self._health_metrics.get(service)
+            if metrics:
+                return metrics.to_dict()
+            return {"error": f"Service not found: {service.value}"}
+
+        return {
+            "health": {s.value: self._health_metrics[s].to_dict() for s in SyncService},
+            "overall_healthy": all(m.is_healthy for m in self._health_metrics.values()),
+        }
 
     async def _get_last_sync(
         self,

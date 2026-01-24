@@ -1,10 +1,11 @@
 """
 Unit tests for Purser agent and TheSieve email filter.
 
-Tests state synchronization, delta-sync operations, and email filtering
-including noise detection and prompt injection protection.
+Tests state synchronization, delta-sync operations, email filtering
+including noise detection and prompt injection protection, and
+health monitoring.
 
-Issues: #49, #50, #51, #52
+Issues: #49, #50, #51, #52, #57
 """
 
 from __future__ import annotations
@@ -703,3 +704,229 @@ class TestDataClasses:
         assert data["service"] == "calendar"
         assert "2026-01-22" in data["last_sync"]
         assert data["items_synced_total"] == 100
+
+
+# =============================================================================
+# Health Monitoring Tests (#57)
+# =============================================================================
+
+
+class TestSyncHealthMetrics:
+    """Tests for SyncHealthMetrics tracking."""
+
+    def test_init_creates_health_metrics(self, purser: Purser) -> None:
+        """Purser should initialize health metrics for all services."""
+        assert SyncService.GMAIL in purser._health_metrics
+        assert SyncService.CALENDAR in purser._health_metrics
+
+    def test_success_rate_100_when_no_syncs(self, purser: Purser) -> None:
+        """Success rate should be 100% when no syncs have occurred."""
+        metrics = purser._health_metrics[SyncService.GMAIL]
+        assert metrics.success_rate == 100.0
+        assert metrics.is_healthy is True
+
+    def test_record_success_updates_metrics(self, purser: Purser) -> None:
+        """record_success should update all relevant metrics."""
+        metrics = purser._health_metrics[SyncService.GMAIL]
+
+        metrics.record_success(items_synced=5, duration_ms=100.0)
+
+        assert metrics.sync_count == 1
+        assert metrics.success_count == 1
+        assert metrics.failure_count == 0
+        assert metrics.total_items_synced == 5
+        assert metrics.last_success is not None
+        assert metrics.avg_duration_ms == 100.0
+
+    def test_record_failure_updates_metrics(self, purser: Purser) -> None:
+        """record_failure should update all relevant metrics."""
+        metrics = purser._health_metrics[SyncService.GMAIL]
+
+        metrics.record_failure(error="Connection failed", duration_ms=50.0)
+
+        assert metrics.sync_count == 1
+        assert metrics.success_count == 0
+        assert metrics.failure_count == 1
+        assert metrics.last_failure is not None
+        assert metrics.last_error == "Connection failed"
+
+    def test_success_rate_calculation(self, purser: Purser) -> None:
+        """Success rate should be calculated correctly."""
+        metrics = purser._health_metrics[SyncService.GMAIL]
+
+        # 8 successes, 2 failures = 80% success rate
+        for _ in range(8):
+            metrics.record_success(items_synced=1, duration_ms=10.0)
+        for _ in range(2):
+            metrics.record_failure(error="fail", duration_ms=10.0)
+
+        assert metrics.success_rate == 80.0
+        assert metrics.is_healthy is False  # < 90%
+
+    def test_is_healthy_threshold(self, purser: Purser) -> None:
+        """is_healthy should use 90% threshold."""
+        metrics = purser._health_metrics[SyncService.CALENDAR]
+
+        # 9 successes, 1 failure = 90% success rate (exactly at threshold)
+        for _ in range(9):
+            metrics.record_success(items_synced=1, duration_ms=10.0)
+        metrics.record_failure(error="fail", duration_ms=10.0)
+
+        assert metrics.success_rate == 90.0
+        assert metrics.is_healthy is True  # >= 90%
+
+    def test_to_dict_serialization(self, purser: Purser) -> None:
+        """to_dict should include all relevant fields."""
+        metrics = purser._health_metrics[SyncService.GMAIL]
+        metrics.record_success(items_synced=10, duration_ms=100.0)
+
+        data = metrics.to_dict()
+
+        assert data["service"] == "gmail"
+        assert data["sync_count"] == 1
+        assert data["success_count"] == 1
+        assert data["failure_count"] == 0
+        assert data["success_rate"] == 100.0
+        assert data["is_healthy"] is True
+        assert data["total_items_synced"] == 10
+        assert "last_success" in data
+        assert "avg_duration_ms" in data
+
+
+class TestHealthRecordingOnSync:
+    """Tests for health metric recording during sync operations."""
+
+    @pytest.mark.asyncio
+    async def test_sync_gmail_records_success(self, purser: Purser, mock_neo4j: MagicMock) -> None:
+        """sync_gmail should record success metrics."""
+        mock_neo4j.execute_query.return_value = []
+
+        await purser.sync_gmail()
+
+        metrics = purser._health_metrics[SyncService.GMAIL]
+        assert metrics.sync_count == 1
+        assert metrics.success_count == 1
+        assert metrics.failure_count == 0
+
+    @pytest.mark.asyncio
+    async def test_sync_calendar_records_success(
+        self, purser: Purser, mock_neo4j: MagicMock
+    ) -> None:
+        """sync_calendar should record success metrics."""
+        mock_neo4j.execute_query.return_value = []
+
+        await purser.sync_calendar()
+
+        metrics = purser._health_metrics[SyncService.CALENDAR]
+        assert metrics.sync_count == 1
+        assert metrics.success_count == 1
+
+    @pytest.mark.asyncio
+    async def test_sync_all_records_metrics_for_all_services(
+        self, purser: Purser, mock_neo4j: MagicMock
+    ) -> None:
+        """sync_all should record metrics for all enabled services."""
+        mock_neo4j.execute_query.return_value = []
+
+        await purser.sync_all()
+
+        gmail_metrics = purser._health_metrics[SyncService.GMAIL]
+        calendar_metrics = purser._health_metrics[SyncService.CALENDAR]
+
+        assert gmail_metrics.sync_count == 1
+        assert calendar_metrics.sync_count == 1
+
+
+class TestGetSyncHealth:
+    """Tests for get_sync_health method."""
+
+    def test_get_sync_health_single_service(self, purser: Purser) -> None:
+        """get_sync_health should return metrics for a single service."""
+        purser._health_metrics[SyncService.GMAIL].record_success(5, 100.0)
+
+        health = purser.get_sync_health(SyncService.GMAIL)
+
+        assert health["service"] == "gmail"
+        assert health["sync_count"] == 1
+        assert health["total_items_synced"] == 5
+
+    def test_get_sync_health_all_services(self, purser: Purser) -> None:
+        """get_sync_health should return all metrics when no service specified."""
+        purser._health_metrics[SyncService.GMAIL].record_success(5, 100.0)
+        purser._health_metrics[SyncService.CALENDAR].record_success(10, 200.0)
+
+        health = purser.get_sync_health()
+
+        assert "health" in health
+        assert "gmail" in health["health"]
+        assert "calendar" in health["health"]
+        assert "overall_healthy" in health
+        assert health["overall_healthy"] is True
+
+    def test_get_sync_health_overall_unhealthy(self, purser: Purser) -> None:
+        """overall_healthy should be False if any service is unhealthy."""
+        # Gmail healthy (100%)
+        purser._health_metrics[SyncService.GMAIL].record_success(1, 100.0)
+
+        # Calendar unhealthy (0%)
+        purser._health_metrics[SyncService.CALENDAR].record_failure("error", 100.0)
+
+        health = purser.get_sync_health()
+
+        assert health["overall_healthy"] is False
+
+
+class TestProcessMessageGetHealth:
+    """Tests for get_health operation via process_message."""
+
+    @pytest.mark.asyncio
+    async def test_process_get_health_all(self, purser: Purser, mock_neo4j: MagicMock) -> None:
+        """Should process get_health operation for all services."""
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="purser",
+            intent="health",
+            payload={"operation": "get_health"},
+            trace_id="test-trace",
+        )
+
+        response = await purser.process_message(msg)
+
+        assert response is not None
+        assert "health" in response.payload
+        assert "overall_healthy" in response.payload
+
+    @pytest.mark.asyncio
+    async def test_process_get_health_single_service(
+        self, purser: Purser, mock_neo4j: MagicMock
+    ) -> None:
+        """Should process get_health operation for a single service."""
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="purser",
+            intent="health",
+            payload={"operation": "get_health", "service": "gmail"},
+            trace_id="test-trace",
+        )
+
+        response = await purser.process_message(msg)
+
+        assert response is not None
+        assert response.payload["service"] == "gmail"
+
+    @pytest.mark.asyncio
+    async def test_process_get_health_invalid_service(
+        self, purser: Purser, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return error for invalid service."""
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="purser",
+            intent="health",
+            payload={"operation": "get_health", "service": "invalid"},
+            trace_id="test-trace",
+        )
+
+        # Should raise ValueError for invalid service
+        with pytest.raises(ValueError):
+            await purser.process_message(msg)
