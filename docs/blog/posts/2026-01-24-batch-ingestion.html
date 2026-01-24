@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="batch-ingestion">
+    <meta name="post-excerpt" content="The Ingestor now processes multiple episodes in parallel. Import history, migrate data, batch process documents.">
+    <title>Loading the Cargo Hold | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Loading the Cargo Hold</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Single episode ingestion works fine for real-time conversations. But what about importing conversation history? Migrating data from another system? Batch processing a folder of documents?</p>
+                <p>One at a time would take forever. The Ingestor now loads cargo in bulk.</p>
+
+                <h2>The API</h2>
+                <pre><code>from klabautermann.agents.ingestor import Ingestor, BatchEpisode
+
+episodes = [
+    BatchEpisode(content="First conversation snippet"),
+    BatchEpisode(content="Second conversation snippet"),
+    BatchEpisode(content="Third conversation snippet", captain_uuid="user-123"),
+]
+
+result = await ingestor.batch_ingest(episodes, max_concurrent=5)
+
+print(f"Processed: {result.successful}/{result.total}")
+print(f"Success rate: {result.success_rate}%")</code></pre>
+
+                <h2>Parallel Processing</h2>
+                <p>Episodes process concurrently, controlled by a semaphore. Default limit is 5 concurrent operations - enough to saturate the LLM API without overwhelming it.</p>
+
+                <pre><code>semaphore = asyncio.Semaphore(max_concurrent)
+
+async def process_episode(index, episode):
+    async with semaphore:
+        return await self._ingest_single_episode(index, episode, trace_id)</code></pre>
+
+                <p>Tune <code>max_concurrent</code> based on your API limits and use case. Higher for throughput, lower for stability.</p>
+
+                <h2>Independent Failures</h2>
+                <p>One bad episode doesn't sink the batch. Each processes independently:</p>
+
+                <pre><code>result = await ingestor.batch_ingest(episodes)
+
+for r in result.results:
+    if not r.success:
+        print(f"Episode {r.index} failed: {r.error}")</code></pre>
+
+                <p>Two of three failed? You still get one in The Locker. The result tells you exactly what happened to each episode.</p>
+
+                <h2>Result Tracking</h2>
+                <p>Three levels of detail:</p>
+
+                <pre><code>@dataclass
+class BatchIngestionResult:
+    total: int          # How many we tried
+    successful: int     # How many worked
+    failed: int         # How many didn't
+    results: list[EpisodeResult]  # Per-episode details
+
+@dataclass
+class EpisodeResult:
+    index: int          # Position in batch
+    success: bool       # Did it work?
+    episode_name: str   # Graphiti's episode ID
+    error: str          # What went wrong (if anything)</code></pre>
+
+                <p>The <code>to_dict()</code> method serializes everything for logging or API responses.</p>
+
+                <h2>Content Cleaning</h2>
+                <p>Each episode goes through the same cleaning as single-episode ingestion:</p>
+                <ul>
+                    <li>Remove role prefixes ("User:", "Assistant:")</li>
+                    <li>Strip roleplay markers (*actions*)</li>
+                    <li>Clean up system mentions</li>
+                </ul>
+                <p>Empty content after cleaning? That episode fails with "Empty content after cleaning" - other episodes continue.</p>
+
+                <h2>Use Cases</h2>
+                <ul>
+                    <li><strong>History Import</strong>: Migrate conversation logs from another system</li>
+                    <li><strong>Document Processing</strong>: Ingest a folder of notes or documents</li>
+                    <li><strong>Backfill</strong>: Add historical data to an existing graph</li>
+                    <li><strong>Testing</strong>: Load synthetic data for development</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#17: [AGT-P-012] Support batch episode ingestion</li>
+                </ul>
+
+                <p>The cargo hold is open. Load it up.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
