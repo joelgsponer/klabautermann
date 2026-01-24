@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Telegram Markdown formatting with error handling (#139)
+  - `TelegramMarkdownFormatter` class for escaping special characters
+  - `escape_markdown()` convenience function
+  - Preserves intentional formatting (*bold*, _italic_, `code`, links)
+  - `_safe_reply()` helper with automatic fallback to plain text on parsing errors
+  - 21 new tests for markdown formatting
 - Batch episode ingestion for Ingestor agent (#17)
   - `batch_ingest()` method for processing multiple episodes in parallel
   - `BatchEpisode` dataclass for input specification
