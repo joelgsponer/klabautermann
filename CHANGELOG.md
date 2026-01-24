@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Alert debouncing tests for Officer of the Watch (#66)
+  - 9 new tests for debouncing functionality
+  - Verify `_recently_sent()` and `_mark_alert_sent()` behavior
+  - Test debounce key format `alert_type:entity_uuid`
+  - Test configurable debounce window expiration
+  - Test `check_conditions` applies debouncing
+  - Test `clear_recent_alerts()` enables re-sending
 - Scheduled sync job for Purser agent (#55)
   - Register Purser with APScheduler using IntervalTrigger
   - Default sync interval: 15 minutes (configurable via `interval_minutes`)
