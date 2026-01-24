@@ -19,8 +19,19 @@ Contains:
 - weight_decay: Relationship weight decay for graph maintenance
 - traversal: Optimized relationship traversal utilities
 - temporal: Time expression parsing and temporal filtering
+- audit_log: Persistent audit logging for graph maintenance operations
 """
 
+from klabautermann.memory.audit_log import (
+    AuditLogStats,
+    AuditQueryFilter,
+    StoredAuditEntry,
+    delete_old_audit_entries,
+    get_audit_stats,
+    query_audit_log,
+    save_audit_entries,
+    save_audit_entry,
+)
 from klabautermann.memory.backup import (
     BackupMetadata,
     BackupSnapshot,
@@ -168,6 +179,15 @@ from klabautermann.memory.zoom_search import (
 
 
 __all__ = [
+    # Audit Log
+    "AuditLogStats",
+    "AuditQueryFilter",
+    "StoredAuditEntry",
+    "delete_old_audit_entries",
+    "get_audit_stats",
+    "query_audit_log",
+    "save_audit_entries",
+    "save_audit_entry",
     # Weight Decay
     "DEFAULT_ACCESS_BOOST",
     "DEFAULT_HALF_LIFE_SECONDS",
