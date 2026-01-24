@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,memory,agents">
+    <meta name="post-slug" content="audit-log-persistence">
+    <meta name="post-excerpt" content="The Hull Cleaner now remembers what it removed. Audit entries persist as AuditLog nodes in the graph for historical review.">
+    <title>The Hull Cleaner's Ledger | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Hull Cleaner's Ledger</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Hull Cleaner scrapes barnacles - weak relationships, orphan messages, duplicate entities. It logs what it removes. But where did those logs go?</p>
+                <p>Into the void. Session-only. Restart the agent, and the history vanishes.</p>
+
+                <h2>The Problem (#87)</h2>
+                <p>AGENTS_EXTENDED.md Section 5 specified: "Persist audit trail of all pruning operations." The Hull Cleaner already generated <code>AuditEntry</code> objects - timestamp, action type, entity ID, reason. But they lived only in memory. No graph storage. No queryable history.</p>
+                <p>Compliance requires records. Debugging requires history. "What did you delete last month?" should have an answer.</p>
+
+                <h2>The Solution</h2>
+                <p>Store audit entries as Neo4j nodes. Query them like any other entity.</p>
+
+                <h3>New Node Type</h3>
+                <pre><code># core/ontology.py
+class NodeLabel(str, Enum):
+    # ... existing types ...
+    AUDIT_LOG = "AuditLog"  # New</code></pre>
+
+                <h3>The Module</h3>
+                <p>A new <code>memory/audit_log.py</code> with five functions:</p>
+                <pre><code>save_audit_entry()      # Single entry
+save_audit_entries()    # Batch with UNWIND
+query_audit_log()       # Filter by time, action, entity type
+get_audit_stats()       # Counts by action type
+delete_old_audit_entries() # Cleanup</code></pre>
+
+                <h3>Batch Efficiency</h3>
+                <p>The Hull Cleaner might prune hundreds of weak relationships in one run. Individual inserts would be slow. UNWIND solves this:</p>
+                <pre><code>UNWIND $entries as entry
+CREATE (al:AuditLog {
+    uuid: entry.uuid,
+    timestamp: entry.timestamp,
+    action: entry.action,
+    entity_type: entry.entity_type,
+    entity_id: entry.entity_id,
+    reason: entry.reason,
+    agent_name: entry.agent_name,
+    metadata: entry.metadata
+})
+RETURN al.uuid as uuid</code></pre>
+                <p>One query. All entries. Fast.</p>
+
+                <h2>Integration</h2>
+                <p>The Hull Cleaner gains a new parameter:</p>
+                <pre><code>await cleaner.scrape_barnacles(
+    dry_run=False,
+    persist_audit=True  # Store entries in graph
+)</code></pre>
+                <p>When <code>persist_audit=True</code>, after the operation completes, all audit entries flow into the graph as <code>AuditLog</code> nodes.</p>
+
+                <h2>Query Patterns</h2>
+                <p>What did the Hull Cleaner remove last week?</p>
+                <pre><code>entries = await cleaner.query_stored_audit(
+    filters={
+        "start_time": "2026-01-17T00:00:00",
+        "end_time": "2026-01-24T00:00:00",
+        "action_types": ["DELETE_RELATIONSHIP", "DELETE_NODE"]
+    }
+)</code></pre>
+                <p>Statistics?</p>
+                <pre><code>stats = await cleaner.get_audit_stats()
+# {
+#     "total_entries": 247,
+#     "entries_by_action": {"DELETE_RELATIONSHIP": 180, "DELETE_NODE": 67},
+#     "entries_by_entity_type": {"relationship": 180, "message": 67},
+#     "date_range_start": "2026-01-15T00:00:00",
+#     "date_range_end": "2026-01-24T09:30:00"
+# }</code></pre>
+
+                <h2>The Tests</h2>
+                <p>Twenty new tests for the audit log module:</p>
+                <ul>
+                    <li><code>TestAuditQueryFilter</code> - Filter dataclass serialization</li>
+                    <li><code>TestStoredAuditEntry</code> - Retrieved entry structure</li>
+                    <li><code>TestAuditLogStats</code> - Statistics dataclass</li>
+                    <li><code>TestSaveAuditEntry</code> - Single entry persistence</li>
+                    <li><code>TestSaveAuditEntries</code> - Batch persistence</li>
+                    <li><code>TestQueryAuditLog</code> - Filtering and retrieval</li>
+                    <li><code>TestGetAuditStats</code> - Statistics aggregation</li>
+                    <li><code>TestDeleteOldAuditEntries</code> - Log cleanup</li>
+                </ul>
+                <p>All 79 hull_cleaner tests pass. No regressions.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#87: [AGT-S-051] Add pruning audit log</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Hull Cleaner keeps a ledger. Every deletion recorded. Every merge documented. Query the history. Audit the maintenance. The past persists.</p>
+                <p><em>A ship without logs is a mystery. A ship with logs tells its own story.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
