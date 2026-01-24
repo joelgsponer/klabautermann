@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -68,6 +68,7 @@ class PurserConfig:
 
     # Sieve settings
     min_email_words: int = 5
+    vip_whitelist: list[str] = field(default_factory=list)  # Issue: #53
 
 
 @dataclass
@@ -252,14 +253,25 @@ class TheSieve:
         re.compile(r"(?i)override (your|the) (rules|instructions)"),
     ]
 
-    def __init__(self, min_words: int = 5) -> None:
+    def __init__(
+        self,
+        min_words: int = 5,
+        vip_whitelist: list[str] | None = None,
+    ) -> None:
         """
         Initialize TheSieve.
 
         Args:
             min_words: Minimum word count for an email to be considered.
+            vip_whitelist: List of email addresses/patterns that bypass filtering.
+                          VIPs still go through security checks (prompt injection).
+                          Issue: #53
         """
         self.min_words = min_words
+        self._vip_whitelist: set[str] = set()
+        if vip_whitelist:
+            # Normalize to lowercase for case-insensitive matching
+            self._vip_whitelist = {v.lower() for v in vip_whitelist}
 
     def filter_email(self, email_data: dict[str, Any]) -> EmailManifest:
         """
@@ -295,7 +307,20 @@ class TheSieve:
                     filter_reason="Boarding Party (Prompt Injection) detected",
                 )
 
-        # 2. Noise check - newsletters, promotions, automated messages
+        # 2. VIP whitelist check - skip noise/content filters but NOT security (#53)
+        if self._is_vip(sender):
+            logger.info(
+                f"[CHART] VIP sender detected: {sender}",
+                extra={"email_id": email_id},
+            )
+            return EmailManifest(
+                email_id=email_id,
+                is_manifest_worthy=True,
+                risk_level=RiskLevel.LOW,
+                filter_reason="VIP whitelist bypass",
+            )
+
+        # 3. Noise check - newsletters, promotions, automated messages
         combined = f"{subject} {sender} {body[:500]}"
         for pattern in self.NOISE_PATTERNS:
             if pattern.search(combined):
@@ -306,7 +331,7 @@ class TheSieve:
                     filter_reason=f"Noise pattern matched: {pattern.pattern}",
                 )
 
-        # 3. Minimum content check
+        # 4. Minimum content check
         word_count = len(body.split())
         if word_count < self.min_words:
             return EmailManifest(
@@ -347,6 +372,70 @@ class TheSieve:
         """
         return any(pattern.search(text) for pattern in self.NOISE_PATTERNS)
 
+    def _is_vip(self, sender: str) -> bool:
+        """
+        Check if sender is on the VIP whitelist.
+
+        Matching is case-insensitive and supports:
+        - Exact email match: "ceo@company.com"
+        - Domain match: "@company.com"
+
+        Args:
+            sender: Email sender address.
+
+        Returns:
+            True if sender is a VIP, False otherwise.
+
+        Issue: #53
+        """
+        if not self._vip_whitelist or not sender:
+            return False
+
+        sender_lower = sender.lower()
+
+        # Extract email from "Name <email>" format
+        if "<" in sender_lower and ">" in sender_lower:
+            start = sender_lower.find("<") + 1
+            end = sender_lower.find(">")
+            sender_lower = sender_lower[start:end]
+
+        for vip in self._vip_whitelist:
+            # Domain wildcard: "@company.com" matches any email from that domain
+            if vip.startswith("@") and sender_lower.endswith(vip):
+                return True
+            # Exact match
+            if sender_lower == vip:
+                return True
+
+        return False
+
+    def add_vip(self, email: str) -> None:
+        """
+        Add an email/domain to the VIP whitelist.
+
+        Args:
+            email: Email address or domain pattern (e.g., "@company.com").
+
+        Issue: #53
+        """
+        self._vip_whitelist.add(email.lower())
+
+    def remove_vip(self, email: str) -> None:
+        """
+        Remove an email/domain from the VIP whitelist.
+
+        Args:
+            email: Email address or domain pattern to remove.
+
+        Issue: #53
+        """
+        self._vip_whitelist.discard(email.lower())
+
+    @property
+    def vip_whitelist(self) -> list[str]:
+        """Get the current VIP whitelist."""
+        return sorted(self._vip_whitelist)
+
 
 # =============================================================================
 # Purser Agent
@@ -377,7 +466,10 @@ class Purser(BaseAgent):
         super().__init__(name="purser")
         self.neo4j = neo4j_client
         self.purser_config = config or PurserConfig()
-        self.sieve = TheSieve(min_words=self.purser_config.min_email_words)
+        self.sieve = TheSieve(
+            min_words=self.purser_config.min_email_words,
+            vip_whitelist=self.purser_config.vip_whitelist,  # Issue: #53
+        )
 
         # Track sync state in memory (persisted to graph on update)
         self._sync_states: dict[SyncService, SyncState] = {
