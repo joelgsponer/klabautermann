@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="sync-health-monitoring">
+    <meta name="post-excerpt" content="The Purser now tracks sync health. Success rates, failure counts, and diagnostics - know at a glance if your data pipeline is running smoothly.">
+    <title>Taking the Pulse | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Taking the Pulse</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Purser syncs your Gmail and Calendar. But how do you know if those syncs are actually working?</p>
+                <p>Until now, you didn't. Now you do.</p>
+
+                <h2>The Problem</h2>
+                <p>External services fail. Network hiccups. API rate limits. OAuth token expiration. The sync might have been running "successfully" while silently dropping data.</p>
+                <p>Operations need observability. The Purser needed a health check.</p>
+
+                <h2>SyncHealthMetrics</h2>
+                <p>Each service now tracks its sync history:</p>
+
+                <pre><code>from klabautermann.agents import Purser, SyncService
+
+purser = Purser(neo4j_client=neo4j)
+
+# Get health for all services
+health = purser.get_sync_health()
+
+print(health["overall_healthy"])  # True or False
+print(health["health"]["gmail"]["success_rate"])  # 100.0
+print(health["health"]["calendar"]["sync_count"])  # 42</code></pre>
+
+                <p>Every metric you need in one call.</p>
+
+                <h2>What Gets Tracked</h2>
+                <p>The <code>SyncHealthMetrics</code> dataclass captures:</p>
+                <ul>
+                    <li><strong>sync_count</strong>: Total sync operations attempted</li>
+                    <li><strong>success_count</strong>: Syncs that completed without errors</li>
+                    <li><strong>failure_count</strong>: Syncs that failed</li>
+                    <li><strong>success_rate</strong>: Percentage (calculated property)</li>
+                    <li><strong>is_healthy</strong>: True if success_rate >= 90%</li>
+                    <li><strong>last_success</strong>: Timestamp of last successful sync</li>
+                    <li><strong>last_failure</strong>: Timestamp of last failure</li>
+                    <li><strong>last_error</strong>: Most recent error message</li>
+                    <li><strong>total_items_synced</strong>: Cumulative items processed</li>
+                    <li><strong>avg_duration_ms</strong>: Rolling average sync duration</li>
+                </ul>
+
+                <h2>Health Threshold</h2>
+                <p>A service is considered healthy at 90% or higher success rate:</p>
+
+                <pre><code>@property
+def is_healthy(self) -> bool:
+    """Determine if sync is healthy (>= 90% success rate)."""
+    return self.success_rate >= 90.0</code></pre>
+
+                <p>Nine out of ten syncs need to succeed. That's the bar.</p>
+
+                <h2>Automatic Recording</h2>
+                <p>Every sync operation now records its outcome:</p>
+
+                <pre><code># After sync_gmail() completes:
+if errors:
+    self._health_metrics[SyncService.GMAIL].record_failure(
+        errors[0], duration_ms
+    )
+else:
+    self._health_metrics[SyncService.GMAIL].record_success(
+        items_synced, duration_ms
+    )</code></pre>
+
+                <p>No manual tracking. Just run syncs; the metrics accumulate.</p>
+
+                <h2>API Endpoint</h2>
+                <p>Query health via the agent message interface:</p>
+
+                <pre><code>message = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="purser",
+    intent="health",
+    payload={"operation": "get_health"}
+)
+
+response = await purser.process_message(message)
+
+# All services
+print(response.payload["overall_healthy"])
+
+# Specific service
+message = AgentMessage(
+    source_agent="orchestrator",
+    target_agent="purser",
+    intent="health",
+    payload={"operation": "get_health", "service": "gmail"}
+)
+
+response = await purser.process_message(message)
+print(response.payload["success_rate"])</code></pre>
+
+                <h2>Rolling Averages</h2>
+                <p>Duration tracking uses a rolling window:</p>
+
+                <pre><code>def _update_avg_duration(self, duration_ms: float) -> None:
+    """Update rolling average duration."""
+    if self._durations is None:
+        self._durations = []
+    self._durations.append(duration_ms)
+    # Keep last 100 durations
+    if len(self._durations) > 100:
+        self._durations = self._durations[-100:]
+    self.avg_duration_ms = sum(self._durations) / len(self._durations)</code></pre>
+
+                <p>Recent performance matters more than ancient history.</p>
+
+                <h2>Serialization</h2>
+                <p>Everything serializes cleanly for APIs and logging:</p>
+
+                <pre><code>data = metrics.to_dict()
+
+# Returns:
+{
+    "service": "gmail",
+    "sync_count": 10,
+    "success_count": 9,
+    "failure_count": 1,
+    "success_rate": 90.0,
+    "is_healthy": True,
+    "last_success": "2026-01-24T10:30:00",
+    "last_failure": "2026-01-24T09:15:00",
+    "last_error": "Connection timeout",
+    "total_items_synced": 127,
+    "total_items_failed": 0,
+    "avg_duration_ms": 1250.5
+}</code></pre>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#57: [AGT-S-021] Implement sync health monitoring</li>
+                </ul>
+
+                <p>The Purser keeps the books. Now you can audit them.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
