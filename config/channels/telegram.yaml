@@ -1,0 +1,51 @@
+# Telegram channel configuration
+# Reference: specs/architecture/CHANNELS.md Section 3
+# Issue: #141
+
+# Bot token - either set here or via TELEGRAM_BOT_TOKEN environment variable
+# Get your token from @BotFather on Telegram
+# Recommended: Use environment variable for security
+# bot_token: "YOUR_BOT_TOKEN_HERE"
+
+# Security: List of allowed Telegram user IDs
+# Empty list means all users are allowed (not recommended for production)
+# Get your user ID by sending a message to @userinfobot
+# Example: [123456789, 987654321]
+allowed_user_ids: []
+
+# Voice message support
+# Enable/disable transcription of voice messages
+# Requires additional setup for speech-to-text
+enable_voice: true
+
+# Connection settings
+connection:
+  # Timeout for HTTP requests to Telegram API (seconds)
+  timeout: 30
+  # Maximum retries for failed requests
+  max_retries: 3
+  # Backoff multiplier between retries
+  retry_backoff: 1.5
+
+# Message handling
+messages:
+  # Maximum message length (Telegram limit is 4096 characters)
+  max_length: 4096
+  # Parse mode for outgoing messages
+  parse_mode: "Markdown"
+  # Whether to show "typing" indicator while processing
+  show_typing: true
+
+# Rate limiting (to avoid Telegram API rate limits)
+rate_limit:
+  # Maximum messages per minute per chat
+  messages_per_minute: 30
+  # Minimum delay between messages (seconds)
+  min_delay: 0.1
+
+# Logging
+logging:
+  # Log incoming message content (disable for privacy)
+  log_content: false
+  # Log user IDs in messages
+  log_user_ids: true
