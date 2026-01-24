@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Persistent audit log storage for HullCleaner maintenance operations (#87)
+  - `AuditLog` node type added to ontology with UUID constraint
+  - `save_audit_entry()` and `save_audit_entries()` for persisting to Neo4j
+  - `query_audit_log()` with flexible filters (time range, action type, entity type)
+  - `get_audit_stats()` for audit statistics (counts by action/entity type)
+  - `delete_old_audit_entries()` for audit log maintenance
+  - `persist_audit=True` parameter in `HullCleaner.scrape_barnacles()`
+  - New operations: `query_stored_audit`, `get_audit_stats`
+  - 20 new tests for audit log functionality
 - Scheduled community detection for Cartographer (#76)
   - Cartographer registers with APScheduler for weekly community detection
   - Default schedule: Sunday midnight (cron: `0 0 * * 0`)
