@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Batch episode ingestion for Ingestor agent (#17)
+  - `batch_ingest()` method for processing multiple episodes in parallel
+  - `BatchEpisode` dataclass for input specification
+  - `EpisodeResult` and `BatchIngestionResult` for result tracking
+  - Semaphore-controlled concurrency with configurable `max_concurrent`
+  - Independent failure handling (one failure doesn't affect others)
+  - 10 new tests for batch ingestion functionality
 - VIP whitelist for TheSieve email filter (#53)
   - `vip_whitelist` parameter in `TheSieve.__init__` and `PurserConfig`
   - VIPs bypass noise/content filters but NOT security checks
