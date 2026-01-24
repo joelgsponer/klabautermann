@@ -23,6 +23,7 @@ from klabautermann.core.models import AgentMessage
 
 
 if TYPE_CHECKING:
+    from klabautermann.channels.manager import BroadcastResult, ChannelManager
     from klabautermann.memory.neo4j_client import Neo4jClient
 
 
@@ -200,6 +201,35 @@ class MorningBriefing:
         }
 
 
+@dataclass
+class AlertSendResult:
+    """Result of sending alerts to channels.
+
+    Tracks which channels received alerts and any failures that occurred.
+    Issue: #67
+    """
+
+    alerts_sent: int
+    channels_delivered: list[str]
+    channels_failed: list[str]
+    errors: dict[str, str]  # channel_name -> error message
+
+    @property
+    def all_delivered(self) -> bool:
+        """Check if all channels received the alerts."""
+        return len(self.channels_failed) == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "alerts_sent": self.alerts_sent,
+            "channels_delivered": self.channels_delivered,
+            "channels_failed": self.channels_failed,
+            "errors": self.errors,
+            "all_delivered": self.all_delivered,
+        }
+
+
 # =============================================================================
 # OfficerOfTheWatch Agent
 # =============================================================================
@@ -218,6 +248,7 @@ class OfficerOfTheWatch(BaseAgent):
         self,
         neo4j_client: Neo4jClient,
         config: OfficerConfig | None = None,
+        channel_manager: ChannelManager | None = None,
     ) -> None:
         """
         Initialize OfficerOfTheWatch.
@@ -225,10 +256,13 @@ class OfficerOfTheWatch(BaseAgent):
         Args:
             neo4j_client: Connected Neo4j client for graph operations.
             config: Optional configuration for alert behavior.
+            channel_manager: Optional channel manager for sending alerts.
+                            If provided, enables send_alerts_to_channels().
         """
         super().__init__(name="officer_of_the_watch")
         self.neo4j = neo4j_client
         self.officer_config = config or OfficerConfig()
+        self._channel_manager = channel_manager
 
         # Track recently sent alerts for debouncing
         self._recent_alerts: dict[str, datetime] = {}
@@ -289,6 +323,25 @@ class OfficerOfTheWatch(BaseAgent):
         elif operation == "morning_briefing":
             briefing = await self.generate_morning_briefing(trace_id=trace_id)
             result_payload = briefing.to_dict()
+        elif operation == "send_alerts":
+            # Send provided alerts to all channels
+            alerts_data = payload.get("alerts", [])
+            alerts = [
+                Alert(
+                    alert_type=AlertType(a["alert_type"]),
+                    priority=AlertPriority(a["priority"]),
+                    message=a["message"],
+                    entity_uuid=a.get("entity_uuid"),
+                    entity_type=a.get("entity_type"),
+                    due_at=a.get("due_at"),
+                    metadata=a.get("metadata", {}),
+                )
+                for a in alerts_data
+            ]
+            send_result = await self.send_alerts_to_channels(
+                alerts=alerts, trace_id=trace_id
+            )
+            result_payload = send_result.to_dict()
         else:
             result_payload = {"error": f"Unknown operation: {operation}"}
 
@@ -1128,6 +1181,169 @@ class OfficerOfTheWatch(BaseAgent):
             "cached_alerts": len(self._recent_alerts),
         }
 
+    # =========================================================================
+    # Channel Integration (#67)
+    # =========================================================================
+
+    def format_alert_for_channel(
+        self,
+        alert: Alert,
+        channel_type: str | None = None,
+    ) -> str:
+        """
+        Format an alert for display on a specific channel type.
+
+        Formats alerts with appropriate styling for different channels:
+        - CLI: Uses emoji prefixes and Markdown formatting for Rich rendering
+        - Telegram: Uses Markdown with emoji prefixes suitable for Telegram
+
+        Args:
+            alert: The alert to format.
+            channel_type: The type of channel ('cli', 'telegram', etc.).
+                         If None, uses a generic format.
+
+        Returns:
+            Formatted alert string.
+        """
+        # Priority emoji prefixes
+        priority_emoji = {
+            AlertPriority.CRITICAL: "🚨",
+            AlertPriority.ERROR: "❌",
+            AlertPriority.WARNING: "⚠️",
+            AlertPriority.INFO: "ℹ️",  # noqa: RUF001
+        }
+
+        # Alert type labels
+        type_labels = {
+            AlertType.DEADLINE_WARNING: "Deadline",
+            AlertType.MEETING_REMINDER: "Meeting",
+            AlertType.OVERDUE_TASK: "Overdue",
+            AlertType.SCHEDULE_CONFLICT: "Conflict",
+            AlertType.ANOMALY: "Alert",
+            AlertType.MORNING_BRIEFING: "Briefing",
+        }
+
+        emoji = priority_emoji.get(alert.priority, "📢")
+        label = type_labels.get(alert.alert_type, "Alert")
+
+        # Format depends on channel type
+        if channel_type == "telegram":
+            # Telegram Markdown format
+            return f"{emoji} *{label}*: {alert.message}"
+        elif channel_type == "cli":
+            # Rich Markdown format
+            return f"{emoji} **{label}**: {alert.message}"
+        else:
+            # Generic format
+            return f"{emoji} [{label}] {alert.message}"
+
+    async def send_alerts_to_channels(
+        self,
+        alerts: list[Alert],
+        trace_id: str | None = None,
+    ) -> AlertSendResult:
+        """
+        Send alerts to all active channels via the Channel Manager.
+
+        This method broadcasts alerts to all active channels, formatting
+        each alert appropriately for the channel type. Failures on individual
+        channels do not prevent delivery to other channels.
+
+        Args:
+            alerts: List of alerts to send.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            AlertSendResult with delivery status per channel.
+
+        Raises:
+            ValueError: If no channel manager is configured.
+        """
+        if self._channel_manager is None:
+            logger.warning(
+                "[SWELL] Cannot send alerts: no channel manager configured",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return AlertSendResult(
+                alerts_sent=0,
+                channels_delivered=[],
+                channels_failed=[],
+                errors={"_config": "No channel manager configured"},
+            )
+
+        if not alerts:
+            logger.debug(
+                "[WHISPER] No alerts to send",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return AlertSendResult(
+                alerts_sent=0,
+                channels_delivered=[],
+                channels_failed=[],
+                errors={},
+            )
+
+        logger.info(
+            f"[CHART] Sending {len(alerts)} alerts to channels",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Get active channels to determine formatting
+        active_channels = self._channel_manager.active_channels
+
+        if not active_channels:
+            logger.warning(
+                "[SWELL] No active channels to send alerts to",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return AlertSendResult(
+                alerts_sent=0,
+                channels_delivered=[],
+                channels_failed=[],
+                errors={"_channels": "No active channels"},
+            )
+
+        # Format alerts as a combined message (generic format for broadcast)
+        formatted_lines = [
+            self.format_alert_for_channel(alert, channel_type=None)
+            for alert in alerts
+        ]
+        content = "\n".join(formatted_lines)
+
+        # Broadcast to all active channels
+        try:
+            broadcast_result: BroadcastResult = await self._channel_manager.broadcast(
+                content=content,
+                metadata={"alert_count": len(alerts), "trace_id": trace_id},
+            )
+
+            logger.info(
+                f"[BEACON] Alert broadcast complete: "
+                f"{broadcast_result.delivered_count} delivered, "
+                f"{broadcast_result.failed_count} failed",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            return AlertSendResult(
+                alerts_sent=len(alerts),
+                channels_delivered=broadcast_result.channels_delivered,
+                channels_failed=broadcast_result.channels_failed,
+                errors=broadcast_result.errors,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] Failed to broadcast alerts: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+                exc_info=True,
+            )
+            return AlertSendResult(
+                alerts_sent=0,
+                channels_delivered=[],
+                channels_failed=active_channels,
+                errors={"_broadcast": str(e)},
+            )
+
 
 # =============================================================================
 # Export
@@ -1137,6 +1353,7 @@ __all__ = [
     "Alert",
     "AlertCheckResult",
     "AlertPriority",
+    "AlertSendResult",
     "AlertType",
     "CalendarEventSummary",
     "MorningBriefing",

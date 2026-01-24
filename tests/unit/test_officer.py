@@ -19,6 +19,7 @@ from klabautermann.agents.officer import (
     Alert,
     AlertCheckResult,
     AlertPriority,
+    AlertSendResult,
     AlertType,
     CalendarEventSummary,
     MorningBriefing,
@@ -1076,3 +1077,346 @@ class TestGreetingGeneration:
         greeting = officer._generate_greeting(event_count=1, task_count=1, overdue_count=2)
 
         assert "overdue" in greeting.lower()
+
+
+# =============================================================================
+# Channel Integration Tests (#67)
+# =============================================================================
+
+
+class TestAlertSendResult:
+    """Tests for AlertSendResult dataclass."""
+
+    def test_alert_send_result_all_delivered(self) -> None:
+        """AlertSendResult should report all_delivered correctly."""
+        result = AlertSendResult(
+            alerts_sent=3,
+            channels_delivered=["cli", "telegram"],
+            channels_failed=[],
+            errors={},
+        )
+
+        assert result.all_delivered is True
+        assert result.alerts_sent == 3
+        assert len(result.channels_delivered) == 2
+
+    def test_alert_send_result_partial_delivery(self) -> None:
+        """AlertSendResult should report partial delivery correctly."""
+        result = AlertSendResult(
+            alerts_sent=3,
+            channels_delivered=["cli"],
+            channels_failed=["telegram"],
+            errors={"telegram": "Connection failed"},
+        )
+
+        assert result.all_delivered is False
+        assert result.channels_delivered == ["cli"]
+        assert result.channels_failed == ["telegram"]
+        assert "telegram" in result.errors
+
+    def test_alert_send_result_to_dict(self) -> None:
+        """AlertSendResult.to_dict should serialize correctly."""
+        result = AlertSendResult(
+            alerts_sent=2,
+            channels_delivered=["cli"],
+            channels_failed=["telegram"],
+            errors={"telegram": "Failed"},
+        )
+
+        result_dict = result.to_dict()
+
+        assert result_dict["alerts_sent"] == 2
+        assert result_dict["channels_delivered"] == ["cli"]
+        assert result_dict["channels_failed"] == ["telegram"]
+        assert result_dict["errors"] == {"telegram": "Failed"}
+        assert result_dict["all_delivered"] is False
+
+
+class TestFormatAlertForChannel:
+    """Tests for format_alert_for_channel method."""
+
+    def test_format_for_telegram(self, officer: OfficerOfTheWatch) -> None:
+        """Should format alert with Telegram Markdown."""
+        alert = Alert(
+            alert_type=AlertType.DEADLINE_WARNING,
+            priority=AlertPriority.WARNING,
+            message="Task 'Review PR' is due soon",
+        )
+
+        formatted = officer.format_alert_for_channel(alert, channel_type="telegram")
+
+        assert "⚠️" in formatted  # Warning emoji
+        assert "*Deadline*" in formatted  # Markdown bold
+        assert "Task 'Review PR' is due soon" in formatted
+
+    def test_format_for_cli(self, officer: OfficerOfTheWatch) -> None:
+        """Should format alert with Rich Markdown."""
+        alert = Alert(
+            alert_type=AlertType.OVERDUE_TASK,
+            priority=AlertPriority.ERROR,
+            message="Task 'Submit report' is overdue",
+        )
+
+        formatted = officer.format_alert_for_channel(alert, channel_type="cli")
+
+        assert "❌" in formatted  # Error emoji
+        assert "**Overdue**" in formatted  # Rich Markdown bold
+        assert "Task 'Submit report' is overdue" in formatted
+
+    def test_format_generic(self, officer: OfficerOfTheWatch) -> None:
+        """Should format alert with generic format when no channel specified."""
+        alert = Alert(
+            alert_type=AlertType.MEETING_REMINDER,
+            priority=AlertPriority.INFO,
+            message="Meeting 'Standup' in 15 minutes",
+        )
+
+        formatted = officer.format_alert_for_channel(alert)
+
+        assert "ℹ️" in formatted  # Info emoji  # noqa: RUF001
+        assert "[Meeting]" in formatted  # Bracket format
+        assert "Meeting 'Standup' in 15 minutes" in formatted
+
+    def test_format_critical_priority(self, officer: OfficerOfTheWatch) -> None:
+        """Should use critical emoji for CRITICAL priority."""
+        alert = Alert(
+            alert_type=AlertType.ANOMALY,
+            priority=AlertPriority.CRITICAL,
+            message="Critical system alert",
+        )
+
+        formatted = officer.format_alert_for_channel(alert)
+
+        assert "🚨" in formatted  # Critical emoji
+
+
+class TestSendAlertsToChannels:
+    """Tests for send_alerts_to_channels method."""
+
+    @pytest.mark.asyncio
+    async def test_send_without_channel_manager(
+        self, mock_neo4j: MagicMock
+    ) -> None:
+        """Should return error when no channel manager configured."""
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=None,
+        )
+
+        alerts = [
+            Alert(
+                alert_type=AlertType.DEADLINE_WARNING,
+                priority=AlertPriority.WARNING,
+                message="Test alert",
+            )
+        ]
+
+        result = await officer.send_alerts_to_channels(alerts)
+
+        assert result.alerts_sent == 0
+        assert "_config" in result.errors
+        assert "No channel manager" in result.errors["_config"]
+
+    @pytest.mark.asyncio
+    async def test_send_empty_alerts(self, mock_neo4j: MagicMock) -> None:
+        """Should handle empty alert list gracefully."""
+        mock_channel_manager = MagicMock()
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        result = await officer.send_alerts_to_channels([])
+
+        assert result.alerts_sent == 0
+        assert result.all_delivered is True
+        mock_channel_manager.broadcast.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_no_active_channels(self, mock_neo4j: MagicMock) -> None:
+        """Should handle no active channels."""
+        mock_channel_manager = MagicMock()
+        mock_channel_manager.active_channels = []
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        alerts = [
+            Alert(
+                alert_type=AlertType.DEADLINE_WARNING,
+                priority=AlertPriority.WARNING,
+                message="Test alert",
+            )
+        ]
+
+        result = await officer.send_alerts_to_channels(alerts)
+
+        assert result.alerts_sent == 0
+        assert "_channels" in result.errors
+
+    @pytest.mark.asyncio
+    async def test_send_successful_broadcast(self, mock_neo4j: MagicMock) -> None:
+        """Should broadcast alerts successfully to active channels."""
+        from datetime import datetime
+
+        from klabautermann.channels import BroadcastResult
+
+        mock_broadcast_result = BroadcastResult(
+            timestamp=datetime.now(),
+            content="test",
+            results={"cli": True, "telegram": True},
+            errors={},
+            delivered_count=2,
+            failed_count=0,
+        )
+
+        mock_channel_manager = MagicMock()
+        mock_channel_manager.active_channels = ["cli", "telegram"]
+        mock_channel_manager.broadcast = AsyncMock(return_value=mock_broadcast_result)
+
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        alerts = [
+            Alert(
+                alert_type=AlertType.DEADLINE_WARNING,
+                priority=AlertPriority.WARNING,
+                message="Task due soon",
+            ),
+            Alert(
+                alert_type=AlertType.OVERDUE_TASK,
+                priority=AlertPriority.ERROR,
+                message="Task overdue",
+            ),
+        ]
+
+        result = await officer.send_alerts_to_channels(alerts, trace_id="test-trace")
+
+        assert result.alerts_sent == 2
+        assert result.channels_delivered == ["cli", "telegram"]
+        assert result.all_delivered is True
+        mock_channel_manager.broadcast.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_partial_failure(self, mock_neo4j: MagicMock) -> None:
+        """Should handle partial delivery failure."""
+        from datetime import datetime
+
+        from klabautermann.channels import BroadcastResult
+
+        mock_broadcast_result = BroadcastResult(
+            timestamp=datetime.now(),
+            content="test",
+            results={"cli": True, "telegram": False},
+            errors={"telegram": "Connection timeout"},
+            delivered_count=1,
+            failed_count=1,
+        )
+
+        mock_channel_manager = MagicMock()
+        mock_channel_manager.active_channels = ["cli", "telegram"]
+        mock_channel_manager.broadcast = AsyncMock(return_value=mock_broadcast_result)
+
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        alerts = [
+            Alert(
+                alert_type=AlertType.DEADLINE_WARNING,
+                priority=AlertPriority.WARNING,
+                message="Test alert",
+            )
+        ]
+
+        result = await officer.send_alerts_to_channels(alerts)
+
+        assert result.alerts_sent == 1
+        assert result.all_delivered is False
+        assert "telegram" in result.errors
+
+    @pytest.mark.asyncio
+    async def test_send_broadcast_exception(self, mock_neo4j: MagicMock) -> None:
+        """Should handle broadcast exception gracefully."""
+        mock_channel_manager = MagicMock()
+        mock_channel_manager.active_channels = ["cli"]
+        mock_channel_manager.broadcast = AsyncMock(
+            side_effect=RuntimeError("Network error")
+        )
+
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        alerts = [
+            Alert(
+                alert_type=AlertType.DEADLINE_WARNING,
+                priority=AlertPriority.WARNING,
+                message="Test alert",
+            )
+        ]
+
+        result = await officer.send_alerts_to_channels(alerts)
+
+        assert result.alerts_sent == 0
+        assert "_broadcast" in result.errors
+        assert "Network error" in result.errors["_broadcast"]
+
+
+class TestProcessMessageSendAlerts:
+    """Tests for process_message with send_alerts operation."""
+
+    @pytest.mark.asyncio
+    async def test_process_send_alerts_operation(
+        self, mock_neo4j: MagicMock
+    ) -> None:
+        """Should process send_alerts operation."""
+        from datetime import datetime
+
+        from klabautermann.channels import BroadcastResult
+
+        mock_broadcast_result = BroadcastResult(
+            timestamp=datetime.now(),
+            content="test",
+            results={"cli": True},
+            errors={},
+            delivered_count=1,
+            failed_count=0,
+        )
+
+        mock_channel_manager = MagicMock()
+        mock_channel_manager.active_channels = ["cli"]
+        mock_channel_manager.broadcast = AsyncMock(return_value=mock_broadcast_result)
+
+        officer = OfficerOfTheWatch(
+            neo4j_client=mock_neo4j,
+            channel_manager=mock_channel_manager,
+        )
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="officer_of_the_watch",
+            intent="officer_command",
+            payload={
+                "operation": "send_alerts",
+                "alerts": [
+                    {
+                        "alert_type": "deadline_warning",
+                        "priority": "WARNING",
+                        "message": "Test deadline alert",
+                    }
+                ],
+            },
+            trace_id="test-trace",
+        )
+
+        response = await officer.process_message(msg)
+
+        assert response is not None
+        assert response.payload["alerts_sent"] == 1
+        assert response.payload["all_delivered"] is True
