@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,agents">
+    <meta name="post-slug" content="alert-debouncing">
+    <meta name="post-excerpt" content="The Officer of the Watch now prevents alert spam. Same warning, 60 minute cooldown.">
+    <title>Silencing the Echo | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Silencing the Echo</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>The Officer of the Watch monitors your deadlines and meetings. But nobody wants the same warning repeated every 15 minutes.</p>
+                <p>Alert debouncing solves this.</p>
+
+                <h2>The Problem</h2>
+                <p>The Officer runs periodic checks. If your task is due in 10 hours, it generates a deadline warning. If nothing changes, the next check generates the same warning again.</p>
+                <p>Alert fatigue is real. Too many alerts means you ignore all alerts.</p>
+
+                <h2>The Solution</h2>
+                <p>Track what was sent and when. Before sending an alert, check if the same alert was sent recently:</p>
+
+                <pre><code>def _recently_sent(self, alert: Alert) -> bool:
+    """Check if a similar alert was recently sent."""
+    key = f"{alert.alert_type.value}:{alert.entity_uuid or 'none'}"
+    last_sent = self._recent_alerts.get(key)
+
+    if last_sent is None:
+        return False
+
+    debounce_seconds = self.officer_config.alert_debounce_minutes * 60
+    elapsed = (datetime.now() - last_sent).total_seconds()
+
+    return elapsed < debounce_seconds</code></pre>
+
+                <h2>The Key</h2>
+                <p>Debounce key = <code>alert_type:entity_uuid</code></p>
+                <ul>
+                    <li><code>deadline_warning:task-123</code> - Deadline warning for task 123</li>
+                    <li><code>meeting_reminder:event-456</code> - Meeting reminder for event 456</li>
+                    <li><code>anomaly:none</code> - System-wide anomaly (no entity)</li>
+                </ul>
+                <p>This means:</p>
+                <ul>
+                    <li>Same alert type + same entity = debounced</li>
+                    <li>Different alert type + same entity = not debounced</li>
+                    <li>Same alert type + different entity = not debounced</li>
+                </ul>
+
+                <h2>Configuration</h2>
+                <p>The window is configurable:</p>
+
+                <pre><code>@dataclass
+class OfficerConfig:
+    # ...
+    alert_debounce_minutes: int = 60  # Default: 1 hour</code></pre>
+
+                <p>Set it to 30 for half-hour cooldown. Set it to 0 to disable debouncing entirely (not recommended).</p>
+
+                <h2>Integration</h2>
+                <p>The debouncing happens automatically in <code>check_conditions()</code>:</p>
+
+                <pre><code>for alert in all_alerts:
+    if self._should_notify(alert):
+        alerts_to_send.append(alert)
+        self._mark_alert_sent(alert)</code></pre>
+
+                <p><code>_should_notify()</code> checks both quiet mode (Deep Work) and debouncing. Only alerts that pass both filters get sent.</p>
+
+                <h2>Testing</h2>
+                <p>This session focused on adding comprehensive tests for the already-implemented functionality:</p>
+                <ul>
+                    <li>Verify <code>_recently_sent()</code> returns false for new alerts</li>
+                    <li>Verify <code>_recently_sent()</code> returns true after marking</li>
+                    <li>Test key format handles None entity_uuid</li>
+                    <li>Test different alert types aren't cross-debounced</li>
+                    <li>Test time window expiration allows re-send</li>
+                    <li>Test <code>clear_recent_alerts()</code> resets state</li>
+                </ul>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#66: [AGT-S-030] Add alert debouncing</li>
+                </ul>
+
+                <p>The implementation was already there. Now it has the tests to prove it works.</p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
