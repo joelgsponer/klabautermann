@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-24">
+    <meta name="post-category" content="feature,memory,agents">
+    <meta name="post-slug" content="transitive-reduction">
+    <meta name="post-excerpt" content="The Hull Cleaner now detects triangles. When A->B->C and A->C both exist, the intermediate path gets pruned.">
+    <title>Pruning the Triangles | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-24">January 24, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">feature</span>
+                        <span class="category-tag">memory</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">Pruning the Triangles</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Graphs accumulate shortcuts. You meet Alice. Alice introduces you to Bob. Bob introduces you to Charlie. Then you meet Charlie directly at a conference. Now your graph has:</p>
+                <ul>
+                    <li>You -> Alice -> Bob -> Charlie (the original chain)</li>
+                    <li>You -> Charlie (the direct connection)</li>
+                </ul>
+                <p>The intermediate path through Bob? Redundant. The Hull Cleaner now finds and prunes it.</p>
+
+                <h2>The Problem (#86)</h2>
+                <p>AGENTS_EXTENDED.md specified transitive path reduction as a pruning rule. The concept: when A->C exists directly AND A->B->C exists indirectly, evaluate whether the indirect path adds value. If the direct connection is stronger (higher weight), the intermediate hop is noise.</p>
+                <p>Without pruning, the graph bloats with redundant paths that slow queries and clutter results.</p>
+
+                <h2>The Algorithm</h2>
+                <p>Find triangles where the direct path is at least as strong as the indirect:</p>
+                <pre><code>MATCH (a)-[r1]->(b)-[r2]->(c)
+WHERE (a)-[direct]->(c)
+AND type(r1) = type(r2) = type(direct)
+AND direct.weight >= (r1.weight + r2.weight) / 2
+RETURN a, b, c, id(r2) as redundant_rel_id</code></pre>
+                <p>We compare the direct weight against the average of the two-hop path. If direct is stronger, the intermediate relationship (r2) is marked for removal.</p>
+
+                <h2>The Implementation</h2>
+                <pre><code>@dataclass
+class TransitivePath:
+    source_uuid: str
+    intermediate_uuid: str
+    target_uuid: str
+    source_name: str
+    intermediate_name: str
+    target_name: str
+    relationship_type: str
+    direct_weight: float
+    indirect_weight: float
+    redundant_rel_id: int</code></pre>
+
+                <h3>Configuration</h3>
+                <pre><code>config = HullCleanerConfig(
+    detect_transitive_redundancy=True,   # Enable/disable
+    transitive_weight_threshold=0.5,     # Comparison threshold
+    max_transitive_per_run=100,          # Limit per operation
+)</code></pre>
+
+                <h3>Usage</h3>
+                <pre><code># Find redundant paths
+paths = await cleaner.find_transitive_paths()
+
+# Preview what would be pruned
+result = await cleaner.reduce_transitive_paths(dry_run=True)
+
+# Actually prune them
+result = await cleaner.reduce_transitive_paths(dry_run=False)</code></pre>
+
+                <h2>Integration</h2>
+                <p>Transitive reduction is now step 4 in <code>scrape_barnacles()</code>:</p>
+                <ol>
+                    <li>Prune weak relationships</li>
+                    <li>Remove orphan messages</li>
+                    <li>Merge duplicate entities</li>
+                    <li><strong>Reduce transitive paths</strong> (new)</li>
+                    <li>Persist audit log (if enabled)</li>
+                </ol>
+
+                <h2>Audit Trail</h2>
+                <p>Two new PruningAction values:</p>
+                <ul>
+                    <li><code>TRANSITIVE_PREVIEW</code> - Dry run mode</li>
+                    <li><code>TRANSITIVE_REDUCTION</code> - Actual deletion</li>
+                </ul>
+                <p>Each audit entry captures the triangle: source, intermediate, and target nodes, plus the weight comparison that justified the pruning.</p>
+
+                <h2>The Tests</h2>
+                <p>13 new tests joined the Hull Cleaner suite:</p>
+                <ul>
+                    <li><code>TestTransitivePath</code> - Dataclass serialization</li>
+                    <li><code>TestTransitiveResult</code> - Result structure</li>
+                    <li><code>TestHullCleanerConfigTransitive</code> - Config defaults</li>
+                    <li><code>TestFindTransitivePaths</code> - Detection queries</li>
+                    <li><code>TestReduceTransitivePaths</code> - Dry run and actual deletion</li>
+                    <li><code>TestProcessMessageTransitiveOperations</code> - Message handling</li>
+                    <li><code>TestScrapeBarnaclesWithTransitive</code> - Integration</li>
+                </ul>
+                <p>All 72 hull_cleaner tests pass.</p>
+
+                <h2>Issues Closed</h2>
+                <ul>
+                    <li>#86: [AGT-S-050] Implement transitive redundancy detection</li>
+                </ul>
+
+                <h2>The Result</h2>
+                <p>The Hull Cleaner scrapes deeper barnacles now. Triangles collapse to direct connections. The graph stays lean, queries stay fast, and navigation stays simple.</p>
+                <p><em>The shortest path is often the only path worth keeping.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>
