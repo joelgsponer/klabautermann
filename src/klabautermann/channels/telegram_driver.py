@@ -24,6 +24,7 @@ from telegram.ext import (
 )
 
 from klabautermann.channels.base_channel import BaseChannel
+from klabautermann.channels.markdown_formatter import escape_markdown
 from klabautermann.channels.sanitization import InputSanitizer
 from klabautermann.core.logger import logger
 
@@ -68,6 +69,40 @@ class TelegramDriver(BaseChannel):
         self._app: Application | None = None
         self._running = False
         self._sanitizer = InputSanitizer()
+
+    async def _safe_reply(
+        self,
+        message: Any,
+        text: str,
+        use_markdown: bool = True,
+    ) -> None:
+        """
+        Send a reply with Markdown, falling back to plain text on error.
+
+        Args:
+            message: Telegram Message object to reply to.
+            text: Response text.
+            use_markdown: Whether to attempt Markdown formatting.
+
+        Issue: #139
+        """
+        if not use_markdown:
+            await message.reply_text(text)
+            return
+
+        formatted_text = escape_markdown(text)
+        try:
+            await message.reply_text(formatted_text, parse_mode="Markdown")
+        except Exception as e:
+            error_msg = str(e).lower()
+            if "parse" in error_msg or "markdown" in error_msg or "can't" in error_msg:
+                logger.warning(
+                    f"[SWELL] Markdown parsing failed in reply, sending plain: {e}",
+                    extra={"agent_name": "telegram"},
+                )
+                await message.reply_text(text)
+            else:
+                raise
 
     @property
     def channel_type(self) -> str:
@@ -189,11 +224,28 @@ class TelegramDriver(BaseChannel):
             )
             return
 
-        await self._app.bot.send_message(
-            chat_id=chat_id,
-            text=content,
-            parse_mode="Markdown",
-        )
+        # Format content for Telegram Markdown and send with fallback (#139)
+        formatted_content = escape_markdown(content)
+        try:
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=formatted_content,
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            # Fallback to plain text if Markdown parsing fails
+            error_msg = str(e).lower()
+            if "parse" in error_msg or "markdown" in error_msg or "can't" in error_msg:
+                logger.warning(
+                    f"[SWELL] Markdown parsing failed, sending as plain text: {e}",
+                    extra={"agent_name": "telegram", "chat_id": chat_id},
+                )
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=content,  # Send original without parse_mode
+                )
+            else:
+                raise
 
     async def receive_message(
         self,
@@ -253,7 +305,7 @@ class TelegramDriver(BaseChannel):
             "or ask me to find something in The Locker (your knowledge graph).\n\n"
             "Type /help for more information."
         )
-        await update.message.reply_text(welcome, parse_mode="Markdown")
+        await self._safe_reply(update.message, welcome)
 
         logger.info(
             "[CHART] /start command received",
@@ -285,7 +337,7 @@ class TelegramDriver(BaseChannel):
             "- Transcribe voice messages\n\n"
             "Just chat naturally - I'll figure out the rest!"
         )
-        await update.message.reply_text(help_text, parse_mode="Markdown")
+        await self._safe_reply(update.message, help_text)
 
     async def _cmd_status(
         self,
@@ -310,7 +362,7 @@ class TelegramDriver(BaseChannel):
             f"- Status: Online\n"
             f"- Voice: {'Enabled' if self.enable_voice else 'Disabled'}"
         )
-        await update.message.reply_text(status, parse_mode="Markdown")
+        await self._safe_reply(update.message, status)
 
     # =========================================================================
     # Message Handlers
@@ -371,7 +423,7 @@ class TelegramDriver(BaseChannel):
                     "timestamp": datetime.now(UTC).timestamp(),
                 },
             )
-            await update.message.reply_text(response, parse_mode="Markdown")
+            await self._safe_reply(update.message, response)
         except Exception as e:
             logger.error(
                 f"[STORM] Error processing text message: {e}",
@@ -430,10 +482,8 @@ class TelegramDriver(BaseChannel):
                     "duration": voice.duration,
                 },
             )
-            await update.message.reply_text(
-                f"_Transcribed: {transcription}_\n\n{response}",
-                parse_mode="Markdown",
-            )
+            voice_response = f"_Transcribed: {transcription}_\n\n{response}"
+            await self._safe_reply(update.message, voice_response)
 
         except Exception as e:
             logger.error(
