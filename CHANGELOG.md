@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- VIP whitelist for TheSieve email filter (#53)
+  - `vip_whitelist` parameter in `TheSieve.__init__` and `PurserConfig`
+  - VIPs bypass noise/content filters but NOT security checks
+  - Support exact email matching and domain wildcards (`@company.com`)
+  - Handle "Name <email>" format in sender addresses
+  - `_is_vip()` helper method with domain matching
+  - `add_vip()`, `remove_vip()`, `vip_whitelist` property for VIP management
+  - 11 new tests for VIP whitelist functionality
 - Alert debouncing tests for Officer of the Watch (#66)
   - 9 new tests for debouncing functionality
   - Verify `_recently_sent()` and `_mark_alert_sent()` behavior
