@@ -12,7 +12,7 @@ Audit entries are generated for all pruning operations and can be persisted
 to Neo4j as AuditLog nodes for historical review and compliance.
 
 Reference: specs/architecture/AGENTS_EXTENDED.md Section 5
-Issues: #79, #80, #81, #84, #85, #87, #88
+Issues: #79, #80, #81, #84, #85, #86, #87, #88
 """
 
 from __future__ import annotations
@@ -56,6 +56,64 @@ class PruningAction(str, Enum):
     ARCHIVE_THREAD = "ARCHIVE_THREAD"
     PREVIEW = "PREVIEW"
     MERGE_PREVIEW = "MERGE_PREVIEW"
+    TRANSITIVE_REDUCTION = "TRANSITIVE_REDUCTION"
+    TRANSITIVE_PREVIEW = "TRANSITIVE_PREVIEW"
+
+
+@dataclass
+class TransitivePath:
+    """A redundant transitive path A->B->C where A->C also exists."""
+
+    source_uuid: str
+    intermediate_uuid: str
+    target_uuid: str
+    source_name: str
+    intermediate_name: str
+    target_name: str
+    relationship_type: str
+    direct_weight: float  # Weight of A->C
+    indirect_weight: float  # Combined weight of A->B + B->C
+    redundant_rel_id: int  # ID of the relationship to remove
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "source_uuid": self.source_uuid,
+            "intermediate_uuid": self.intermediate_uuid,
+            "target_uuid": self.target_uuid,
+            "source_name": self.source_name,
+            "intermediate_name": self.intermediate_name,
+            "target_name": self.target_name,
+            "relationship_type": self.relationship_type,
+            "direct_weight": round(self.direct_weight, 3),
+            "indirect_weight": round(self.indirect_weight, 3),
+            "redundant_rel_id": self.redundant_rel_id,
+        }
+
+
+@dataclass
+class TransitiveResult:
+    """Result of a transitive reduction operation."""
+
+    operation: str
+    dry_run: bool
+    paths_found: int
+    paths_reduced: int
+    errors: list[str]
+    duration_ms: float
+    audit_entries: list[AuditEntry] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "operation": self.operation,
+            "dry_run": self.dry_run,
+            "paths_found": self.paths_found,
+            "paths_reduced": self.paths_reduced,
+            "errors": self.errors,
+            "duration_ms": round(self.duration_ms, 2),
+            "audit_entry_count": len(self.audit_entries),
+        }
 
 
 @dataclass
@@ -110,6 +168,11 @@ class HullCleanerConfig:
     duplicate_similarity_threshold: float = 0.85
     duplicate_auto_merge_threshold: float = 0.95  # Auto-merge above this threshold
     max_duplicates_per_run: int = 100
+
+    # Transitive redundancy detection settings (#86)
+    detect_transitive_redundancy: bool = True
+    transitive_weight_threshold: float = 0.5  # Remove if direct > indirect combined
+    max_transitive_per_run: int = 100
 
     # Run limits
     max_deletions_per_run: int = 1000
@@ -323,6 +386,17 @@ class HullCleaner(BaseAgent):
         elif operation == "merge_duplicates":
             merge_result = await self.merge_duplicates(dry_run=dry_run, trace_id=trace_id)
             result_payload = merge_result.to_dict()
+        elif operation == "find_transitive_paths":
+            paths = await self.find_transitive_paths(trace_id=trace_id)
+            result_payload = {
+                "transitive_paths": [p.to_dict() for p in paths],
+                "count": len(paths),
+            }
+        elif operation == "reduce_transitive_paths":
+            transitive_result = await self.reduce_transitive_paths(
+                dry_run=dry_run, trace_id=trace_id
+            )
+            result_payload = transitive_result.to_dict()
         elif operation == "query_stored_audit":
             # Query persisted audit entries from Neo4j
             filters = payload.get("filters", {})
@@ -433,8 +507,22 @@ class HullCleaner(BaseAgent):
                 )
                 errors.append(error_msg)
 
-        # Future: Add more pruning operations here
-        # - Transitive path reduction
+        # 4. Detect and reduce transitive redundancy
+        if self.hull_config.detect_transitive_redundancy:
+            try:
+                transitive_result = await self.reduce_transitive_paths(
+                    dry_run=dry_run, trace_id=trace_id
+                )
+                total_rels_found += transitive_result.paths_found
+                total_rels_pruned += transitive_result.paths_reduced
+                self._audit_log.extend(transitive_result.audit_entries)
+            except Exception as e:
+                error_msg = f"Transitive reduction failed: {e}"
+                logger.error(
+                    f"[STORM] {error_msg}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+                errors.append(error_msg)
 
         # Persist audit entries to Neo4j if requested
         if persist_audit and self._audit_log:
@@ -1096,6 +1184,195 @@ class HullCleaner(BaseAgent):
         return False
 
     # =========================================================================
+    # Transitive Redundancy Detection (#86)
+    # =========================================================================
+
+    async def find_transitive_paths(
+        self,
+        limit: int | None = None,
+        trace_id: str | None = None,
+    ) -> list[TransitivePath]:
+        """
+        Find redundant transitive paths in the graph.
+
+        A transitive path A->B->C is redundant when:
+        1. A direct relationship A->C exists
+        2. The direct relationship has equal or greater weight
+
+        Args:
+            limit: Maximum paths to return.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            List of TransitivePath objects describing redundant paths.
+        """
+        limit = limit or self.hull_config.max_transitive_per_run
+
+        logger.info(
+            "[CHART] Searching for transitive redundancy",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Find triangles where direct relationship is stronger than indirect path
+        # Only consider weighted relationship types used by Graphiti
+        query = """
+        MATCH (a)-[r1]->(b)-[r2]->(c)
+        WHERE (a)-[direct]->(c)
+        AND type(r1) = type(r2)
+        AND type(r1) = type(direct)
+        AND r1.weight IS NOT NULL
+        AND r2.weight IS NOT NULL
+        AND direct.weight IS NOT NULL
+        AND direct.weight >= (r1.weight + r2.weight) / 2
+        AND a <> c
+        AND a <> b
+        AND b <> c
+        RETURN DISTINCT
+            a.uuid as source_uuid,
+            b.uuid as intermediate_uuid,
+            c.uuid as target_uuid,
+            COALESCE(a.name, a.uuid) as source_name,
+            COALESCE(b.name, b.uuid) as intermediate_name,
+            COALESCE(c.name, c.uuid) as target_name,
+            type(r2) as relationship_type,
+            direct.weight as direct_weight,
+            (r1.weight + r2.weight) / 2 as indirect_weight,
+            id(r2) as redundant_rel_id
+        ORDER BY direct_weight - indirect_weight DESC
+        LIMIT $limit
+        """
+
+        result = await self.neo4j.execute_query(
+            query,
+            {"limit": limit},
+            trace_id=trace_id,
+        )
+
+        paths = [
+            TransitivePath(
+                source_uuid=row["source_uuid"],
+                intermediate_uuid=row["intermediate_uuid"],
+                target_uuid=row["target_uuid"],
+                source_name=row["source_name"],
+                intermediate_name=row["intermediate_name"],
+                target_name=row["target_name"],
+                relationship_type=row["relationship_type"],
+                direct_weight=float(row["direct_weight"]),
+                indirect_weight=float(row["indirect_weight"]),
+                redundant_rel_id=int(row["redundant_rel_id"]),
+            )
+            for row in result
+        ]
+
+        logger.info(
+            f"[BEACON] Found {len(paths)} transitive redundant paths",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return paths
+
+    async def reduce_transitive_paths(
+        self,
+        dry_run: bool = True,
+        trace_id: str | None = None,
+    ) -> TransitiveResult:
+        """
+        Find and remove redundant transitive relationships.
+
+        When A->B->C exists and A->C also exists with sufficient weight,
+        the B->C relationship is redundant and can be removed.
+
+        Args:
+            dry_run: If True, only preview without deleting.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            TransitiveResult with operation statistics.
+        """
+        start_time = time.time()
+        errors: list[str] = []
+
+        logger.info(
+            f"[CHART] Starting transitive reduction (dry_run={dry_run})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        # Find redundant paths
+        paths = await self.find_transitive_paths(trace_id=trace_id)
+
+        audit_entries: list[AuditEntry] = []
+        paths_reduced = 0
+
+        for path in paths:
+            # Create audit entry
+            action = (
+                PruningAction.TRANSITIVE_PREVIEW if dry_run else PruningAction.TRANSITIVE_REDUCTION
+            )
+            entry = AuditEntry(
+                timestamp=datetime.now(),
+                action=action,
+                entity_type="relationship",
+                entity_id=path.redundant_rel_id,
+                reason=(
+                    f"Transitive redundancy: {path.source_name}->{path.intermediate_name}"
+                    f"->{path.target_name} (direct weight {path.direct_weight:.2f} >= "
+                    f"indirect {path.indirect_weight:.2f})"
+                ),
+                metadata={
+                    "source_uuid": path.source_uuid,
+                    "intermediate_uuid": path.intermediate_uuid,
+                    "target_uuid": path.target_uuid,
+                    "relationship_type": path.relationship_type,
+                    "direct_weight": path.direct_weight,
+                    "indirect_weight": path.indirect_weight,
+                },
+            )
+            audit_entries.append(entry)
+
+            if not dry_run:
+                try:
+                    # Delete the redundant relationship
+                    delete_query = """
+                    MATCH ()-[r]->()
+                    WHERE id(r) = $rel_id
+                    DELETE r
+                    RETURN count(r) as deleted
+                    """
+                    result = await self.neo4j.execute_query(
+                        delete_query,
+                        {"rel_id": path.redundant_rel_id},
+                        trace_id=trace_id,
+                    )
+                    if result and result[0].get("deleted", 0) > 0:
+                        paths_reduced += 1
+                except Exception as e:
+                    errors.append(f"Failed to delete relationship {path.redundant_rel_id}: {e}")
+
+        if dry_run:
+            paths_reduced = len(paths)  # Preview counts all found as "would reduce"
+
+        duration_ms = (time.time() - start_time) * 1000
+
+        result = TransitiveResult(
+            operation="reduce_transitive_paths",
+            dry_run=dry_run,
+            paths_found=len(paths),
+            paths_reduced=paths_reduced,
+            errors=errors,
+            duration_ms=duration_ms,
+            audit_entries=audit_entries,
+        )
+
+        logger.info(
+            f"[BEACON] Transitive reduction complete: "
+            f"found {len(paths)} paths, reduced {paths_reduced} "
+            f"({'preview' if dry_run else 'actual'})",
+            extra={"trace_id": trace_id, "agent_name": self.name},
+        )
+
+        return result
+
+    # =========================================================================
     # Statistics
     # =========================================================================
 
@@ -1303,4 +1580,6 @@ __all__ = [
     "PruningAction",
     "PruningResult",
     "PruningRule",
+    "TransitivePath",
+    "TransitiveResult",
 ]
