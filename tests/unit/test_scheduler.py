@@ -534,3 +534,140 @@ class TestCartographerScheduledJob:
         call_kwargs = mock_cartographer.detect_communities.call_args.kwargs
         assert "trace_id" in call_kwargs
         assert isinstance(call_kwargs["trace_id"], str)
+
+
+# =============================================================================
+# Purser Scheduled Job Tests (Issue #55)
+# =============================================================================
+
+
+class TestPurserScheduledJob:
+    """Tests for Purser scheduled sync job (Issue #55)."""
+
+    @pytest.fixture
+    def scheduler(self) -> AsyncIOScheduler:
+        """Create scheduler instance for tests."""
+        return create_scheduler()
+
+    @pytest.fixture
+    def mock_purser(self) -> Mock:
+        """Create mock Purser agent."""
+        agent = Mock()
+        agent.sync_all = AsyncMock()
+        return agent
+
+    def test_registers_purser_job_when_enabled(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Should register Purser job when agent available and enabled."""
+        agents = {"purser": mock_purser}
+        config = {"purser": {"enabled": True}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is not None
+        assert job.name == "Purser Gmail/Calendar Sync"
+
+    def test_registers_purser_with_default_interval(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Should use default 15-minute interval."""
+        agents = {"purser": mock_purser}
+        config = {"purser": {"enabled": True}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is not None
+        # Default interval is 15 minutes
+        assert job.trigger.interval.total_seconds() == 15 * 60
+
+    def test_registers_purser_with_custom_interval(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Should use custom interval when provided."""
+        agents = {"purser": mock_purser}
+        config = {"purser": {"enabled": True, "interval_minutes": 30}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is not None
+        # Custom interval is 30 minutes
+        assert job.trigger.interval.total_seconds() == 30 * 60
+
+    def test_skips_purser_when_disabled(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Should not register Purser job when disabled."""
+        agents = {"purser": mock_purser}
+        config = {"purser": {"enabled": False}}
+
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is None
+
+    def test_skips_purser_when_not_available(self, scheduler: AsyncIOScheduler) -> None:
+        """Should not register Purser job when agent not available."""
+        agents = {}  # No purser
+        config = {"purser": {"enabled": True}}
+
+        # Should not raise exception
+        register_scheduled_jobs(scheduler, agents, config)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is None
+
+    @pytest.mark.asyncio
+    async def test_purser_job_calls_sync_all(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Purser job should call sync_all when triggered."""
+        agents = {"purser": mock_purser}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is not None
+
+        # Execute the job function directly
+        await job.func()
+
+        # Verify the agent method was called
+        mock_purser.sync_all.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_purser_job_handles_failures(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Purser job should handle sync failures gracefully."""
+        # Make sync_all raise an exception
+        mock_purser.sync_all.side_effect = RuntimeError("Sync failed")
+        agents = {"purser": mock_purser}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("purser_sync")
+        assert job is not None
+
+        # Execute should not raise - error is caught and logged
+        await job.func()
+
+        # Job should still have tried to call sync_all
+        mock_purser.sync_all.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_purser_job_receives_trace_id(
+        self, scheduler: AsyncIOScheduler, mock_purser: Mock
+    ) -> None:
+        """Purser job should receive a trace_id when executed."""
+        agents = {"purser": mock_purser}
+        register_scheduled_jobs(scheduler, agents)
+
+        job = scheduler.get_job("purser_sync")
+        await job.func()
+
+        # Verify trace_id was passed
+        call_kwargs = mock_purser.sync_all.call_args.kwargs
+        assert "trace_id" in call_kwargs
+        assert isinstance(call_kwargs["trace_id"], str)
