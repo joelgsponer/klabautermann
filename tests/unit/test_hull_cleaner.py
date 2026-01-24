@@ -1396,12 +1396,14 @@ class TestScrapeBarnaclesWithDuplicates:
     @pytest.mark.asyncio
     async def test_scrape_handles_duplicate_errors(self, cleaner, mock_neo4j):
         """Test that scrape_barnacles handles duplicate merge errors gracefully."""
-        # First two calls succeed (weak rels, orphans), third fails
+        # First two calls succeed (weak rels, orphans), third fails (duplicates),
+        # fourth succeeds (transitive)
         mock_neo4j.execute_query = AsyncMock(
             side_effect=[
                 [],  # weak rels
                 [],  # orphans
                 Exception("Duplicate detection failed"),  # duplicates - persons
+                [],  # transitive paths
             ]
         )
 
@@ -1410,3 +1412,374 @@ class TestScrapeBarnaclesWithDuplicates:
         # Should have captured the error but not crashed
         assert len(result.errors) == 1
         assert "Duplicate entity merge failed" in result.errors[0]
+
+
+# ===========================================================================
+# Transitive Redundancy Detection Tests (#86)
+# ===========================================================================
+
+
+class TestTransitivePath:
+    """Tests for TransitivePath dataclass."""
+
+    def test_to_dict(self):
+        """Test conversion to dictionary."""
+        from klabautermann.agents.hull_cleaner import TransitivePath
+
+        path = TransitivePath(
+            source_uuid="uuid-a",
+            intermediate_uuid="uuid-b",
+            target_uuid="uuid-c",
+            source_name="Alice",
+            intermediate_name="Bob",
+            target_name="Charlie",
+            relationship_type="KNOWS",
+            direct_weight=0.8,
+            indirect_weight=0.5,
+            redundant_rel_id=12345,
+        )
+
+        result = path.to_dict()
+
+        assert result["source_uuid"] == "uuid-a"
+        assert result["source_name"] == "Alice"
+        assert result["relationship_type"] == "KNOWS"
+        assert result["direct_weight"] == 0.8
+        assert result["indirect_weight"] == 0.5
+        assert result["redundant_rel_id"] == 12345
+
+
+class TestTransitiveResult:
+    """Tests for TransitiveResult dataclass."""
+
+    def test_to_dict(self):
+        """Test conversion to dictionary."""
+        from klabautermann.agents.hull_cleaner import TransitiveResult
+
+        result = TransitiveResult(
+            operation="reduce_transitive_paths",
+            dry_run=True,
+            paths_found=5,
+            paths_reduced=5,
+            errors=[],
+            duration_ms=100.5,
+            audit_entries=[],
+        )
+
+        output = result.to_dict()
+
+        assert output["operation"] == "reduce_transitive_paths"
+        assert output["dry_run"] is True
+        assert output["paths_found"] == 5
+        assert output["paths_reduced"] == 5
+        assert output["audit_entry_count"] == 0
+
+
+class TestHullCleanerConfigTransitive:
+    """Tests for HullCleanerConfig transitive settings."""
+
+    def test_default_transitive_values(self):
+        """Test default transitive config values."""
+        config = HullCleanerConfig()
+
+        assert config.detect_transitive_redundancy is True
+        assert config.transitive_weight_threshold == 0.5
+        assert config.max_transitive_per_run == 100
+
+    def test_custom_transitive_values(self):
+        """Test custom transitive config values."""
+        config = HullCleanerConfig(
+            detect_transitive_redundancy=False,
+            transitive_weight_threshold=0.7,
+            max_transitive_per_run=50,
+        )
+
+        assert config.detect_transitive_redundancy is False
+        assert config.transitive_weight_threshold == 0.7
+        assert config.max_transitive_per_run == 50
+
+
+class TestFindTransitivePaths:
+    """Tests for find_transitive_paths method."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_find_transitive_paths_empty(self, cleaner, mock_neo4j):
+        """Test finding transitive paths with empty result."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        paths = await cleaner.find_transitive_paths()
+
+        assert len(paths) == 0
+        mock_neo4j.execute_query.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_find_transitive_paths_with_results(self, cleaner, mock_neo4j):
+        """Test finding transitive paths with results."""
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "source_uuid": "uuid-a",
+                    "intermediate_uuid": "uuid-b",
+                    "target_uuid": "uuid-c",
+                    "source_name": "Alice",
+                    "intermediate_name": "Bob",
+                    "target_name": "Charlie",
+                    "relationship_type": "KNOWS",
+                    "direct_weight": 0.9,
+                    "indirect_weight": 0.5,
+                    "redundant_rel_id": 12345,
+                }
+            ]
+        )
+
+        paths = await cleaner.find_transitive_paths()
+
+        assert len(paths) == 1
+        assert paths[0].source_name == "Alice"
+        assert paths[0].intermediate_name == "Bob"
+        assert paths[0].target_name == "Charlie"
+        assert paths[0].direct_weight == 0.9
+        assert paths[0].indirect_weight == 0.5
+
+
+class TestReduceTransitivePaths:
+    """Tests for reduce_transitive_paths method."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_reduce_dry_run(self, cleaner, mock_neo4j):
+        """Test transitive reduction in dry-run mode."""
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "source_uuid": "uuid-a",
+                    "intermediate_uuid": "uuid-b",
+                    "target_uuid": "uuid-c",
+                    "source_name": "Alice",
+                    "intermediate_name": "Bob",
+                    "target_name": "Charlie",
+                    "relationship_type": "KNOWS",
+                    "direct_weight": 0.9,
+                    "indirect_weight": 0.5,
+                    "redundant_rel_id": 12345,
+                }
+            ]
+        )
+
+        result = await cleaner.reduce_transitive_paths(dry_run=True)
+
+        assert result.dry_run is True
+        assert result.paths_found == 1
+        assert result.paths_reduced == 1  # Preview counts as "would reduce"
+        assert len(result.audit_entries) == 1
+        assert result.audit_entries[0].action == PruningAction.TRANSITIVE_PREVIEW
+
+    @pytest.mark.asyncio
+    async def test_reduce_actual_delete(self, cleaner, mock_neo4j):
+        """Test actual transitive reduction."""
+        mock_neo4j.execute_query = AsyncMock(
+            side_effect=[
+                # First call: find paths
+                [
+                    {
+                        "source_uuid": "uuid-a",
+                        "intermediate_uuid": "uuid-b",
+                        "target_uuid": "uuid-c",
+                        "source_name": "Alice",
+                        "intermediate_name": "Bob",
+                        "target_name": "Charlie",
+                        "relationship_type": "KNOWS",
+                        "direct_weight": 0.9,
+                        "indirect_weight": 0.5,
+                        "redundant_rel_id": 12345,
+                    }
+                ],
+                # Second call: delete relationship
+                [{"deleted": 1}],
+            ]
+        )
+
+        result = await cleaner.reduce_transitive_paths(dry_run=False)
+
+        assert result.dry_run is False
+        assert result.paths_found == 1
+        assert result.paths_reduced == 1
+        assert len(result.audit_entries) == 1
+        assert result.audit_entries[0].action == PruningAction.TRANSITIVE_REDUCTION
+
+    @pytest.mark.asyncio
+    async def test_reduce_handles_delete_error(self, cleaner, mock_neo4j):
+        """Test that reduction handles delete errors gracefully."""
+        mock_neo4j.execute_query = AsyncMock(
+            side_effect=[
+                # First call: find paths
+                [
+                    {
+                        "source_uuid": "uuid-a",
+                        "intermediate_uuid": "uuid-b",
+                        "target_uuid": "uuid-c",
+                        "source_name": "Alice",
+                        "intermediate_name": "Bob",
+                        "target_name": "Charlie",
+                        "relationship_type": "KNOWS",
+                        "direct_weight": 0.9,
+                        "indirect_weight": 0.5,
+                        "redundant_rel_id": 12345,
+                    }
+                ],
+                # Second call: delete fails
+                Exception("Delete failed"),
+            ]
+        )
+
+        result = await cleaner.reduce_transitive_paths(dry_run=False)
+
+        assert result.paths_found == 1
+        assert result.paths_reduced == 0  # Delete failed
+        assert len(result.errors) == 1
+        assert "Failed to delete relationship" in result.errors[0]
+
+
+class TestProcessMessageTransitiveOperations:
+    """Tests for process_message transitive operations."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with mock client."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_process_find_transitive_paths(self, cleaner, mock_neo4j):
+        """Test process_message with find_transitive_paths operation."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="hull_cleaner",
+            intent="hull_cleaner_command",
+            payload={"operation": "find_transitive_paths"},
+            trace_id="test-trace",
+        )
+
+        result = await cleaner.process_message(msg)
+
+        assert result is not None
+        assert result.payload["count"] == 0
+        assert result.payload["transitive_paths"] == []
+
+    @pytest.mark.asyncio
+    async def test_process_reduce_transitive_paths(self, cleaner, mock_neo4j):
+        """Test process_message with reduce_transitive_paths operation."""
+        mock_neo4j.execute_query = AsyncMock(return_value=[])
+
+        msg = AgentMessage(
+            source_agent="orchestrator",
+            target_agent="hull_cleaner",
+            intent="hull_cleaner_command",
+            payload={"operation": "reduce_transitive_paths", "dry_run": True},
+            trace_id="test-trace",
+        )
+
+        result = await cleaner.process_message(msg)
+
+        assert result is not None
+        assert result.payload["operation"] == "reduce_transitive_paths"
+        assert result.payload["dry_run"] is True
+
+
+class TestScrapeBarnaclesWithTransitive:
+    """Tests for scrape_barnacles with transitive reduction."""
+
+    @pytest.fixture
+    def mock_neo4j(self):
+        """Create mock Neo4j client."""
+        client = MagicMock()
+        client.execute_query = AsyncMock(return_value=[])
+        return client
+
+    @pytest.fixture
+    def cleaner(self, mock_neo4j):
+        """Create HullCleaner with all rules enabled."""
+        return HullCleaner(neo4j_client=mock_neo4j)
+
+    @pytest.mark.asyncio
+    async def test_scrape_includes_transitive(self, mock_neo4j):
+        """Test scrape_barnacles includes transitive reduction."""
+        # Disable other operations to isolate transitive testing
+        config = HullCleanerConfig(
+            prune_weak_relationships=False,
+            remove_orphan_messages=False,
+            detect_duplicates=False,
+            detect_transitive_redundancy=True,
+        )
+        cleaner = HullCleaner(neo4j_client=mock_neo4j, config=config)
+
+        mock_neo4j.execute_query = AsyncMock(
+            return_value=[
+                {
+                    "source_uuid": "uuid-a",
+                    "intermediate_uuid": "uuid-b",
+                    "target_uuid": "uuid-c",
+                    "source_name": "A",
+                    "intermediate_name": "B",
+                    "target_name": "C",
+                    "relationship_type": "KNOWS",
+                    "direct_weight": 0.9,
+                    "indirect_weight": 0.5,
+                    "redundant_rel_id": 123,
+                }
+            ]
+        )
+
+        result = await cleaner.scrape_barnacles(dry_run=True)
+
+        # Should have found the transitive path
+        assert result.relationships_found == 1
+        assert result.relationships_pruned == 1
+
+    @pytest.mark.asyncio
+    async def test_scrape_with_transitive_disabled(self, mock_neo4j):
+        """Test scrape with transitive detection disabled."""
+        config = HullCleanerConfig(
+            prune_weak_relationships=False,
+            remove_orphan_messages=False,
+            detect_duplicates=False,
+            detect_transitive_redundancy=False,
+        )
+        cleaner = HullCleaner(neo4j_client=mock_neo4j, config=config)
+
+        result = await cleaner.scrape_barnacles(dry_run=True)
+
+        # No operations should be processed
+        assert result.relationships_found == 0
+        assert result.nodes_found == 0
