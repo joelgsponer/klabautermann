@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Telegram channel configuration file (#141)
+  - `config/channels/telegram.yaml` with bot_token, allowed_user_ids, enable_voice
+  - Connection settings (timeout, retries, backoff)
+  - Message handling (max_length, parse_mode, show_typing)
+  - Rate limiting and logging options
 - Channel Manager integration for Officer of the Watch (#67)
   - `AlertSendResult` dataclass for tracking per-channel delivery status
   - `format_alert_for_channel()` method with channel-specific formatting:
