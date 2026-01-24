@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Fix context query function patches to use correct module path with `AsyncMock`
 
 ### Added
+- Transitive redundancy detection for HullCleaner (#86)
+  - `TransitivePath` and `TransitiveResult` dataclasses
+  - `TRANSITIVE_REDUCTION` and `TRANSITIVE_PREVIEW` actions in PruningAction enum
+  - Config options: `detect_transitive_redundancy`, `transitive_weight_threshold`, `max_transitive_per_run`
+  - `find_transitive_paths()` method using Cypher triangle detection
+  - `reduce_transitive_paths()` method with dry_run support
+  - Integrated into `scrape_barnacles()` as step 4
+  - 13 new tests for transitive redundancy detection
 - Persistent audit log storage for HullCleaner maintenance operations (#87)
   - `AuditLog` node type added to ontology with UUID constraint
   - `save_audit_entry()` and `save_audit_entries()` for persisting to Neo4j
