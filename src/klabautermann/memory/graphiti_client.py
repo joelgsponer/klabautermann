@@ -10,6 +10,7 @@ Reference: specs/architecture/MEMORY.md
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,20 @@ from klabautermann.core.ontology import ENTITY_TYPES
 
 if TYPE_CHECKING:
     from graphiti_core import Graphiti
+
+    from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+
+@dataclass
+class TripletResult:
+    """Result of adding a triplet to the graph."""
+
+    source_uuid: str
+    target_uuid: str
+    edge_uuid: str
+    source_name: str
+    target_name: str
+    relationship_type: str
 
 
 class GraphitiClient:
@@ -480,9 +495,147 @@ class GraphitiClient:
             )
             return []
 
+    async def add_triplet_from_extraction(
+        self,
+        source_entity: ExtractedEntity,
+        target_entity: ExtractedEntity,
+        relationship: ExtractedRelationship,
+        group_id: str,
+        trace_id: str | None = None,
+    ) -> TripletResult:
+        """
+        Add a pre-extracted triplet (entity-relationship-entity) to the graph.
+
+        Uses Graphiti's add_triplet() API which:
+        - Creates EntityNode objects with embeddings
+        - Creates EntityEdge with embeddings
+        - Handles temporal properties (valid_at, etc.)
+        - Performs deduplication via embedding similarity
+
+        This is the preferred method for LLM-extracted entities as it ensures
+        proper embedding generation for semantic search.
+
+        Args:
+            source_entity: The source entity from pre-extraction.
+            target_entity: The target entity from pre-extraction.
+            relationship: The relationship connecting them.
+            group_id: Group ID for the triplet (typically captain_uuid).
+            trace_id: Trace ID for logging.
+
+        Returns:
+            TripletResult with UUIDs of created/matched nodes and edge.
+
+        Raises:
+            ExternalServiceError: If Graphiti add_triplet fails.
+        """
+        self._ensure_connected()
+        assert self._client is not None  # Guaranteed by _ensure_connected
+
+        logger.info(
+            f"[CHART] Adding triplet: {source_entity.name} -[{relationship.relationship_type}]-> "
+            f"{target_entity.name}",
+            extra={
+                "trace_id": trace_id,
+                "agent_name": "graphiti",
+                "source": source_entity.name,
+                "target": target_entity.name,
+                "rel_type": relationship.relationship_type,
+            },
+        )
+
+        try:
+            from graphiti_core.edges import EntityEdge
+            from graphiti_core.nodes import EntityNode
+
+            now = datetime.now(tz=UTC)
+
+            # Create source EntityNode
+            source_node = EntityNode(
+                name=source_entity.name,
+                labels=[source_entity.entity_type],
+                summary=source_entity.properties.get(
+                    "summary", f"{source_entity.entity_type}: {source_entity.name}"
+                ),
+                group_id=group_id,
+            )
+
+            # Create target EntityNode
+            target_node = EntityNode(
+                name=target_entity.name,
+                labels=[target_entity.entity_type],
+                summary=target_entity.properties.get(
+                    "summary", f"{target_entity.entity_type}: {target_entity.name}"
+                ),
+                group_id=group_id,
+            )
+
+            # Build fact string for the edge
+            fact = relationship.properties.get(
+                "fact",
+                f"{source_entity.name} {relationship.relationship_type.lower().replace('_', ' ')} "
+                f"{target_entity.name}",
+            )
+
+            # Create EntityEdge
+            edge = EntityEdge(
+                source_node_uuid=source_node.uuid,
+                target_node_uuid=target_node.uuid,
+                name=relationship.relationship_type,
+                fact=fact,
+                group_id=group_id,
+                created_at=now,
+                valid_at=now,
+                episodes=[],
+            )
+
+            # Add triplet to graph (this generates embeddings)
+            result = await self._client.add_triplet(
+                source_node=source_node,
+                edge=edge,
+                target_node=target_node,
+            )
+
+            # Extract UUIDs from result
+            source_uuid = result.nodes[0].uuid if result.nodes else source_node.uuid
+            target_uuid = result.nodes[1].uuid if len(result.nodes) > 1 else target_node.uuid
+            edge_uuid = result.edges[0].uuid if result.edges else edge.uuid
+
+            logger.info(
+                f"[BEACON] Triplet added with embeddings: {source_uuid[:8]}... "
+                f"-[{relationship.relationship_type}]-> {target_uuid[:8]}...",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "graphiti",
+                    "source_uuid": source_uuid,
+                    "target_uuid": target_uuid,
+                    "edge_uuid": edge_uuid,
+                },
+            )
+
+            return TripletResult(
+                source_uuid=source_uuid,
+                target_uuid=target_uuid,
+                edge_uuid=edge_uuid,
+                source_name=source_entity.name,
+                target_name=target_entity.name,
+                relationship_type=relationship.relationship_type,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"[STORM] add_triplet failed: {e}",
+                extra={
+                    "trace_id": trace_id,
+                    "agent_name": "graphiti",
+                    "source": source_entity.name,
+                    "target": target_entity.name,
+                },
+            )
+            raise ExternalServiceError("graphiti", f"add_triplet failed: {e}") from e
+
 
 # ===========================================================================
 # Export
 # ===========================================================================
 
-__all__ = ["GraphitiClient"]
+__all__ = ["GraphitiClient", "TripletResult"]

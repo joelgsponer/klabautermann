@@ -582,3 +582,290 @@ class TestBatchIngestion:
         assert result.total == 1
         assert result.successful == 0
         assert result.failed == 1
+
+
+# ===========================================================================
+# LLM Extraction with Graphiti Embeddings Tests
+# ===========================================================================
+
+
+class TestLLMExtractionWithEmbeddings:
+    """Test suite for LLM extraction path using Graphiti add_triplet."""
+
+    @pytest.fixture
+    def mock_graphiti(self) -> Mock:
+        """Create a mock GraphitiClient with add_triplet support."""
+        mock = Mock()
+        mock.is_connected = True
+        mock.add_episode = AsyncMock()
+
+        # Mock add_triplet_from_extraction to return TripletResult
+        async def mock_add_triplet(
+            source_entity: Mock,
+            target_entity: Mock,
+            relationship: Mock,
+            group_id: str,
+            trace_id: str | None,
+        ) -> Mock:
+            return Mock(
+                source_uuid=f"uuid-{source_entity.name.lower().replace(' ', '-')}",
+                target_uuid=f"uuid-{target_entity.name.lower().replace(' ', '-')}",
+                edge_uuid=f"edge-{relationship.relationship_type.lower()}",
+                source_name=source_entity.name,
+                target_name=target_entity.name,
+                relationship_type=relationship.relationship_type,
+            )
+
+        mock.add_triplet_from_extraction = AsyncMock(side_effect=mock_add_triplet)
+        return mock
+
+    @pytest.fixture
+    def mock_neo4j(self) -> Mock:
+        """Create a mock Neo4jClient."""
+        mock = Mock()
+        mock.execute_query = AsyncMock(return_value=[])
+        return mock
+
+    @pytest.fixture
+    def mock_anthropic(self) -> Mock:
+        """Create a mock Anthropic client."""
+        return Mock()
+
+    @pytest.fixture
+    def mock_merge_engine(self) -> Mock:
+        """Create a mock MergeDecisionEngine."""
+        mock = Mock()
+        # Default to "create" decision
+        mock.decide = AsyncMock(
+            return_value=Mock(action="create", target_uuid=None, properties_to_update=None)
+        )
+        return mock
+
+    @pytest.fixture
+    def ingestor_with_llm(
+        self, mock_graphiti: Mock, mock_neo4j: Mock, mock_merge_engine: Mock
+    ) -> Ingestor:
+        """Create an Ingestor with LLM extraction enabled."""
+        from klabautermann.agents.ingestor import IngestorConfig
+
+        ingestor = Ingestor(
+            name="ingestor",
+            config={},
+            graphiti_client=mock_graphiti,
+            neo4j_client=mock_neo4j,
+            ingestor_config=IngestorConfig(use_llm_extraction=True),
+        )
+        # Inject mock merge engine
+        ingestor.merge_engine = mock_merge_engine
+        return ingestor
+
+    @pytest.mark.asyncio
+    async def test_uses_add_triplet_for_new_entities(
+        self, ingestor_with_llm: Ingestor, mock_graphiti: Mock, mock_merge_engine: Mock
+    ) -> None:
+        """Should use add_triplet when creating new entities with relationships."""
+        from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+        entities = [
+            ExtractedEntity(name="John", entity_type="Person", properties={}),
+            ExtractedEntity(name="Acme Corp", entity_type="Organization", properties={}),
+        ]
+        relationships = [
+            ExtractedRelationship(
+                source_name="John",
+                source_type="Person",
+                relationship_type="WORKS_AT",
+                target_name="Acme Corp",
+                target_type="Organization",
+            )
+        ]
+
+        await ingestor_with_llm._process_with_llm(
+            entities=entities,
+            relationships=relationships,
+            message_uuid="msg-123",
+            trace_id="test-001",
+        )
+
+        # Verify add_triplet was called
+        mock_graphiti.add_triplet_from_extraction.assert_called_once()
+        call_kwargs = mock_graphiti.add_triplet_from_extraction.call_args.kwargs
+        assert call_kwargs["source_entity"].name == "John"
+        assert call_kwargs["target_entity"].name == "Acme Corp"
+        assert call_kwargs["relationship"].relationship_type == "WORKS_AT"
+
+    @pytest.mark.asyncio
+    async def test_skips_standalone_entities(
+        self, ingestor_with_llm: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should skip entities that don't participate in any relationship."""
+        from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+        entities = [
+            ExtractedEntity(name="John", entity_type="Person", properties={}),
+            ExtractedEntity(name="Acme Corp", entity_type="Organization", properties={}),
+            ExtractedEntity(
+                name="Standalone Person", entity_type="Person", properties={}
+            ),  # No relationship
+        ]
+        relationships = [
+            ExtractedRelationship(
+                source_name="John",
+                source_type="Person",
+                relationship_type="WORKS_AT",
+                target_name="Acme Corp",
+                target_type="Organization",
+            )
+        ]
+
+        await ingestor_with_llm._process_with_llm(
+            entities=entities,
+            relationships=relationships,
+            message_uuid="msg-123",
+            trace_id="test-002",
+        )
+
+        # add_triplet should only be called once (for John -> Acme Corp)
+        assert mock_graphiti.add_triplet_from_extraction.call_count == 1
+        # Standalone Person should not be in the call
+        call_kwargs = mock_graphiti.add_triplet_from_extraction.call_args.kwargs
+        assert call_kwargs["source_entity"].name != "Standalone Person"
+        assert call_kwargs["target_entity"].name != "Standalone Person"
+
+    @pytest.mark.asyncio
+    async def test_handles_merge_decisions(
+        self, ingestor_with_llm: Ingestor, mock_graphiti: Mock, mock_neo4j: Mock
+    ) -> None:
+        """Should use update_entity for merge decisions, not add_triplet."""
+        from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+        entities = [
+            ExtractedEntity(name="John", entity_type="Person", properties={"title": "PM"}),
+            ExtractedEntity(name="Acme Corp", entity_type="Organization", properties={}),
+        ]
+        relationships = [
+            ExtractedRelationship(
+                source_name="John",
+                source_type="Person",
+                relationship_type="WORKS_AT",
+                target_name="Acme Corp",
+                target_type="Organization",
+            )
+        ]
+
+        # Configure merge engine to merge John, create Acme
+        call_count = 0
+
+        async def mock_decide(entity: object, candidates: object, trace_id: object) -> Mock:
+            nonlocal call_count
+            call_count += 1
+            if hasattr(entity, "name") and entity.name == "John":  # type: ignore[union-attr]
+                return Mock(
+                    action="merge",
+                    target_uuid="existing-john-uuid",
+                    properties_to_update={"title": "PM"},
+                )
+            return Mock(action="create", target_uuid=None, properties_to_update=None)
+
+        ingestor_with_llm.merge_engine.decide = mock_decide
+
+        await ingestor_with_llm._process_with_llm(
+            entities=entities,
+            relationships=relationships,
+            message_uuid="msg-123",
+            trace_id="test-003",
+        )
+
+        # add_triplet should be called for creating the relationship with new entity
+        mock_graphiti.add_triplet_from_extraction.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_both_merged_uses_direct_relationship(
+        self, ingestor_with_llm: Ingestor, mock_graphiti: Mock, mock_neo4j: Mock
+    ) -> None:
+        """When both entities are merged, should use direct relationship creation."""
+        from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+        entities = [
+            ExtractedEntity(name="John", entity_type="Person", properties={}),
+            ExtractedEntity(name="Acme Corp", entity_type="Organization", properties={}),
+        ]
+        relationships = [
+            ExtractedRelationship(
+                source_name="John",
+                source_type="Person",
+                relationship_type="WORKS_AT",
+                target_name="Acme Corp",
+                target_type="Organization",
+            )
+        ]
+
+        # Configure merge engine to merge both entities
+        async def mock_decide(entity: object, candidates: object, trace_id: object) -> Mock:
+            if hasattr(entity, "name"):
+                if entity.name == "John":  # type: ignore[union-attr]
+                    return Mock(
+                        action="merge",
+                        target_uuid="existing-john-uuid",
+                        properties_to_update=None,
+                    )
+                elif entity.name == "Acme Corp":  # type: ignore[union-attr]
+                    return Mock(
+                        action="merge",
+                        target_uuid="existing-acme-uuid",
+                        properties_to_update=None,
+                    )
+            return Mock(action="create", target_uuid=None, properties_to_update=None)
+
+        ingestor_with_llm.merge_engine.decide = mock_decide
+
+        await ingestor_with_llm._process_with_llm(
+            entities=entities,
+            relationships=relationships,
+            message_uuid="msg-123",
+            trace_id="test-004",
+        )
+
+        # add_triplet should NOT be called when both are merged
+        mock_graphiti.add_triplet_from_extraction.assert_not_called()
+        # Instead, direct relationship creation should happen via execute_query
+        mock_neo4j.execute_query.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_multiple_relationships_creates_multiple_triplets(
+        self, ingestor_with_llm: Ingestor, mock_graphiti: Mock
+    ) -> None:
+        """Should create triplets for each relationship."""
+        from klabautermann.core.validation import ExtractedEntity, ExtractedRelationship
+
+        entities = [
+            ExtractedEntity(name="John", entity_type="Person", properties={}),
+            ExtractedEntity(name="Acme Corp", entity_type="Organization", properties={}),
+            ExtractedEntity(name="Project X", entity_type="Project", properties={}),
+        ]
+        relationships = [
+            ExtractedRelationship(
+                source_name="John",
+                source_type="Person",
+                relationship_type="WORKS_AT",
+                target_name="Acme Corp",
+                target_type="Organization",
+            ),
+            ExtractedRelationship(
+                source_name="Project X",
+                source_type="Project",
+                relationship_type="CONTRIBUTES_TO",
+                target_name="Acme Corp",
+                target_type="Organization",
+            ),
+        ]
+
+        await ingestor_with_llm._process_with_llm(
+            entities=entities,
+            relationships=relationships,
+            message_uuid="msg-123",
+            trace_id="test-005",
+        )
+
+        # Should call add_triplet for each relationship
+        assert mock_graphiti.add_triplet_from_extraction.call_count == 2
