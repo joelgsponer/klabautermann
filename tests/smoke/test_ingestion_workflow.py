@@ -229,5 +229,6 @@ class TestTaskPlanningPromptSchema:
 
     def test_prompt_includes_execute_payload_schema(self) -> None:
         """TASK_PLANNING_PROMPT documents execute payload format."""
-        assert "execute tasks:" in Orchestrator.TASK_PLANNING_PROMPT.lower()
+        # Prompt now uses "execute tasks (email):" and "execute tasks (calendar_list):"
+        assert "execute tasks" in Orchestrator.TASK_PLANNING_PROMPT.lower()
         assert '"action_type"' in Orchestrator.TASK_PLANNING_PROMPT

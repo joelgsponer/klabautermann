@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="post-date" content="2026-01-26">
+    <meta name="post-category" content="refactor,agents">
+    <meta name="post-slug" content="bard-owns-the-voice">
+    <meta name="post-excerpt" content="The Bard is now the sole owner of Klabautermann's nautical voice. LLM-powered personality rewriting, storm mode detection, and channel formatting - all in one place.">
+    <title>The Bard Finds Its Voice | Ship's Log</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container">
+            <a href="../index.html" class="back-link">&larr; Back to Ship's Log</a>
+        </div>
+    </header>
+
+    <article class="post">
+        <header class="post-header">
+            <div class="container">
+                <div class="post-meta">
+                    <time datetime="2026-01-26">January 26, 2026</time>
+                    <div class="post-categories">
+                        <span class="category-tag">refactor</span>
+                        <span class="category-tag">agents</span>
+                    </div>
+                </div>
+                <h1 class="post-title">The Bard Finds Its Voice</h1>
+            </div>
+        </header>
+
+        <main class="post-body">
+            <div class="container">
+                <p>Every ship needs one voice, not a chorus. Today the Bard of the Bilge became the sole owner of Klabautermann's personality.</p>
+
+                <h2>The Problem: Personality Scattered Across the Deck</h2>
+                <p>Personality was everywhere and nowhere. The Orchestrator's SYSTEM_PROMPT contained nautical lexicon guidelines. Storm mode detection lived in the Orchestrator. The Bard only added tidbits 7% of the time.</p>
+                <p>Three problems:</p>
+                <ul>
+                    <li>Inconsistent voice - different prompts, different tones</li>
+                    <li>Hard to maintain - change personality meant touching multiple files</li>
+                    <li>Channel-agnostic - same output for CLI, Telegram, and API</li>
+                </ul>
+
+                <h2>The Solution: Single Owner</h2>
+                <p>The Bard is now responsible for everything presentation:</p>
+
+                <pre><code># Before: Orchestrator handled personality
+response = "Found Sarah in the database. She works at Acme."
+# That's it. Functional. Sterile.
+
+# After: Bard transforms with personality
+result = await bard.apply_personality(
+    clean_response="Found Sarah in the database. She works at Acme.",
+    channel="telegram",
+    trace_id="trace-123"
+)
+
+# "Scouted the horizon and found Sarah in The Locker.
+#  She's sailing with Acme these days.
+#  _Reminds me of the time I navigated the Great Maelstrom..."</code></pre>
+
+                <h2>LLM-Powered Voice</h2>
+                <p>The Bard now uses Haiku for personality rewriting. Not just appending tidbits - actually transforming the response:</p>
+
+                <pre><code>PERSONALITY_PROMPT = """You are the voice of Klabautermann...
+
+PERSONALITY TRAITS:
+- Efficient: Answer the question first, nautical color second
+- Witty: Dry humor, never slapstick
+- Knowledgeable: Quiet confidence
+- Humble: Admit when you don't know
+
+NAUTICAL LEXICON (use naturally, never forced):
+- Database/memory → "The Locker"
+- Search → "Scout the horizon"
+- Task list → "The Manifest"
+- Error → "Rough waters"
+
+VOICE GUIDELINES:
+- NEVER use "Arrr", "Matey", "Shiver me timbers"
+- Nautical metaphors should feel natural
+...
+
+Rewrite this response with personality:
+{response}"""</code></pre>
+
+                <p>Temperature 0.8 for variety. Haiku for speed. Natural variety in every response.</p>
+
+                <h2>Storm Mode: When to Shut Up</h2>
+                <p>Sometimes the Captain needs facts, not flavor. Storm mode detection moved from Orchestrator to Bard:</p>
+
+                <pre><code>STORM_KEYWORDS = ["urgent", "emergency", "critical", "asap", "immediately", "crisis"]
+
+def _detect_storm_mode(self, text: str) -> bool:
+    if not self.bard_config.storm_mode_enabled:
+        return False
+    text_lower = text.lower()
+    return any(kw in text_lower for kw in self.bard_config.storm_keywords)
+
+# Storm mode active:
+# Input: "URGENT: Server down!"
+# Output: "URGENT: Server down!"  (no personality, no tidbits)</code></pre>
+
+                <p>When the seas are rough, the Bard stays silent.</p>
+
+                <h2>Channel-Aware Formatting</h2>
+                <p>Different channels need different formatting:</p>
+
+                <pre><code>def format_for_channel(self, response: str, channel: str | None) -> str:
+    if channel == "telegram":
+        # Keep markdown formatting
+        return response
+    if channel == "cli":
+        # Plain text
+        return response
+    if channel == "api":
+        # Clean, no formatting
+        return response
+    return response</code></pre>
+
+                <p>The foundation is laid. Future enhancements: ASCII art headers for CLI, proper Markdown escaping for Telegram.</p>
+
+                <h2>The New Flow</h2>
+
+                <pre><code>User Input
+    ↓
+Orchestrator (clean functional response)
+    ↓
+Bard.apply_personality()
+    ├─ 1. Auto-detect storm mode
+    ├─ 2. LLM rewrite with Haiku (if not storm)
+    ├─ 3. Add tidbits (7% chance)
+    └─ 4. Format for channel
+    ↓
+Final response to user</code></pre>
+
+                <h2>PersonalityResult</h2>
+                <p>The Bard returns a structured result:</p>
+
+                <pre><code>@dataclass
+class PersonalityResult:
+    original_response: str
+    final_response: str
+    personality_applied: bool
+    storm_mode: bool = False
+    tidbit_added: bool = False
+    tidbit: str | None = None
+    saga_id: str | None = None
+    channel: str | None = None
+    llm_rewrite_used: bool = False</code></pre>
+
+                <p>The Orchestrator knows exactly what happened. Logging is comprehensive. Debugging is straightforward.</p>
+
+                <h2>Stripped from the Orchestrator</h2>
+                <p>The Orchestrator's SYSTEM_PROMPT went on a diet:</p>
+
+                <pre><code># Before
+PERSONALITY:
+- You are a salty, efficient helper
+- Use "The Locker" for database
+- Be witty but never annoying
+...
+
+# After
+RESPONSE STYLE:
+- Produce clean, factual responses
+- The Bard agent will add personality</code></pre>
+
+                <p>The Orchestrator now produces clean functional output. The Bard transforms it. Single responsibility. Clear ownership.</p>
+
+                <h2>Configuration</h2>
+                <p>Everything configurable in <code>bard.yaml</code>:</p>
+
+                <pre><code>personality:
+  enabled: true
+  model: claude-3-5-haiku-20241022
+  temperature: 0.8
+  max_tokens: 1024
+
+storm_mode:
+  enabled: true
+  keywords:
+    - urgent
+    - emergency
+    - critical
+    - asap
+    - immediately
+    - crisis
+
+channels:
+  cli:
+    format: plain
+  telegram:
+    format: markdown
+  api:
+    format: raw</code></pre>
+
+                <h2>Tests</h2>
+                <p>126 tests pass. New coverage for:</p>
+                <ul>
+                    <li><code>apply_personality()</code> - main entry point</li>
+                    <li><code>_detect_storm_mode()</code> - storm keyword detection</li>
+                    <li><code>format_for_channel()</code> - channel formatting</li>
+                    <li><code>PersonalityResult</code> - structured output</li>
+                    <li>Orchestrator delegation - clean handoff to Bard</li>
+                </ul>
+
+                <h2>What Changed</h2>
+                <table>
+                    <tr><th>File</th><th>Change</th></tr>
+                    <tr><td><code>bard.py</code></td><td>+200 lines: LLM rewriting, storm mode, channel formatting</td></tr>
+                    <tr><td><code>prompts.py</code></td><td>Removed personality section</td></tr>
+                    <tr><td><code>_orchestrator.py</code></td><td>Simplified _apply_personality() to delegate</td></tr>
+                    <tr><td><code>bard.yaml</code></td><td>Added personality, storm, channel config</td></tr>
+                    <tr><td><code>orchestrator.yaml</code></td><td>Removed wit_level, personality section</td></tr>
+                </table>
+
+                <p>One voice. One owner. The Bard of the Bilge has found its role.</p>
+
+                <p><em>The sea teaches patience. So does refactoring personality systems, I've found.</em></p>
+            </div>
+        </main>
+    </article>
+
+    <footer class="site-footer">
+        <div class="container">
+            <a href="../index.html">&larr; Back to Ship's Log</a>
+        </div>
+    </footer>
+</body>
+</html>

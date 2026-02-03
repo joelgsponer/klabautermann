@@ -2336,3 +2336,315 @@ class TestArchiveTimedOutSagasWithSummary:
         assert archived[0]["saga_id"] == "old-saga-1"
         assert archived[0]["note_uuid"] is not None  # UUID is generated internally
         assert "summary" in archived[0]
+
+
+# =============================================================================
+# Storm Mode Detection Tests (Bard as sole owner)
+# =============================================================================
+
+
+class TestStormModeDetection:
+    """Tests for storm mode detection in Bard."""
+
+    def test_detect_storm_mode_with_urgent_keyword(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should detect storm mode when urgent keywords present."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        assert bard._detect_storm_mode("This is an urgent matter") is True
+        assert bard._detect_storm_mode("EMERGENCY: System down") is True
+        assert bard._detect_storm_mode("Critical issue detected") is True
+        assert bard._detect_storm_mode("Need this ASAP") is True
+
+    def test_detect_storm_mode_without_keywords(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should not detect storm mode when no urgent keywords."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        assert bard._detect_storm_mode("Hello, how are you?") is False
+        assert bard._detect_storm_mode("What do you know about Sarah?") is False
+        assert bard._detect_storm_mode("Please remind me about the meeting") is False
+
+    def test_detect_storm_mode_disabled(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """Should not detect storm mode when disabled in config."""
+        config = BardConfig(storm_mode_enabled=False)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        # Even with urgent keywords, should return False when disabled
+        assert bard._detect_storm_mode("This is URGENT!") is False
+
+    def test_detect_storm_mode_custom_keywords(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should use custom storm keywords from config."""
+        config = BardConfig(storm_keywords=["fire", "alert"])
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        assert bard._detect_storm_mode("Fire alarm triggered") is True
+        assert bard._detect_storm_mode("Alert: Server down") is True
+        # Default keywords should not trigger
+        assert bard._detect_storm_mode("This is urgent") is False
+
+
+# =============================================================================
+# PersonalityResult Model Tests
+# =============================================================================
+
+
+class TestPersonalityResultModel:
+    """Tests for PersonalityResult dataclass."""
+
+    def test_personality_result_to_dict(self) -> None:
+        """PersonalityResult should serialize to dict."""
+        from klabautermann.agents.bard import PersonalityResult
+
+        result = PersonalityResult(
+            original_response="Hello",
+            final_response="Ahoy, Captain!",
+            personality_applied=True,
+            storm_mode=False,
+            tidbit_added=True,
+            tidbit="A wise tidbit",
+            saga_id="saga-123",
+            chapter=2,
+            channel="telegram",
+            llm_rewrite_used=True,
+        )
+
+        d = result.to_dict()
+
+        assert d["personality_applied"] is True
+        assert d["storm_mode"] is False
+        assert d["tidbit_added"] is True
+        assert d["tidbit"] == "A wise tidbit"
+        assert d["saga_id"] == "saga-123"
+        assert d["chapter"] == 2
+        assert d["channel"] == "telegram"
+        assert d["llm_rewrite_used"] is True
+
+    def test_personality_result_storm_mode(self) -> None:
+        """PersonalityResult should track storm mode."""
+        from klabautermann.agents.bard import PersonalityResult
+
+        result = PersonalityResult(
+            original_response="Urgent alert",
+            final_response="Urgent alert",
+            personality_applied=False,
+            storm_mode=True,
+        )
+
+        assert result.personality_applied is False
+        assert result.storm_mode is True
+        assert result.final_response == result.original_response
+
+
+# =============================================================================
+# Channel Formatting Tests
+# =============================================================================
+
+
+class TestChannelFormatting:
+    """Tests for format_for_channel method."""
+
+    def test_format_for_cli(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """CLI should get plain text."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        response = "Hello, _Captain_!"
+        formatted = bard.format_for_channel(response, channel="cli")
+
+        # CLI passes through as-is
+        assert formatted == response
+
+    def test_format_for_telegram(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """Telegram should get markdown formatting."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        response = "Hello, _Captain_!"
+        formatted = bard.format_for_channel(response, channel="telegram")
+
+        # Telegram passes through markdown
+        assert formatted == response
+
+    def test_format_for_api(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """API should get clean text."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        response = "Hello, Captain!"
+        formatted = bard.format_for_channel(response, channel="api")
+
+        assert formatted == response
+
+    def test_format_for_none_channel(self, mock_neo4j: MagicMock, captain_uuid: str) -> None:
+        """None channel should pass through."""
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid)
+
+        response = "Hello!"
+        formatted = bard.format_for_channel(response, channel=None)
+
+        assert formatted == response
+
+
+# =============================================================================
+# Apply Personality Tests (Main Entry Point)
+# =============================================================================
+
+
+class TestApplyPersonality:
+    """Tests for apply_personality method."""
+
+    @pytest.mark.asyncio
+    async def test_apply_personality_storm_mode_skips_rewrite(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Storm mode should skip personality rewriting."""
+        config = BardConfig(personality_rewrite_enabled=True)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        result = await bard.apply_personality(
+            clean_response="URGENT: Server is down!",
+            trace_id="test-storm",
+        )
+
+        assert result.storm_mode is True
+        assert result.personality_applied is False
+        assert result.llm_rewrite_used is False
+        # Response should be unchanged
+        assert result.final_response == "URGENT: Server is down!"
+
+    @pytest.mark.asyncio
+    async def test_apply_personality_explicit_storm_mode(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Explicit storm_mode=True should skip personality."""
+        config = BardConfig(personality_rewrite_enabled=True)
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        result = await bard.apply_personality(
+            clean_response="Hello there!",  # No storm keywords
+            storm_mode=True,  # Explicit override
+            trace_id="test-explicit-storm",
+        )
+
+        assert result.storm_mode is True
+        assert result.personality_applied is False
+
+    @pytest.mark.asyncio
+    async def test_apply_personality_passes_channel(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should pass channel to formatting."""
+        config = BardConfig(
+            personality_rewrite_enabled=False,  # Disable LLM rewrite for test simplicity
+            tidbit_probability=0,  # Disable tidbits
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+
+        result = await bard.apply_personality(
+            clean_response="Hello!",
+            channel="telegram",
+            trace_id="test-channel",
+        )
+
+        assert result.channel == "telegram"
+        assert result.personality_applied is True
+
+    @pytest.mark.asyncio
+    async def test_apply_personality_llm_disabled(
+        self, mock_neo4j: MagicMock, captain_uuid: str
+    ) -> None:
+        """Should skip LLM rewrite when disabled."""
+        config = BardConfig(
+            personality_rewrite_enabled=False,
+            tidbit_probability=0,
+        )
+        bard = BardOfTheBilge(neo4j_client=mock_neo4j, captain_uuid=captain_uuid, config=config)
+        mock_neo4j.execute_query.return_value = []
+
+        result = await bard.apply_personality(
+            clean_response="Hello there!",
+            trace_id="test-no-llm",
+        )
+
+        assert result.llm_rewrite_used is False
+        assert result.personality_applied is True  # Still applies (via salt_response)
+
+
+# =============================================================================
+# Bard Config New Fields Tests
+# =============================================================================
+
+
+class TestBardConfigNewFields:
+    """Tests for new BardConfig fields."""
+
+    def test_default_personality_config(self) -> None:
+        """Default personality config should be set."""
+        config = BardConfig()
+
+        assert config.personality_rewrite_enabled is True
+        assert config.personality_model == "claude-3-5-haiku-20241022"
+        assert config.personality_temperature == 0.8
+        assert config.personality_max_tokens == 1024
+
+    def test_default_storm_config(self) -> None:
+        """Default storm mode config should be set."""
+        config = BardConfig()
+
+        assert config.storm_mode_enabled is True
+        assert "urgent" in config.storm_keywords
+        assert "emergency" in config.storm_keywords
+        assert "critical" in config.storm_keywords
+
+    def test_custom_personality_config(self) -> None:
+        """Should accept custom personality config."""
+        config = BardConfig(
+            personality_rewrite_enabled=False,
+            personality_model="claude-3-opus-20240229",
+            personality_temperature=0.5,
+            personality_max_tokens=512,
+        )
+
+        assert config.personality_rewrite_enabled is False
+        assert config.personality_model == "claude-3-opus-20240229"
+        assert config.personality_temperature == 0.5
+        assert config.personality_max_tokens == 512
+
+    def test_custom_storm_config(self) -> None:
+        """Should accept custom storm mode config."""
+        config = BardConfig(
+            storm_mode_enabled=False,
+            storm_keywords=["danger", "alert"],
+        )
+
+        assert config.storm_mode_enabled is False
+        assert config.storm_keywords == ["danger", "alert"]
+
+
+# =============================================================================
+# Export Tests for New Items
+# =============================================================================
+
+
+class TestNewExports:
+    """Tests for new module exports."""
+
+    def test_personality_result_exported(self) -> None:
+        """PersonalityResult should be in __all__."""
+        from klabautermann.agents.bard import __all__
+
+        assert "PersonalityResult" in __all__
+
+    def test_personality_prompt_exported(self) -> None:
+        """PERSONALITY_PROMPT should be in __all__."""
+        from klabautermann.agents.bard import __all__
+
+        assert "PERSONALITY_PROMPT" in __all__
+
+    def test_storm_keywords_exported(self) -> None:
+        """STORM_KEYWORDS should be in __all__."""
+        from klabautermann.agents.bard import __all__
+
+        assert "STORM_KEYWORDS" in __all__

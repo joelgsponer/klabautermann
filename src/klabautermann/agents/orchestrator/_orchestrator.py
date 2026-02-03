@@ -1262,85 +1262,64 @@ class Orchestrator(BaseAgent):
             },
         }
 
-    def _detect_storm_mode(self, response: str) -> bool:
-        """
-        Detect if response should be in "storm mode" (urgent, no tidbits).
-
-        Args:
-            response: Response text to analyze.
-
-        Returns:
-            True if storm mode should be active.
-        """
-        storm_config = self._bard_config.get("storm_mode", {})
-        if not storm_config.get("enabled", True):
-            return False
-
-        keywords = storm_config.get("keywords", ["urgent", "emergency", "critical", "asap"])
-        response_lower = response.lower()
-        return any(keyword.lower() in response_lower for keyword in keywords)
-
     async def _apply_personality(
         self,
         response: str,
         trace_id: str,
+        channel: str | None = None,
     ) -> str:
         """
-        Apply Klabautermann personality formatting to response.
+        Delegate personality transformation to the Bard agent.
 
-        Invokes the Bard for response "salting" with nautical flair.
-        The Bard may add tidbits or continue sagas based on probability
-        and configuration.
+        The Bard is the sole owner of voice/personality. It handles:
+        - LLM-based personality rewriting (nautical voice)
+        - Storm mode detection (skip personality for urgent responses)
+        - Tidbit/saga management
+        - Channel-specific formatting
 
         Args:
-            response: Raw response text.
+            response: Clean, functional response text.
             trace_id: Request trace ID.
+            channel: Optional channel type for formatting ("cli", "telegram", "api").
 
         Returns:
-            Response with personality applied (possibly with tidbit).
+            Response with personality applied by the Bard.
         """
         # If Bard is not initialized, pass through
         if self._bard is None:
             logger.debug(
-                "[WHISPER] Personality applied (pass-through, no Bard)",
+                "[WHISPER] Personality pass-through (no Bard)",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
             return response
 
-        # Check storm mode - no tidbits during urgent responses
-        storm_mode = self._detect_storm_mode(response)
-
         try:
-            # Invoke the Bard for response salting
-            salt_result = await self._bard.salt_response(
+            # Delegate entirely to Bard for personality transformation
+            personality_result = await self._bard.apply_personality(
                 clean_response=response,
-                storm_mode=storm_mode,
+                channel=channel,
                 trace_id=trace_id,
             )
 
-            if salt_result.tidbit_added:
+            if personality_result.personality_applied:
                 logger.info(
-                    f"[BEACON] Bard added tidbit (saga={salt_result.saga_id or 'standalone'})",
+                    "[BEACON] Bard applied personality",
                     extra={
                         "trace_id": trace_id,
                         "agent_name": self.name,
-                        "tidbit_added": True,
-                        "is_continuation": salt_result.is_continuation,
-                        "chapter": salt_result.chapter,
+                        "llm_rewrite": personality_result.llm_rewrite_used,
+                        "tidbit_added": personality_result.tidbit_added,
+                        "storm_mode": personality_result.storm_mode,
+                        "channel": channel,
                     },
                 )
-                return salt_result.salted_response
 
-            logger.debug(
-                "[WHISPER] Personality applied (Bard skipped tidbit)",
-                extra={"trace_id": trace_id, "agent_name": self.name},
-            )
-            return response
+            return personality_result.final_response
 
         except Exception as e:
             # Log error but don't fail the response
             logger.warning(
-                f"[SWELL] Bard error, using unsalted response: {e}",
+                f"[SWELL] Bard error, using clean response: {e}",
                 extra={"trace_id": trace_id, "agent_name": self.name},
             )
             return response
@@ -2329,6 +2308,36 @@ Analyze this message and return a JSON task plan.
             trace_id = str(uuid.uuid4())
 
         start_time = time.time()
+
+        # Ensure thread exists if thread_uuid looks like an external_id fallback
+        # (e.g., "telegram-6856676378" instead of a proper UUID)
+        if self.thread_manager and "-" in thread_uuid:
+            try:
+                # Check if this looks like a UUID (36 chars with hyphens in right places)
+                is_uuid = (
+                    len(thread_uuid) == 36 and thread_uuid[8] == "-" and thread_uuid[13] == "-"
+                )
+                if not is_uuid:
+                    # This is likely an external_id fallback, try to create the thread
+                    parts = thread_uuid.split("-", 1)
+                    channel_type = parts[0]
+                    external_id = parts[1] if len(parts) > 1 else thread_uuid
+                    thread_node = await self.thread_manager.get_or_create_thread(
+                        external_id=external_id,
+                        channel_type=channel_type,
+                        trace_id=trace_id,
+                    )
+                    thread_uuid = thread_node.uuid
+                    logger.info(
+                        f"[BEACON] Created thread in v2 workflow: {thread_uuid[:8]}...",
+                        extra={"trace_id": trace_id, "agent_name": self.name},
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"[SWELL] Could not ensure thread exists: {e}",
+                    extra={"trace_id": trace_id, "agent_name": self.name},
+                )
+
         logger.info(
             "[CHART] Starting v2 workflow",
             extra={

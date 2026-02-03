@@ -18,6 +18,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import anthropic
+
 from klabautermann.agents.base_agent import BaseAgent
 from klabautermann.core.logger import logger
 from klabautermann.core.models import AgentMessage
@@ -25,6 +27,52 @@ from klabautermann.core.models import AgentMessage
 
 if TYPE_CHECKING:
     from klabautermann.memory.neo4j_client import Neo4jClient
+
+
+# =============================================================================
+# Personality Prompt (Bard is sole owner of voice/personality)
+# =============================================================================
+
+PERSONALITY_PROMPT: str = """You are the voice of Klabautermann, a ship's spirit who helps the Captain navigate digital seas.
+
+PERSONALITY TRAITS:
+- Efficient: Answer the question first, add nautical color second
+- Witty: Dry humor, understated wit - never slapstick or over-the-top
+- Knowledgeable: Quiet confidence, you've seen these waters before
+- Protective: Warn proactively about rough waters ahead
+- Humble: Admit when you don't know something
+
+NAUTICAL LEXICON (use naturally, never forced):
+- Database/memory → "The Locker"
+- Search → "Scout the horizon"
+- Task list → "The Manifest"
+- Calendar → "The Charts"
+- Error/problem → "Rough waters"
+- Delete → "Walk the plank"
+- New information → "Fresh cargo"
+- User → "Captain"
+
+VOICE GUIDELINES:
+- NEVER use pirate clichés: "Arrr", "Matey", "Shiver me timbers", "Ahoy"
+- Nautical metaphors should feel natural, not forced or performative
+- Maintain the factual content exactly - only change presentation
+- Keep responses concise; personality enhances, not inflates
+- When in doubt, prefer understated over theatrical
+
+STORM MODE (when urgent keywords detected):
+- Be terse and direct - no nautical flourishes
+- Focus entirely on the information, skip the personality
+- Urgent situations need clarity, not character
+
+Rewrite the following response with personality while preserving ALL factual content exactly:
+
+ORIGINAL RESPONSE:
+{response}
+
+REWRITTEN RESPONSE:"""
+
+
+STORM_KEYWORDS: list[str] = ["urgent", "emergency", "critical", "asap", "immediately", "crisis"]
 
 
 # =============================================================================
@@ -54,7 +102,7 @@ class SagaLimitReachedError(SagaLifecycleError):
         self.max_active = max_active
         self.active_names = active_names
         super().__init__(
-            f"Maximum {max_active} active sagas reached. " f"Active: {', '.join(active_names)}"
+            f"Maximum {max_active} active sagas reached. Active: {', '.join(active_names)}"
         )
 
 
@@ -222,6 +270,16 @@ class BardConfig:
     # Query limits
     default_query_limit: int = 10
 
+    # LLM Personality Rewriting
+    personality_rewrite_enabled: bool = True
+    personality_model: str = "claude-3-5-haiku-20241022"
+    personality_temperature: float = 0.8
+    personality_max_tokens: int = 1024
+
+    # Storm mode configuration
+    storm_mode_enabled: bool = True
+    storm_keywords: list[str] = field(default_factory=lambda: STORM_KEYWORDS.copy())
+
 
 @dataclass
 class LoreEpisode:
@@ -287,6 +345,35 @@ class SaltResult:
 
 
 @dataclass
+class PersonalityResult:
+    """Result of applying personality to a response."""
+
+    original_response: str
+    final_response: str
+    personality_applied: bool
+    storm_mode: bool = False
+    tidbit_added: bool = False
+    tidbit: str | None = None
+    saga_id: str | None = None
+    chapter: int | None = None
+    channel: str | None = None
+    llm_rewrite_used: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "personality_applied": self.personality_applied,
+            "storm_mode": self.storm_mode,
+            "tidbit_added": self.tidbit_added,
+            "tidbit": self.tidbit,
+            "saga_id": self.saga_id,
+            "chapter": self.chapter,
+            "channel": self.channel,
+            "llm_rewrite_used": self.llm_rewrite_used,
+        }
+
+
+@dataclass
 class ActiveSaga:
     """Information about an active (unfinished) saga."""
 
@@ -341,11 +428,14 @@ def generate_saga_name() -> str:
 
 class BardOfTheBilge(BaseAgent):
     """
-    The keeper of Klabautermann's mythology.
+    The keeper of Klabautermann's mythology and sole owner of personality/voice.
 
-    The Bard generates short, evocative story fragments ("tidbits") that add
-    flavor to responses. It can continue ongoing sagas across multiple
-    conversations, tracking them via the LoreEpisode graph.
+    The Bard is responsible for:
+    1. LLM-based personality rewriting (nautical voice via Haiku)
+    2. Tidbit generation (short story fragments)
+    3. Saga management (multi-chapter narratives)
+    4. Storm mode detection (skip personality for urgent responses)
+    5. Channel-specific formatting (Telegram markdown, CLI plain text)
 
     Story Guidelines:
         - Keep tidbits to 1-2 sentences maximum
@@ -377,6 +467,16 @@ class BardOfTheBilge(BaseAgent):
         self.neo4j = neo4j_client
         self.captain_uuid = captain_uuid
         self.bard_config = config or BardConfig()
+
+        # LLM client for personality rewriting (lazy initialization)
+        self._anthropic: anthropic.AsyncAnthropic | None = None
+
+    @property
+    def anthropic_client(self) -> anthropic.AsyncAnthropic:
+        """Lazy-initialize Anthropic client."""
+        if self._anthropic is None:
+            self._anthropic = anthropic.AsyncAnthropic()
+        return self._anthropic
 
     async def process_message(self, msg: AgentMessage) -> AgentMessage | None:
         """
@@ -696,6 +796,197 @@ class BardOfTheBilge(BaseAgent):
             salted_response=salted,
             tidbit_added=True,
             tidbit=tidbit,
+        )
+
+    # =========================================================================
+    # Personality & Storm Mode (Bard is sole owner of voice/personality)
+    # =========================================================================
+
+    def _detect_storm_mode(self, text: str) -> bool:
+        """
+        Detect if response should be in "storm mode" (urgent, no personality).
+
+        When storm mode is active, the Bard skips personality rewriting and tidbits
+        to provide terse, direct responses for urgent situations.
+
+        Args:
+            text: Text to analyze for storm keywords.
+
+        Returns:
+            True if storm mode should be active.
+        """
+        if not self.bard_config.storm_mode_enabled:
+            return False
+
+        keywords = self.bard_config.storm_keywords
+        text_lower = text.lower()
+        return any(keyword.lower() in text_lower for keyword in keywords)
+
+    async def _rewrite_with_personality(
+        self,
+        response: str,
+        trace_id: str | None = None,
+    ) -> str:
+        """
+        Use LLM (Haiku) to rewrite response with nautical personality.
+
+        Args:
+            response: Clean response text to rewrite.
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            Response rewritten with personality.
+        """
+        if not self.bard_config.personality_rewrite_enabled:
+            return response
+
+        prompt = PERSONALITY_PROMPT.format(response=response)
+
+        try:
+            logger.debug(
+                "[WHISPER] Calling LLM for personality rewrite",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            llm_response = await self.anthropic_client.messages.create(
+                model=self.bard_config.personality_model,
+                max_tokens=self.bard_config.personality_max_tokens,
+                temperature=self.bard_config.personality_temperature,
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            rewritten: str = str(llm_response.content[0].text).strip()
+
+            logger.debug(
+                "[WHISPER] LLM personality rewrite complete",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+
+            return rewritten
+
+        except Exception as e:
+            # Log error but fall back to original response
+            logger.warning(
+                f"[SWELL] LLM personality rewrite failed, using original: {e}",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            return response
+
+    def format_for_channel(
+        self,
+        response: str,
+        channel: str | None = None,
+    ) -> str:
+        """
+        Apply channel-specific formatting to response.
+
+        Args:
+            response: Response text to format.
+            channel: Channel type ("cli", "telegram", "api").
+
+        Returns:
+            Response with channel-appropriate formatting.
+        """
+        if channel is None or channel == "api":
+            # API gets clean text, no formatting
+            return response
+
+        if channel == "telegram":
+            # Telegram supports Markdown - ensure proper escaping
+            # Tidbits are already wrapped in _italics_
+            return response
+
+        if channel == "cli":
+            # CLI gets plain text, no special formatting needed
+            return response
+
+        # Unknown channel, pass through
+        return response
+
+    async def apply_personality(
+        self,
+        clean_response: str,
+        storm_mode: bool | None = None,
+        channel: str | None = None,
+        trace_id: str | None = None,
+    ) -> PersonalityResult:
+        """
+        Apply Klabautermann personality to a clean response.
+
+        This is the main entry point for personality transformation.
+        The Bard:
+        1. Detects storm mode (or uses provided value)
+        2. Rewrites response with nautical personality via LLM (unless storm mode)
+        3. Optionally adds tidbits via salt_response
+        4. Applies channel-specific formatting
+
+        Args:
+            clean_response: Functional response text from Orchestrator.
+            storm_mode: Override storm mode detection (if None, auto-detect).
+            channel: Channel type for formatting ("cli", "telegram", "api").
+            trace_id: Optional trace ID for logging.
+
+        Returns:
+            PersonalityResult with the transformed response.
+        """
+        # Auto-detect storm mode if not provided
+        if storm_mode is None:
+            storm_mode = self._detect_storm_mode(clean_response)
+
+        # Storm mode: return clean response without personality
+        if storm_mode:
+            logger.debug(
+                "[WHISPER] Storm mode active, skipping personality",
+                extra={"trace_id": trace_id, "agent_name": self.name},
+            )
+            final_response = self.format_for_channel(clean_response, channel)
+            return PersonalityResult(
+                original_response=clean_response,
+                final_response=final_response,
+                personality_applied=False,
+                storm_mode=True,
+                channel=channel,
+            )
+
+        # Step 1: Rewrite with LLM personality
+        personality_response = await self._rewrite_with_personality(
+            clean_response, trace_id=trace_id
+        )
+        llm_rewrite_used = personality_response != clean_response
+
+        # Step 2: Apply tidbit salting (7% chance)
+        salt_result = await self.salt_response(
+            clean_response=personality_response,
+            storm_mode=False,  # Already checked above
+            channel=channel,
+            trace_id=trace_id,
+        )
+
+        # Step 3: Apply channel formatting
+        final_response = self.format_for_channel(salt_result.salted_response, channel)
+
+        logger.info(
+            "[BEACON] Personality applied to response",
+            extra={
+                "trace_id": trace_id,
+                "agent_name": self.name,
+                "llm_rewrite": llm_rewrite_used,
+                "tidbit_added": salt_result.tidbit_added,
+                "channel": channel,
+            },
+        )
+
+        return PersonalityResult(
+            original_response=clean_response,
+            final_response=final_response,
+            personality_applied=True,
+            storm_mode=False,
+            tidbit_added=salt_result.tidbit_added,
+            tidbit=salt_result.tidbit,
+            saga_id=salt_result.saga_id,
+            chapter=salt_result.chapter,
+            channel=channel,
+            llm_rewrite_used=llm_rewrite_used,
         )
 
     # =========================================================================
@@ -1756,13 +2047,16 @@ class BardOfTheBilge(BaseAgent):
 
 __all__ = [
     "CANONICAL_TIDBITS",
+    "PERSONALITY_PROMPT",
     "SAGA_TIDBITS",
     "STANDALONE_TIDBITS",
+    "STORM_KEYWORDS",
     "ActiveSaga",
     "BardConfig",
     "BardOfTheBilge",
     "ChapterTooSoonError",
     "LoreEpisode",
+    "PersonalityResult",
     "SagaCompleteError",
     "SagaLifecycleError",
     "SagaLimitReachedError",

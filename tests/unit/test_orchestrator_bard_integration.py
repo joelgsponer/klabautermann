@@ -1,14 +1,15 @@
 """
 Unit tests for Orchestrator Bard integration (#109).
 
-Tests the salt_response integration in _apply_personality method.
+Tests the apply_personality integration where Orchestrator delegates
+personality/voice handling entirely to the Bard agent.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from klabautermann.agents.bard import BardOfTheBilge, SaltResult
+from klabautermann.agents.bard import BardOfTheBilge, PersonalityResult
 from klabautermann.agents.orchestrator import Orchestrator
 
 
@@ -58,57 +59,59 @@ class TestOrchestratorBardIntegration:
         assert "bard" not in orchestrator_without_bard._agent_registry
 
     @pytest.mark.asyncio
-    async def test_apply_personality_with_bard_adds_tidbit(
+    async def test_apply_personality_delegates_to_bard(
         self, orchestrator_with_bard: Orchestrator
     ) -> None:
-        """_apply_personality calls Bard and adds tidbit when probability hits."""
-        salt_result = SaltResult(
+        """_apply_personality delegates to Bard's apply_personality method."""
+        personality_result = PersonalityResult(
             original_response="Hello",
-            salted_response="Hello\n\n_A tale from the sea..._",
+            final_response="Ahoy, Captain! Hello.\n\n_A tale from the sea..._",
+            personality_applied=True,
             tidbit_added=True,
             tidbit="A tale from the sea...",
-            saga_id=None,
-            chapter=None,
-            is_continuation=False,
+            llm_rewrite_used=True,
         )
 
         with patch.object(
             orchestrator_with_bard._bard,
-            "salt_response",
+            "apply_personality",
             new_callable=AsyncMock,
-            return_value=salt_result,
+            return_value=personality_result,
         ):
             response = await orchestrator_with_bard._apply_personality(
                 response="Hello",
                 trace_id="trace-123",
             )
 
-            assert response == "Hello\n\n_A tale from the sea..._"
+            assert response == "Ahoy, Captain! Hello.\n\n_A tale from the sea..._"
 
     @pytest.mark.asyncio
-    async def test_apply_personality_with_bard_no_tidbit(
+    async def test_apply_personality_passes_channel(
         self, orchestrator_with_bard: Orchestrator
     ) -> None:
-        """_apply_personality returns original when Bard doesn't add tidbit."""
-        salt_result = SaltResult(
+        """_apply_personality passes channel to Bard."""
+        personality_result = PersonalityResult(
             original_response="Hello",
-            salted_response="Hello",
-            tidbit_added=False,
-            tidbit=None,
+            final_response="Hello",
+            personality_applied=True,
+            channel="telegram",
         )
 
         with patch.object(
             orchestrator_with_bard._bard,
-            "salt_response",
+            "apply_personality",
             new_callable=AsyncMock,
-            return_value=salt_result,
-        ):
-            response = await orchestrator_with_bard._apply_personality(
+            return_value=personality_result,
+        ) as mock_apply:
+            await orchestrator_with_bard._apply_personality(
                 response="Hello",
                 trace_id="trace-123",
+                channel="telegram",
             )
 
-            assert response == "Hello"
+            mock_apply.assert_called_once()
+            call_kwargs = mock_apply.call_args.kwargs
+            assert call_kwargs.get("channel") == "telegram"
 
     @pytest.mark.asyncio
     async def test_apply_personality_without_bard_passthrough(
@@ -129,7 +132,7 @@ class TestOrchestratorBardIntegration:
         """_apply_personality returns original on Bard error."""
         with patch.object(
             orchestrator_with_bard._bard,
-            "salt_response",
+            "apply_personality",
             new_callable=AsyncMock,
             side_effect=Exception("Bard error"),
         ):
@@ -142,8 +145,8 @@ class TestOrchestratorBardIntegration:
             assert response == "Hello"
 
 
-class TestStormModeDetection:
-    """Tests for storm mode detection."""
+class TestStormModeInBard:
+    """Tests for storm mode detection (now handled by Bard)."""
 
     @pytest.fixture
     def orchestrator(self) -> Orchestrator:
@@ -155,56 +158,45 @@ class TestStormModeDetection:
             captain_uuid="captain-123",
         )
 
-    def test_detect_storm_mode_urgent(self, orchestrator: Orchestrator) -> None:
-        """Storm mode detected with 'urgent' keyword."""
-        assert orchestrator._detect_storm_mode("This is URGENT!") is True
-
-    def test_detect_storm_mode_emergency(self, orchestrator: Orchestrator) -> None:
-        """Storm mode detected with 'emergency' keyword."""
-        assert orchestrator._detect_storm_mode("Emergency meeting now") is True
-
-    def test_detect_storm_mode_critical(self, orchestrator: Orchestrator) -> None:
-        """Storm mode detected with 'critical' keyword."""
-        assert orchestrator._detect_storm_mode("Critical bug found") is True
-
-    def test_detect_storm_mode_asap(self, orchestrator: Orchestrator) -> None:
-        """Storm mode detected with 'asap' keyword."""
-        assert orchestrator._detect_storm_mode("Need this ASAP") is True
-
-    def test_detect_storm_mode_normal(self, orchestrator: Orchestrator) -> None:
-        """No storm mode for normal responses."""
-        assert orchestrator._detect_storm_mode("Here's your calendar for today") is False
-
-    def test_detect_storm_mode_case_insensitive(self, orchestrator: Orchestrator) -> None:
-        """Storm mode detection is case-insensitive."""
-        assert orchestrator._detect_storm_mode("URGENT task") is True
-        assert orchestrator._detect_storm_mode("urgent task") is True
-
     @pytest.mark.asyncio
-    async def test_storm_mode_passed_to_bard(self, orchestrator: Orchestrator) -> None:
-        """Storm mode flag is passed to Bard salt_response."""
-        salt_result = SaltResult(
-            original_response="Urgent response",
-            salted_response="Urgent response",
-            tidbit_added=False,
-            tidbit=None,
+    async def test_bard_handles_storm_mode_detection(self, orchestrator: Orchestrator) -> None:
+        """Storm mode is now detected by Bard, not Orchestrator."""
+        # Bard's apply_personality auto-detects storm mode
+        personality_result = PersonalityResult(
+            original_response="URGENT: Server down!",
+            final_response="URGENT: Server down!",
+            personality_applied=False,  # Skipped due to storm mode
+            storm_mode=True,
         )
 
         with patch.object(
             orchestrator._bard,
-            "salt_response",
+            "apply_personality",
             new_callable=AsyncMock,
-            return_value=salt_result,
-        ) as mock_salt:
-            await orchestrator._apply_personality(
-                response="This is URGENT!",
+            return_value=personality_result,
+        ):
+            response = await orchestrator._apply_personality(
+                response="URGENT: Server down!",
                 trace_id="trace-123",
             )
 
-            # Verify storm_mode=True was passed
-            mock_salt.assert_called_once()
-            call_kwargs = mock_salt.call_args.kwargs
-            assert call_kwargs.get("storm_mode") is True
+            # Storm mode should return clean response
+            assert response == "URGENT: Server down!"
+
+    def test_bard_storm_mode_detection(self, orchestrator: Orchestrator) -> None:
+        """Bard's _detect_storm_mode works correctly."""
+        bard = orchestrator._bard
+        assert bard is not None
+
+        # Test storm keywords
+        assert bard._detect_storm_mode("This is URGENT!") is True
+        assert bard._detect_storm_mode("Emergency meeting now") is True
+        assert bard._detect_storm_mode("Critical bug found") is True
+        assert bard._detect_storm_mode("Need this ASAP") is True
+
+        # Test normal messages
+        assert bard._detect_storm_mode("Here's your calendar for today") is False
+        assert bard._detect_storm_mode("Hello, how are you?") is False
 
 
 class TestBardConfigLoading:
@@ -264,21 +256,22 @@ class TestBardSagaContinuation:
     @pytest.mark.asyncio
     async def test_saga_continuation_logged(self, orchestrator: Orchestrator) -> None:
         """Saga continuation is logged with chapter info."""
-        salt_result = SaltResult(
+        personality_result = PersonalityResult(
             original_response="Hello",
-            salted_response="Hello\n\n_Chapter 3 of the saga..._",
+            final_response="Hello\n\n_Chapter 3 of the saga..._",
+            personality_applied=True,
             tidbit_added=True,
             tidbit="Chapter 3 of the saga...",
             saga_id="saga-123",
             chapter=3,
-            is_continuation=True,
+            llm_rewrite_used=True,
         )
 
         with patch.object(
             orchestrator._bard,
-            "salt_response",
+            "apply_personality",
             new_callable=AsyncMock,
-            return_value=salt_result,
+            return_value=personality_result,
         ):
             response = await orchestrator._apply_personality(
                 response="Hello",

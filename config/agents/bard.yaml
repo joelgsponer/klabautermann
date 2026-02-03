@@ -1,12 +1,15 @@
 # Bard of the Bilge configuration
-# The keeper of mythology who weaves tales across conversations
+# The keeper of mythology and SOLE OWNER of personality/voice
+# The Bard transforms clean functional responses into nautical-voiced output
 
 name: bard
 
-model:
-  primary: claude-3-5-haiku-20241022
+# LLM Personality Rewriting (Bard uses Haiku for voice transformation)
+personality:
+  enabled: true
+  model: claude-3-5-haiku-20241022
   temperature: 0.8
-  max_output_tokens: 200
+  max_tokens: 1024
 
 # Probability that a response gets "salted" with a tidbit (5-10%)
 tidbit_probability: 0.07
@@ -27,7 +30,8 @@ selection_weights:
   start_saga: 0.2
   standalone: 0.5
 
-# Storm mode - disable tidbits during urgent responses
+# Storm mode - skip personality and tidbits during urgent responses
+# Bard detects storm keywords and returns terse, direct responses
 storm_mode:
   enabled: true
   keywords:
@@ -35,8 +39,22 @@ storm_mode:
     - emergency
     - critical
     - asap
+    - immediately
+    - crisis
 
-# Display formatting
+# Channel-specific formatting
+channels:
+  cli:
+    # CLI gets plain text output
+    format: plain
+  telegram:
+    # Telegram supports Markdown
+    format: markdown
+  api:
+    # API gets clean text, no formatting
+    format: raw
+
+# Display formatting for tidbits
 display:
   format: italic  # Wrap tidbits in _underscores_ for markdown italic
   separator: "\n\n"  # Separator between response and tidbit

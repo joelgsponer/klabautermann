@@ -1,5 +1,8 @@
 # Orchestrator Configuration
 # The "CEO" agent that routes intents and coordinates sub-agents
+#
+# NOTE: Personality/voice is handled by the Bard agent, not the Orchestrator.
+# The Orchestrator produces clean, functional responses that the Bard transforms.
 
 # V2 Workflow: Think-Dispatch-Synthesize pattern (Sprint 4)
 # When true, uses parallel multi-intent processing instead of single-intent routing
@@ -11,10 +14,6 @@ model:
   temperature: 0.7
   max_context_tokens: 8000
   max_output_tokens: 4096
-
-personality:
-  name: klabautermann
-  wit_level: 0.3  # 0.0 = terse, 1.0 = very witty
 
 # Intent classification uses LLM (Haiku) for semantic understanding
 # No hardcoded keyword lists - the LLM handles classification
