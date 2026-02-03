@@ -10,6 +10,7 @@ Klabautermann extracts entities from your conversations, stores them in Neo4j vi
 - **Temporal Knowledge Graph**: Neo4j + Graphiti for time-aware entity storage and retrieval
 - **Entity Extraction**: Automatically extracts people, organizations, tasks, and relationships from conversations
 - **Hybrid Search**: Combines semantic (vector), structural (graph), and temporal search strategies
+- **Web Search**: Real-time information retrieval via Brave Search API for current events and news
 - **Email Management**: Full Gmail integration - search, send, delete, archive, and label emails
 - **Calendar Integration**: View and create calendar events with conflict detection
 - **Hot-Reload Configuration**: Change agent configs without restarting
@@ -19,6 +20,8 @@ Klabautermann extracts entities from your conversations, stores them in Neo4j vi
 | Feature | Status | Description |
 |---------|--------|-------------|
 | Entity Extraction | ✅ | Extract people, orgs, tasks from conversations |
+| Knowledge Graph Search | ✅ | Query stored entities and relationships |
+| Web Search | ✅ | Real-time news and current events via Brave API |
 | Email Search | ✅ | Search emails with natural language queries |
 | Email Send | ✅ | Compose and send emails (draft first for safety) |
 | Email Delete | ✅ | Move emails to trash |
@@ -87,7 +90,7 @@ Orchestration Layer (intent classification, delegation)
          ▼
 Agent Layer:
   ├─ Ingestor (Haiku)   → extracts entities → Graphiti
-  ├─ Researcher (Haiku) → hybrid vector+graph search
+  ├─ Researcher (Haiku) → knowledge graph + web search
   └─ Executor (Sonnet)  → MCP tool execution
          │
          ▼
@@ -168,6 +171,7 @@ email:
 | `ANTHROPIC_API_KEY` | Yes | Claude API key for agents |
 | `NEO4J_PASSWORD` | Yes | Neo4j database password |
 | `OPENAI_API_KEY` | No | For entity extraction (Graphiti) |
+| `BRAVE_SEARCH_API_KEY` | No | For web search (Researcher agent) |
 | `GOOGLE_CLIENT_ID` | No | For Gmail/Calendar integration |
 | `GOOGLE_CLIENT_SECRET` | No | For Gmail/Calendar integration |
 | `GOOGLE_REFRESH_TOKEN` | No | OAuth2 refresh token |

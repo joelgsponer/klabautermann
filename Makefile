@@ -2,7 +2,7 @@
 # ======================
 # Common development commands
 
-.PHONY: help venv install dev run api tui tui-build test test-fast lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
+.PHONY: help venv install dev run api bridge tui tui-build test test-fast test-unit test-integration test-e2e test-orchestrator test-researcher lint type-check format check clean docker-up docker-down docker-logs init-db wipe-db reset-db test-docker-up test-docker-down test-docker-logs test-contracts test-golden test-all-services
 
 # Default target
 help:
@@ -15,19 +15,23 @@ help:
 	@echo "  make dev          Install development dependencies"
 	@echo ""
 	@echo "Run:"
-	@echo "  make run          Start the CLI"
-	@echo "  make api          Start the API server (ws://localhost:8765)"
+	@echo "  make run          Start the CLI (full stack + CLI interface)"
+	@echo "  make api          Start the API server (full stack, no CLI)"
+	@echo "  make bridge       Build The Bridge UI + start API server (full stack)"
 	@echo "  make tui          Build and run the Rust TUI"
 	@echo "  make tui-build    Build the Rust TUI only"
 	@echo ""
 	@echo "Quality:"
-	@echo "  make test         Run all tests"
-	@echo "  make test-fast    Run tests in parallel (requires pytest-xdist)"
-	@echo "  make test-cov     Run tests with coverage report"
-	@echo "  make lint         Run linter (ruff)"
-	@echo "  make type-check   Run type checker (mypy)"
-	@echo "  make format       Format code (ruff format)"
-	@echo "  make check        Run all quality checks"
+	@echo "  make test              Run all tests"
+	@echo "  make test-fast         Run tests in parallel (requires pytest-xdist)"
+	@echo "  make test-unit         Run unit tests only"
+	@echo "  make test-orchestrator Run orchestrator tests"
+	@echo "  make test-researcher   Run researcher tests (incl. web search)"
+	@echo "  make test-cov          Run tests with coverage report"
+	@echo "  make lint              Run linter (ruff)"
+	@echo "  make type-check        Run type checker (mypy)"
+	@echo "  make format            Format code (ruff format)"
+	@echo "  make check             Run all quality checks"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up    Start Docker services"
@@ -66,6 +70,10 @@ run:
 api:
 	uv run python scripts/start_api.py
 
+bridge:
+	cd web && npm run build
+	uv run python scripts/start_api.py
+
 tui-build:
 	cd tui-rs && cargo build --release
 
@@ -88,6 +96,12 @@ test-integration:
 
 test-e2e:
 	pytest tests/e2e/ -v -m e2e
+
+test-orchestrator:
+	pytest tests/unit/test_orchestrator*.py -v
+
+test-researcher:
+	pytest tests/unit/test_researcher.py -v
 
 test-cov:
 	pytest tests/ --cov=src/klabautermann --cov-report=html --cov-report=term
