@@ -2,7 +2,10 @@
 # Searches the knowledge graph for relevant information
 
 model:
-  primary: claude-3-haiku-20240307
+  # Planning uses Sonnet for speed - just picking search strategies
+  planning: claude-sonnet-4-20250514
+  # Synthesis uses Opus for quality reasoning
+  synthesis: claude-opus-4-5-20251101
   temperature: 0.3
   max_context_tokens: 4000
   max_output_tokens: 2048
@@ -13,10 +16,20 @@ search:
   use_vector_search: true
   use_graph_traversal: true
   max_hops: 2
+  max_parallel_strategies: 4
+  default_result_limit: 10
+  max_total_results: 50
+  timeout_seconds: 30
+  # Web search via Brave Search API
+  web_search_enabled: true
+  web_search_timeout: 10.0
+  web_result_limit: 5
 
+# Timeouts - these keys must match what researcher.py reads
 timeouts:
-  agent_response: 30.0
-  llm_call: 30.0
+  planning: 30.0      # Was 15s default - Sonnet should be faster anyway
+  execution: 45.0     # Search execution timeout
+  synthesis: 60.0     # Opus synthesis needs more time
 
 retry:
   max_attempts: 3

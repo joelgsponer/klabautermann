@@ -34,6 +34,9 @@ class ModelConfig(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_context_tokens: int = Field(default=8000, gt=0)
     max_output_tokens: int = Field(default=4096, gt=0)
+    # Researcher-specific model settings
+    planning: str | None = None  # Model for search planning (Sonnet recommended)
+    synthesis: str | None = None  # Model for report synthesis (Opus recommended)
 
 
 class PersonalityConfig(BaseModel):
@@ -72,6 +75,10 @@ class TimeoutConfig(BaseModel):
     agent_response: float = Field(default=30.0, gt=0.0)
     llm_call: float = Field(default=60.0, gt=0.0)
     mcp_call: float = Field(default=30.0, gt=0.0)
+    # Researcher-specific timeout settings
+    planning: float | None = None  # Search planning timeout
+    execution: float | None = None  # Search execution timeout
+    synthesis: float | None = None  # Report synthesis timeout
 
 
 class RetryConfig(BaseModel):
@@ -125,6 +132,15 @@ class SearchConfig(BaseModel):
     use_vector_search: bool = True
     use_graph_traversal: bool = True
     max_hops: int = Field(default=2, ge=1, le=5)
+    # Extended search settings
+    max_parallel_strategies: int = Field(default=4, ge=1, le=10)
+    default_result_limit: int = Field(default=10, ge=1)
+    max_total_results: int = Field(default=50, ge=1)
+    timeout_seconds: float = Field(default=30.0, gt=0.0)
+    # Web search settings (Brave Search API)
+    web_search_enabled: bool = True
+    web_search_timeout: float = Field(default=10.0, gt=0.0)
+    web_result_limit: int = Field(default=5, ge=1, le=20)
 
 
 class ToolsConfig(BaseModel):
