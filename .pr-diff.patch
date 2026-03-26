@@ -1,0 +1,86 @@
+diff --git a/src/entries/handlers.rs b/src/entries/handlers.rs
+index 2a44eb8..cfe2a4b 100644
+--- a/src/entries/handlers.rs
++++ b/src/entries/handlers.rs
+@@ -203,6 +203,16 @@ pub async fn create_entry(
+         let relative_path =
+             media::save_media(&state.config.media_dir, &user.id, &file_id, &ext, &bytes).await?;
+ 
++        // Trim content and enforce length limit; treat empty as None
++        let trimmed_content = content
++            .map(|c| c.trim().to_string())
++            .filter(|c| !c.is_empty());
++        if let Some(ref text) = trimmed_content {
++            if text.len() > MAX_TEXT_LENGTH {
++                return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
++            }
++        }
++
+         let entry = models::create_media_entry(
+             &state.db,
+             &user.id,
+@@ -210,6 +220,7 @@ pub async fn create_entry(
+             &relative_path,
+             &detected_mime,
+             bytes.len() as i64,
++            trimmed_content.as_deref(),
+         )
+         .await?;
+ 
+diff --git a/src/entries/models.rs b/src/entries/models.rs
+index ec08698..7ad2928 100644
+--- a/src/entries/models.rs
++++ b/src/entries/models.rs
+@@ -89,16 +89,18 @@ pub async fn create_media_entry(
+     media_path: &str,
+     media_mime: &str,
+     media_size: i64,
++    content: Option<&str>,
+ ) -> Result<Entry, sqlx::Error> {
+     let id = uuid::Uuid::new_v4().to_string();
+     let transcription_status = if entry_type == "image" { "none" } else { "pending" };
+     sqlx::query(
+-        r#"INSERT INTO entries (id, user_id, entry_type, media_path, media_mime, media_size, transcription_status)
+-           VALUES (?, ?, ?, ?, ?, ?, ?)"#,
++        r#"INSERT INTO entries (id, user_id, entry_type, content, media_path, media_mime, media_size, transcription_status)
++           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
+     )
+     .bind(&id)
+     .bind(user_id)
+     .bind(entry_type)
++    .bind(content)
+     .bind(media_path)
+     .bind(media_mime)
+     .bind(media_size)
+diff --git a/templates/partials/entry.html b/templates/partials/entry.html
+index 8508ea8..795712f 100644
+--- a/templates/partials/entry.html
++++ b/templates/partials/entry.html
+@@ -33,6 +33,11 @@
+                 {% endif %}
+             {% endif %}
+ 
++            {# Caption text (content submitted alongside media) #}
++            {% if let Some(caption) = entry.content %}
++                <p class="entry-caption">{{ caption }}</p>
++            {% endif %}
++
+             {# Transcription status #}
+             {% if entry.transcription_status == "pending" || entry.transcription_status == "processing" %}
+                 <p class="entry-transcription transcribing"
+diff --git a/templates/partials/entry_expanded.html b/templates/partials/entry_expanded.html
+index 06e28f1..044ea76 100644
+--- a/templates/partials/entry_expanded.html
++++ b/templates/partials/entry_expanded.html
+@@ -29,6 +29,11 @@
+                 {% endif %}
+             {% endif %}
+ 
++            {# Caption text (content submitted alongside media) #}
++            {% if let Some(caption) = entry.content %}
++                <p class="entry-caption">{{ caption }}</p>
++            {% endif %}
++
+             {% if let Some(transcript) = entry.transcript %}
+             <p class="entry-transcription">{{ transcript }}</p>
+             {% endif %}
