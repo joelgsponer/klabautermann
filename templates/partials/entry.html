@@ -33,6 +33,11 @@
                 {% endif %}
             {% endif %}
 
+            {# Caption text (content submitted alongside media) #}
+            {% if let Some(caption) = entry.content %}
+                <p class="entry-caption">{{ caption }}</p>
+            {% endif %}
+
             {# Transcription status #}
             {% if entry.transcription_status == "pending" || entry.transcription_status == "processing" %}
                 <p class="entry-transcription transcribing"
