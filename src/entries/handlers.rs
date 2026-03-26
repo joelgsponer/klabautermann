@@ -12,6 +12,7 @@ use crate::entries::models::{self, Entry};
 use crate::error::AppError;
 use crate::media;
 use crate::state::AppState;
+use crate::summary::models::{self as summary_models, DailySummary};
 use crate::tags::models::{self as tag_models, Tag};
 
 const PAGE_SIZE: i64 = 20;
@@ -29,6 +30,8 @@ struct TimelineTemplate {
     username: String,
     entries: Vec<EntryWithTags>,
     has_more: bool,
+    summary: Option<DailySummary>,
+    has_gemini_key: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -73,10 +76,16 @@ pub async fn timeline(
         })
         .collect();
 
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let summary = summary_models::get_summary_for_date(&state.db, &user.id, &today).await?;
+    let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
+
     Ok(TimelineTemplate {
         username: user.username,
         entries,
         has_more,
+        summary,
+        has_gemini_key,
     })
 }
 

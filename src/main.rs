@@ -5,6 +5,7 @@ mod error;
 mod media;
 mod routes;
 mod state;
+mod summary;
 mod tags;
 
 use axum_extra::extract::cookie::Key;
@@ -53,6 +54,9 @@ async fn main() -> anyhow::Result<()> {
     // Re-enqueue pending transcriptions from crash recovery
     entries::transcription::recover_pending(&pool, &tx).await;
 
+    // Spawn daily summary scheduler
+    summary::scheduler::spawn_scheduler(pool.clone(), config.clone());
+
     // Build router
     let app = routes::build_router(state);
 
@@ -87,6 +91,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("002_sessions", include_str!("../migrations/002_sessions.sql")),
         ("003_add_image_type", include_str!("../migrations/003_add_image_type.sql")),
         ("004_tags", include_str!("../migrations/004_tags.sql")),
+        ("005_daily_summaries", include_str!("../migrations/005_daily_summaries.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

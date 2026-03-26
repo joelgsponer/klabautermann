@@ -7,6 +7,7 @@ use tower_http::services::ServeDir;
 use crate::auth::handlers as auth;
 use crate::entries::handlers as entries;
 use crate::state::AppState;
+use crate::summary::handlers as summary;
 use crate::tags::handlers as tags;
 
 pub fn build_router(state: AppState) -> Router {
@@ -26,6 +27,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/entries/{id}", get(entries::get_entry).delete(entries::delete_entry))
         .route("/entries/{id}/expand", get(entries::expand_entry))
         .route("/entries/{id}/collapse", get(entries::collapse_entry))
+        // Summary
+        .route("/summary/today", get(summary::summary_today))
+        .route("/summary/generate", post(summary::generate_summary))
         // Tags
         .route("/tags", get(tags::tags_page))
         .route("/tags/autocomplete", get(tags::autocomplete))

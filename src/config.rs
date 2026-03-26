@@ -7,6 +7,7 @@ pub struct Config {
     pub openai_api_key: String,
     pub listen_addr: String,
     pub media_dir: String,
+    pub gemini_api_key: Option<String>,
 }
 
 impl Config {
@@ -25,6 +26,7 @@ impl Config {
             openai_api_key: std::env::var("OPENAI_API_KEY").unwrap_or_default(),
             listen_addr: std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into()),
             media_dir: std::env::var("MEDIA_DIR").unwrap_or_else(|_| "media".into()),
+            gemini_api_key: std::env::var("GEMINI_API_KEY").ok(),
         })
     }
 }
