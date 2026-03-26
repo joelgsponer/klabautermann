@@ -37,7 +37,7 @@ pub async fn upsert_tag_report(
     sqlx::query(
         r#"INSERT INTO tag_reports (id, tag_id, user_id, report, entry_count)
            VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(tag_id) DO UPDATE SET
+           ON CONFLICT(tag_id, user_id) DO UPDATE SET
                report = excluded.report,
                entry_count = excluded.entry_count,
                generated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"#,
@@ -52,7 +52,7 @@ pub async fn upsert_tag_report(
 
     get_tag_report(pool, tag_id, user_id)
         .await
-        .map(|opt| opt.unwrap())
+        .and_then(|opt| opt.ok_or(sqlx::Error::RowNotFound))
 }
 
 pub fn build_tag_report_prompt(
@@ -80,7 +80,7 @@ pub fn build_tag_report_prompt(
     prompt.push_str("Entries:\n\n");
     for entry in entries {
         let text = entry.display_text().unwrap_or("[no text]");
-        let text = if text.len() > 1000 { &text[..1000] } else { text };
+        let text = text.char_indices().nth(1000).map_or(text, |(i, _)| &text[..i]);
         prompt.push_str(&format!("[{}] {}\n\n", entry.created_at, text));
     }
 
