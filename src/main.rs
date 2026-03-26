@@ -84,6 +84,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
     let migration_files = [
         ("001_initial_schema", include_str!("../migrations/001_initial_schema.sql")),
         ("002_sessions", include_str!("../migrations/002_sessions.sql")),
+        ("003_add_image_type", include_str!("../migrations/003_add_image_type.sql")),
     ];
 
     for (name, sql) in migration_files {
