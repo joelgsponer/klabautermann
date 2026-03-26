@@ -47,6 +47,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/tags/{id}/entries", get(tags::tag_entries))
         .route("/tags/{id}/report", get(tags::tag_report))
         .route("/tags/{id}/report/generate", post(tags::generate_tag_report_handler))
+        // Version
+        .route("/version", get(|| async { env!("GIT_HASH") }))
         // Media
         .route("/media/{user_id}/{filename}", get(entries::serve_media))
         // Static files

@@ -15,5 +15,7 @@
 </head>
 <body>
     {% block body %}{% endblock %}
+    <div id="version-badge" style="position:fixed;bottom:4px;right:8px;font-size:0.65rem;opacity:0.3;color:var(--text,#888);pointer-events:none;z-index:9999;font-family:monospace;"></div>
+    <script>fetch('/version').then(r=>r.text()).then(v=>{document.getElementById('version-badge').textContent=v.trim()})</script>
 </body>
 </html>
