@@ -34,9 +34,11 @@ dependencies = [
     "google-auth>=2.0",
     "google-auth-oauthlib>=1.0",
     "google-api-python-client>=2.0",
-    # API server for Go TUI
+    # API server for Go TUI and web UI
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
     # Scheduling
     "apscheduler>=3.10",
     # File watching for config hot-reload
@@ -199,3 +201,4 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
+

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Captain's Log web UI with tag autocomplete (#423)
+  - New server-rendered timeline page at `/`
+  - `GET /api/tags/suggestions` endpoint for real-time tag prefix matching
+  - Tag dropdown component with keyboard navigation (arrow keys, Enter, Escape)
+  - Visually distinct tag suggestion chips with hover/active states
+  - Graceful degradation when knowledge graph is unavailable
+
 ### Changed
 - Remove keyword-based intent classification fallback - pure LLM semantic understanding only (#2, #354)
 - Remove keyword-based zoom level detection fallback - AI-first approach with graceful degradation (#355)

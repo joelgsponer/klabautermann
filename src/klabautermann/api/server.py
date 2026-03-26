@@ -1,16 +1,24 @@
 """
-FastAPI WebSocket server for Klabautermann.
+FastAPI server for Klabautermann.
 
-Provides WebSocket endpoint for TUI clients to communicate with the orchestrator.
-Exposes Prometheus metrics at /metrics endpoint.
+Provides:
+- WebSocket endpoint for TUI clients to communicate with the orchestrator.
+- Server-rendered web UI (timeline / captain's log) using Jinja2 templates.
+- REST endpoint for tag autocomplete suggestions.
+- Prometheus metrics at /metrics endpoint.
 """
 
 import json
 import time
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
+from klabautermann.core.logger import logger
 from klabautermann.core.metrics import (
     decrement_websocket_connections,
     get_metrics,
@@ -20,7 +28,20 @@ from klabautermann.core.metrics import (
 )
 
 
+# Resolve paths relative to the repository root so the server works regardless
+# of the current working directory when launched.
+# __file__ = src/klabautermann/api/server.py → 4 parents up = repo root
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent
+_STATIC_DIR = _REPO_ROOT / "static"
+_TEMPLATES_DIR = _REPO_ROOT / "templates"
+
 app = FastAPI(title="Klabautermann API", version="0.1.0")
+
+# Static assets (CSS, JS)
+app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+# Jinja2 templates
+templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 # Global orchestrator instance (set by start_api.py)
 _orchestrator = None
@@ -72,6 +93,42 @@ async def metrics_endpoint() -> Response:
         content=get_metrics(),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
+
+
+@app.get("/", response_class=HTMLResponse)
+async def timeline_page(request: Request) -> HTMLResponse:
+    """Render the Captain's Log timeline web UI."""
+    return templates.TemplateResponse(request, "timeline.html")
+
+
+@app.get("/api/tags/suggestions")
+async def tag_suggestions(q: str = Query(default="", min_length=1)) -> list[str]:
+    """Return tag name suggestions matching the prefix query.
+
+    Queries the knowledge graph for entity names that start with the given
+    prefix.  Falls back to an empty list when the graph is unavailable so
+    the UI degrades gracefully.
+    """
+    if not q:
+        return []
+
+    if _orchestrator is None or _orchestrator.graphiti is None:
+        return []
+
+    try:
+        graphiti = _orchestrator.graphiti
+        if hasattr(graphiti, "search"):
+            results = await graphiti.search(q, limit=10)
+            names: list[str] = []
+            for node in results.get("nodes", []):
+                name = node.get("name", "")
+                if name and name.lower().startswith(q.lower()):
+                    names.append(name)
+            return names[:8]
+    except Exception:
+        logger.exception("[STORM] tag_suggestions: error querying graphiti for prefix %r", q)
+
+    return []
 
 
 @app.websocket("/ws/chat")
