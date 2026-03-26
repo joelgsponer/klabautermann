@@ -52,9 +52,7 @@ pub async fn generate_summary(
     };
 
     // Check AI consent before calling Gemini
-    let has_consent: bool = sqlx::query_scalar("SELECT ai_consent FROM users WHERE id = ?")
-        .bind(&user.id)
-        .fetch_one(&state.db)
+    let has_consent = crate::auth::check_ai_consent(&state.db, &user.id)
         .await
         .map_err(|e| AppError::from(anyhow::anyhow!(e)))?;
     if !has_consent {

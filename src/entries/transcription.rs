@@ -61,10 +61,7 @@ async fn process_transcription(
         .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
 
     // Check AI consent before calling Whisper
-    let has_consent: bool = sqlx::query_scalar("SELECT ai_consent FROM users WHERE id = ?")
-        .bind(&entry.user_id)
-        .fetch_one(pool)
-        .await?;
+    let has_consent = crate::auth::check_ai_consent(pool, &entry.user_id).await?;
     if !has_consent {
         anyhow::bail!("User has not consented to AI processing");
     }
