@@ -1,0 +1,42 @@
+<div class="entry entry-editing" id="entry-{{ entry.id }}">
+    <div class="entry-time">{{ entry.formatted_time() }}</div>
+    <div class="entry-body">
+        <form hx-patch="/entries/{{ entry.id }}/edit"
+              hx-target="#entry-{{ entry.id }}"
+              hx-swap="outerHTML"
+              hx-encoding="multipart/form-data">
+            {% if entry.entry_type != "text" %}
+                {# Show media as read-only #}
+                {% if entry.entry_type == "image" %}
+                    {% if let Some(path) = entry.media_path %}
+                    <img src="/media/{{ path }}" class="entry-image" loading="lazy" alt="Journal image">
+                    {% endif %}
+                {% elif entry.entry_type == "audio" %}
+                    {% if let Some(path) = entry.media_path %}
+                    <audio controls preload="metadata" class="entry-audio">
+                        <source src="/media/{{ path }}" type="{{ entry.media_mime.as_deref().unwrap_or("audio/webm") }}">
+                    </audio>
+                    {% endif %}
+                {% else %}
+                    {% if let Some(path) = entry.media_path %}
+                    <video controls preload="metadata" class="entry-video">
+                        <source src="/media/{{ path }}" type="{{ entry.media_mime.as_deref().unwrap_or("video/webm") }}">
+                    </video>
+                    {% endif %}
+                {% endif %}
+            {% endif %}
+
+            <textarea name="content" class="edit-textarea" rows="4" autofocus>{% if entry.entry_type == "text" %}{{ entry.content.as_deref().unwrap_or("") }}{% else %}{{ entry.transcript.as_deref().or(entry.content.as_deref()).unwrap_or("") }}{% endif %}</textarea>
+
+            <div class="edit-actions">
+                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-ghost"
+                        hx-get="/entries/{{ entry.id }}/collapse"
+                        hx-target="#entry-{{ entry.id }}"
+                        hx-swap="outerHTML">
+                    Cancel
+                </button>
+            </div>
+        </form>
+    </div>
+</div>

@@ -31,6 +31,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/entries/{id}", get(entries::get_entry).delete(entries::delete_entry))
         .route("/entries/{id}/expand", get(entries::expand_entry))
         .route("/entries/{id}/collapse", get(entries::collapse_entry))
+        .route("/entries/{id}/edit", get(entries::edit_entry_form).patch(entries::update_entry))
         // Summary
         .route("/summary/today", get(summary::summary_today))
         .route("/summary/generate", post(summary::generate_summary))
