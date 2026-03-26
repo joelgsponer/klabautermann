@@ -1,0 +1,18 @@
+<div class="entry-card">
+  <form id="entry-form" method="post" action="/api/entries">
+    <div class="entry-input-wrapper">
+      <textarea
+        id="entry-input"
+        class="entry-input"
+        name="content"
+        placeholder="What's on your mind, Captain?"
+        rows="3"
+        onkeydown="if(event.key==='Enter' && !event.shiftKey && document.getElementById('tag-autocomplete').hidden){ event.preventDefault(); this.closest('form').requestSubmit(); }"
+      ></textarea>
+      {% include "partials/tag_autocomplete.html" %}
+    </div>
+    <div class="entry-actions">
+      <button type="submit" class="btn-submit">Log Entry</button>
+    </div>
+  </form>
+</div>

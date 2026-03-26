@@ -1,0 +1,178 @@
+/* Klabautermann — Nautical Theme */
+
+:root {
+  --navy: #0a0a1a;
+  --navy-light: #222240;
+  --navy-lighter: #2a2a4a;
+  --brass: #c9a84c;
+  --brass-dim: #8b7530;
+  --parchment: #e8dcc8;
+  --fog: #b8b8d0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--navy);
+  color: var(--parchment);
+  font-family: 'Georgia', 'Times New Roman', serif;
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+.container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+  border-bottom: 2px solid var(--brass-dim);
+  padding-bottom: 1rem;
+}
+
+.header h1 {
+  color: var(--brass);
+  font-size: 2rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Entry form card */
+.entry-card {
+  background: var(--navy-light);
+  border: 1px solid var(--brass-dim);
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.entry-input-wrapper {
+  position: relative;
+}
+
+.entry-input {
+  width: 100%;
+  background: var(--navy-lighter);
+  color: var(--parchment);
+  border: 1px solid var(--brass-dim);
+  border-radius: 4px;
+  padding: 0.75rem;
+  font-size: 1rem;
+  font-family: inherit;
+  resize: vertical;
+  transition: border-color 0.2s ease;
+}
+
+.entry-input:focus {
+  outline: none;
+  border-color: var(--brass);
+}
+
+.entry-input::placeholder {
+  color: var(--fog);
+  opacity: 0.7;
+}
+
+/* Tag autocomplete dropdown */
+.tag-autocomplete {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--navy);
+  border: 1px solid var(--brass-dim);
+  border-left: 3px solid var(--brass);
+  border-radius: 4px 4px 0 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.autocomplete-item {
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  color: var(--parchment);
+  transition: background 0.1s ease, color 0.1s ease;
+  font-size: 0.95rem;
+}
+
+.autocomplete-item:hover {
+  background: var(--navy-lighter);
+}
+
+.autocomplete-item.active {
+  background: var(--brass-dim);
+  color: var(--navy);
+  font-weight: bold;
+}
+
+/* Entry actions */
+.entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.btn-submit {
+  background: var(--brass-dim);
+  color: var(--navy);
+  border: none;
+  border-radius: 4px;
+  padding: 0.5rem 1.25rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  font-weight: bold;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: background 0.2s ease;
+}
+
+.btn-submit:hover {
+  background: var(--brass);
+}
+
+/* Timeline entries */
+.entries {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.entry-item {
+  background: var(--navy-light);
+  border: 1px solid var(--navy-lighter);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.entry-item time {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--fog);
+  margin-bottom: 0.4rem;
+}
+
+.entry-item .content {
+  color: var(--parchment);
+}
+
+.tag {
+  display: inline-block;
+  background: var(--navy-lighter);
+  border: 1px solid var(--brass-dim);
+  color: var(--brass);
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.85rem;
+  margin-right: 0.25rem;
+}
