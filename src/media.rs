@@ -29,3 +29,12 @@ pub async fn delete_media(media_dir: &str, relative_path: &str) -> Result<()> {
     }
     Ok(())
 }
+
+/// Delete the entire media directory for a user (used when deleting an account).
+pub async fn delete_user_media_dir(media_dir: &str, user_id: &str) -> Result<()> {
+    let user_dir = PathBuf::from(media_dir).join(user_id);
+    if user_dir.exists() {
+        fs::remove_dir_all(&user_dir).await?;
+    }
+    Ok(())
+}

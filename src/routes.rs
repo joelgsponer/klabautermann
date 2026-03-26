@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
     Router,
 };
 use tower_http::services::ServeDir;
@@ -21,6 +21,10 @@ pub fn build_router(state: AppState) -> Router {
             get(auth::register_page).post(auth::register_submit),
         )
         .route("/logout", post(auth::logout))
+        // Account management
+        .route("/account", delete(auth::delete_account))
+        .route("/account/ai-consent", post(auth::toggle_ai_consent))
+        .route("/account/export", get(auth::export_data))
         // Entries
         .route("/entries", post(entries::create_entry))
         .route("/entries/page", get(entries::timeline_page))

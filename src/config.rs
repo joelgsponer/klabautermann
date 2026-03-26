@@ -8,6 +8,7 @@ pub struct Config {
     pub listen_addr: String,
     pub media_dir: String,
     pub gemini_api_key: Option<String>,
+    pub secure_cookies: bool,
 }
 
 impl Config {
@@ -27,6 +28,9 @@ impl Config {
             listen_addr: std::env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into()),
             media_dir: std::env::var("MEDIA_DIR").unwrap_or_else(|_| "media".into()),
             gemini_api_key: std::env::var("GEMINI_API_KEY").ok(),
+            secure_cookies: std::env::var("SECURE_COOKIES")
+                .map(|v| v != "false")
+                .unwrap_or(true),
         })
     }
 }

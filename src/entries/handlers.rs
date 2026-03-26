@@ -278,22 +278,41 @@ pub async fn delete_entry(
 
 /// GET /media/:user_id/:filename — serve stored media
 pub async fn serve_media(
-    _user: AuthUser,
+    user: AuthUser,
     State(state): State<AppState>,
     Path((user_id, filename)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    let path = std::path::Path::new(&state.config.media_dir)
-        .join(&user_id)
-        .join(&filename);
-
-    if !path.exists() {
+    // BOLA fix: only allow access to the authenticated user's own media
+    if user_id != user.id {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
-    let bytes = tokio::fs::read(&path).await?;
+    let media_dir = std::path::Path::new(&state.config.media_dir);
+    let expected_prefix = media_dir.join(&user_id);
+    let path = expected_prefix.join(&filename);
+
+    // Path canonicalization: prevent directory traversal by verifying
+    // the resolved path is still inside the user's media directory
+    let canonical_path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
+    let canonical_prefix = match expected_prefix.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
+    };
+    if !canonical_path.starts_with(&canonical_prefix) {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+
+    if !canonical_path.exists() {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+
+    let bytes = tokio::fs::read(&canonical_path).await?;
 
     // Guess MIME from extension
-    let mime = match path.extension().and_then(|e| e.to_str()) {
+    let mime = match canonical_path.extension().and_then(|e| e.to_str()) {
         Some("webm") => "video/webm",
         Some("mp4") => "video/mp4",
         Some("ogg") => "audio/ogg",

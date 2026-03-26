@@ -60,6 +60,15 @@ async fn process_transcription(
         .await?
         .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
 
+    // Check AI consent before calling Whisper
+    let has_consent: bool = sqlx::query_scalar("SELECT ai_consent FROM users WHERE id = ?")
+        .bind(&entry.user_id)
+        .fetch_one(pool)
+        .await?;
+    if !has_consent {
+        anyhow::bail!("User has not consented to AI processing");
+    }
+
     let media_path = entry
         .media_path
         .ok_or_else(|| anyhow::anyhow!("No media path"))?;
