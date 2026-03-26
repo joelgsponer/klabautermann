@@ -87,6 +87,24 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("003_add_image_type", include_str!("../migrations/003_add_image_type.sql")),
     ];
 
+    // Recover from partial migration 003 run (entries_new exists, entries dropped)
+    let has_entries_new: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='entries_new'"
+    ).fetch_one(pool).await?;
+    let has_entries: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='entries'"
+    ).fetch_one(pool).await?;
+    if has_entries_new && !has_entries {
+        info!("Recovering from partial migration: renaming entries_new to entries");
+        sqlx::query("ALTER TABLE entries_new RENAME TO entries").execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_entries_user_created ON entries(user_id, created_at DESC)")
+            .execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_entries_transcription ON entries(transcription_status) WHERE transcription_status IN ('pending', 'processing')")
+            .execute(pool).await?;
+        sqlx::query("INSERT OR IGNORE INTO _migrations (name) VALUES ('003_add_image_type')")
+            .execute(pool).await?;
+    }
+
     for (name, sql) in migration_files {
         let applied: bool = sqlx::query_scalar("SELECT COUNT(*) > 0 FROM _migrations WHERE name = ?")
             .bind(name)
