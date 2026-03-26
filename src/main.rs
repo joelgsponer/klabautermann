@@ -92,6 +92,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("003_add_image_type", include_str!("../migrations/003_add_image_type.sql")),
         ("004_tags", include_str!("../migrations/004_tags.sql")),
         ("005_daily_summaries", include_str!("../migrations/005_daily_summaries.sql")),
+        ("006_tag_reports", include_str!("../migrations/006_tag_reports.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} Report — Klabautermann{% endblock %}
+
+{% block body %}
+<div class="app-container">
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">Klabautermann</h1>
+            <span class="header-subtitle">{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} — Report</span>
+        </div>
+        <div class="header-right">
+            <a href="/tags/{{ tag.id }}/entries" class="btn btn-ghost">Entries</a>
+            <a href="/tags" class="btn btn-ghost">All Tags</a>
+            <a href="/" class="btn btn-ghost">Back to Log</a>
+            <span class="username">{{ username }}</span>
+            <form method="POST" action="/logout" class="inline-form">
+                <button type="submit" class="btn btn-ghost">Disembark</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="timeline-container">
+        {% include "partials/tag_report_panel.html" %}
+    </main>
+</div>
+{% endblock %}

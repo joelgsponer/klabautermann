@@ -3,6 +3,7 @@
         {% if tag.tag_type == "person" %}@{% else %}#{% endif %}<span class="tag-name-text">{{ tag.name }}</span>
     </a>
     <div class="tag-row-actions">
+        <a href="/tags/{{ tag.id }}/report" class="btn btn-ghost">Report</a>
         <button class="btn btn-ghost" onclick="startRenameTag('{{ tag.id }}', '{{ tag.name }}')">Rename</button>
         <button class="btn btn-ghost btn-delete-tag"
                 hx-delete="/tags/{{ tag.id }}"
