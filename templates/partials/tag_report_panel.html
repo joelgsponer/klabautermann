@@ -1,0 +1,37 @@
+<div id="tag-report-panel" class="summary-panel">
+    {% if let Some(r) = report %}
+    <div class="summary-header">
+        <h3 class="summary-title">{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} — Knowledge Report</h3>
+        {% if has_gemini_key %}
+        <button class="btn btn-ghost"
+                hx-post="/tags/{{ tag.id }}/report/generate"
+                hx-target="#tag-report-panel"
+                hx-swap="outerHTML"
+                hx-indicator="#report-loading">
+            Regenerate
+        </button>
+        {% endif %}
+    </div>
+    <div class="summary-text">{{ r.report }}</div>
+    <div class="summary-meta" style="margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.7;">
+        {{ r.entry_count }} entries · Generated {{ r.generated_at }}
+    </div>
+    {% else %}
+    <div class="summary-header">
+        <h3 class="summary-title">{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} — Knowledge Report</h3>
+    </div>
+    {% if has_gemini_key %}
+    <p class="summary-empty">No report generated yet for this tag.</p>
+    <button class="btn btn-primary btn-sm"
+            hx-post="/tags/{{ tag.id }}/report/generate"
+            hx-target="#tag-report-panel"
+            hx-swap="outerHTML"
+            hx-indicator="#report-loading">
+        Generate Report
+    </button>
+    {% else %}
+    <p class="summary-empty">Set GEMINI_API_KEY to enable AI-powered tag reports.</p>
+    {% endif %}
+    {% endif %}
+    <div id="report-loading" class="htmx-indicator summary-loading">Generating report...</div>
+</div>

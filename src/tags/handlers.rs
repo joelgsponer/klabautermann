@@ -12,10 +12,28 @@ use crate::entries::handlers::EntryWithTags;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::tags::models::{self, Tag};
+use super::report::{self, TagReport};
 
 const PAGE_SIZE: i64 = 20;
 
 // ── Templates ──────────────────────────────────────────────
+
+#[derive(Template, WebTemplate)]
+#[template(path = "tag_report.html")]
+struct TagReportPageTemplate {
+    username: String,
+    tag: Tag,
+    report: Option<TagReport>,
+    has_gemini_key: bool,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "partials/tag_report_panel.html")]
+struct TagReportPanelTemplate {
+    tag: Tag,
+    report: Option<TagReport>,
+    has_gemini_key: bool,
+}
 
 #[derive(Template, WebTemplate)]
 #[template(path = "tags.html")]
@@ -168,4 +186,62 @@ pub async fn tag_entries(
         entries,
         has_more,
     })
+}
+
+/// GET /tags/{id}/report
+pub async fn tag_report(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    let tag = models::get_tag(&state.db, &id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
+    // Ownership check
+    if tag.user_id != user.id {
+        return Err(anyhow::anyhow!("Tag not found").into());
+    }
+    let report = report::get_tag_report(&state.db, &id, &user.id).await?;
+    let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
+
+    Ok(TagReportPageTemplate {
+        username: user.username,
+        tag,
+        report,
+        has_gemini_key,
+    })
+}
+
+/// POST /tags/{id}/report/generate
+pub async fn generate_tag_report_handler(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let api_key = match &state.config.gemini_api_key {
+        Some(key) if !key.is_empty() => key.clone(),
+        _ => return Ok(StatusCode::SERVICE_UNAVAILABLE.into_response()),
+    };
+
+    let tag = models::get_tag(&state.db, &id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
+    if tag.user_id != user.id {
+        return Err(anyhow::anyhow!("Tag not found").into());
+    }
+
+    match report::generate_tag_report(&state.db, &api_key, &id, &user.id).await {
+        Ok(_) => {},
+        Err(e) => {
+            tracing::error!(error = %e, "Tag report generation failed");
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR, format!("Report generation failed: {}", e)).into_response());
+        }
+    }
+
+    let report = report::get_tag_report(&state.db, &id, &user.id).await?;
+    Ok(TagReportPanelTemplate {
+        tag,
+        report,
+        has_gemini_key: true,
+    }.into_response())
 }
