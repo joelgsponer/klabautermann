@@ -1,5 +1,5 @@
 # ── Builder stage ──────────────────────────────────────────────
-FROM rust:1.86-bookworm AS builder
+FROM rust:bookworm AS builder
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
