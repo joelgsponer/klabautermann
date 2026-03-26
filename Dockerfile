@@ -2,7 +2,9 @@
 FROM rust:bookworm AS builder
 
 WORKDIR /build
+COPY .git/ .git/
 COPY Cargo.toml Cargo.lock ./
+COPY build.rs ./
 COPY src/ src/
 COPY migrations/ migrations/
 COPY templates/ templates/
