@@ -96,6 +96,17 @@ pub async fn link_entry_tags(
     Ok(())
 }
 
+pub async fn unlink_entry_tags(
+    pool: &SqlitePool,
+    entry_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM entry_tags WHERE entry_id = ?")
+        .bind(entry_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 pub async fn get_tags_for_entry(
     pool: &SqlitePool,
     entry_id: &str,

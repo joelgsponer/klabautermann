@@ -109,6 +109,27 @@ pub async fn create_media_entry(
     get_entry(pool, &id).await.map(|e| e.unwrap())
 }
 
+pub async fn update_entry(
+    pool: &SqlitePool,
+    id: &str,
+    user_id: &str,
+    content: &str,
+) -> Result<Option<Entry>, sqlx::Error> {
+    let result = sqlx::query(
+        r#"UPDATE entries SET content = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE id = ? AND user_id = ?"#,
+    )
+    .bind(content)
+    .bind(id)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    get_entry(pool, id).await
+}
+
 pub async fn get_entry(pool: &SqlitePool, id: &str) -> Result<Option<Entry>, sqlx::Error> {
     sqlx::query_as::<_, Entry>("SELECT * FROM entries WHERE id = ?")
         .bind(id)

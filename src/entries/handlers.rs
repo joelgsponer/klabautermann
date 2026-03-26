@@ -55,6 +55,12 @@ struct TimelinePageTemplate {
     has_more: bool,
 }
 
+#[derive(Template, WebTemplate)]
+#[template(path = "partials/entry_edit.html")]
+struct EntryEditTemplate {
+    entry: Entry,
+}
+
 // ── Handlers ──────────────────────────────────────────────
 
 /// GET / — full page timeline
@@ -274,6 +280,59 @@ pub async fn delete_entry(
 
     models::delete_entry(&state.db, &id, &user.id).await?;
     Ok(StatusCode::OK.into_response())
+}
+
+/// GET /entries/:id/edit — inline edit form
+pub async fn edit_entry_form(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let entry = models::get_entry(&state.db, &id)
+        .await?
+        .filter(|e| e.user_id == user.id)
+        .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
+
+    Ok(EntryEditTemplate { entry }.into_response())
+}
+
+/// PATCH /entries/:id/edit — update entry content
+pub async fn update_entry(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Response, AppError> {
+    let mut content: Option<String> = None;
+    while let Some(field) = multipart.next_field().await? {
+        if field.name() == Some("content") {
+            content = Some(field.text().await?);
+        }
+    }
+
+    let new_content = content
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Content cannot be empty"))?;
+
+    let entry = models::update_entry(&state.db, &id, &user.id, &new_content)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
+
+    // Re-link tags: clear old, parse new
+    tag_models::unlink_entry_tags(&state.db, &entry.id).await?;
+    let parsed = tag_models::parse_tags_from_text(&new_content);
+    let mut tag_ids = Vec::new();
+    for (name, tag_type) in &parsed {
+        let tag = tag_models::get_or_create_tag(&state.db, &user.id, name, tag_type).await?;
+        tag_ids.push(tag.id);
+    }
+    if !tag_ids.is_empty() {
+        tag_models::link_entry_tags(&state.db, &entry.id, &tag_ids).await?;
+    }
+    let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
+
+    Ok(EntryCollapsedTemplate { entry, tags }.into_response())
 }
 
 /// GET /media/:user_id/:filename — serve stored media
