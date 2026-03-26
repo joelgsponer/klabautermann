@@ -117,11 +117,14 @@ pub async fn create_entry(
     let entry = if let Some((bytes, filename, mime)) = media_data {
         // Media entry
         let file_id = uuid::Uuid::new_v4().to_string();
+        let default_ext = if mime.starts_with("image/") { "png" } else { "webm" };
         let ext = filename
             .rsplit('.')
             .next()
-            .unwrap_or("webm");
-        let entry_type = if mime.starts_with("video/") {
+            .unwrap_or(default_ext);
+        let entry_type = if mime.starts_with("image/") {
+            "image"
+        } else if mime.starts_with("video/") {
             "video"
         } else {
             "audio"
@@ -140,8 +143,10 @@ pub async fn create_entry(
         )
         .await?;
 
-        // Enqueue for transcription
-        let _ = state.transcription_tx.send(entry.id.clone()).await;
+        // Enqueue for transcription (only audio/video, not images)
+        if entry_type != "image" {
+            let _ = state.transcription_tx.send(entry.id.clone()).await;
+        }
 
         entry
     } else if let Some(text) = content {
@@ -240,6 +245,11 @@ pub async fn serve_media(
         Some("mp4") => "video/mp4",
         Some("ogg") => "audio/ogg",
         Some("wav") => "audio/wav",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
         _ => "application/octet-stream",
     };
 

@@ -154,6 +154,49 @@ function onRecordingComplete(blob, type) {
     document.getElementById('media-file').files = dt.files;
 }
 
+// ═══════════════════════════════════════════════
+// IMAGE PASTE & FILE UPLOAD HANDLING
+// ═══════════════════════════════════════════════
+
+// Handle paste events on the textarea (Ctrl+V / Cmd+V with images)
+document.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            if (file) attachImageFile(file);
+            return;
+        }
+    }
+});
+
+// Handle file input change (image button click)
+document.getElementById('media-file').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        attachImageFile(file);
+    }
+});
+
+function attachImageFile(file) {
+    // Show preview
+    const preview = document.getElementById('media-preview');
+    clearPreview();
+    preview.hidden = false;
+
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(file);
+    preview.appendChild(img);
+
+    // Set the file on the file input
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('media-file').files = dt.files;
+}
+
 // Reset preview after form submit
 document.addEventListener('htmx:afterRequest', (e) => {
     if (e.detail.elt && e.detail.elt.id === 'entry-form') {

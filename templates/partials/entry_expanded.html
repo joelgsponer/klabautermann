@@ -11,7 +11,11 @@
             </button>
         {% else %}
             {# Media entry — same as collapsed but full transcript #}
-            {% if entry.entry_type == "audio" %}
+            {% if entry.entry_type == "image" %}
+                {% if let Some(path) = entry.media_path %}
+                <img src="/media/{{ path }}" class="entry-image" loading="lazy" alt="Journal image">
+                {% endif %}
+            {% elif entry.entry_type == "audio" %}
                 {% if let Some(path) = entry.media_path %}
                 <audio controls preload="metadata" class="entry-audio">
                     <source src="/media/{{ path }}" type="{{ entry.media_mime.as_deref().unwrap_or("audio/webm") }}">
