@@ -27,6 +27,13 @@ struct RegisterTemplate {
     error: Option<String>,
 }
 
+#[derive(Template, WebTemplate)]
+#[template(path = "account.html")]
+struct AccountTemplate {
+    username: String,
+    ai_consent: bool,
+}
+
 #[derive(Deserialize)]
 pub struct LoginForm {
     username: String,
@@ -220,6 +227,21 @@ pub async fn logout(
 
     let jar = jar.remove(Cookie::from("session_id"));
     Ok((jar, Redirect::to("/login")).into_response())
+}
+
+/// GET /account — account settings page
+pub async fn account_page(
+    user: AuthUser,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let ai_consent = crate::auth::check_ai_consent(&state.db, &user.id)
+        .await
+        .unwrap_or(false);
+
+    Ok(AccountTemplate {
+        username: user.username,
+        ai_consent,
+    })
 }
 
 #[derive(Deserialize)]

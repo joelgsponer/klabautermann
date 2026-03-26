@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Account — Klabautermann{% endblock %}
+
+{% block body %}
+<div class="app-container">
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">Klabautermann</h1>
+            <span class="header-subtitle">Account Settings</span>
+        </div>
+        <div class="header-right">
+            <a href="/" class="btn btn-ghost">Back to Log</a>
+            <span class="username">{{ username }}</span>
+            <form method="POST" action="/logout" class="inline-form">
+                <button type="submit" class="btn btn-ghost">Disembark</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="timeline-container">
+        <div class="settings-section">
+            <h2 class="tag-section-title">AI Processing</h2>
+            <p class="settings-description">
+                Enable AI-powered features like daily summaries, tag reports, and audio transcription.
+                Your entries are sent to external AI services (Gemini, OpenAI) for processing.
+            </p>
+            <label class="toggle-row">
+                <input type="checkbox" id="ai-consent-toggle"
+                       {% if ai_consent %}checked{% endif %}
+                       hx-post="/account/ai-consent"
+                       hx-vals='js:{"ai_consent": event.target.checked}'
+                       hx-swap="none">
+                <span class="toggle-label">Allow AI processing of my entries</span>
+            </label>
+        </div>
+
+        <div class="settings-section">
+            <h2 class="tag-section-title">Data</h2>
+            <div class="settings-actions">
+                <a href="/account/export" class="btn btn-ghost">Export All Data (JSON)</a>
+            </div>
+        </div>
+
+        <div class="settings-section settings-danger">
+            <h2 class="tag-section-title">Danger Zone</h2>
+            <p class="settings-description">
+                Permanently delete your account and all data. This cannot be undone.
+            </p>
+            <button class="btn btn-danger"
+                    hx-delete="/account"
+                    hx-confirm="Are you sure? This will permanently delete your account and ALL data. This cannot be undone.">
+                Delete Account
+            </button>
+        </div>
+    </main>
+</div>
+{% endblock %}

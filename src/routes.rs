@@ -27,7 +27,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/logout", post(auth::logout))
         // Account management
-        .route("/account", delete(auth::delete_account))
+        .route("/account", get(auth::account_page).delete(auth::delete_account))
         .route("/account/ai-consent", post(auth::set_ai_consent))
         .route("/account/export", get(auth::export_data))
         // Entries
