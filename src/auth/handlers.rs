@@ -4,10 +4,10 @@ use axum::{
     extract::State,
     http::{header, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    Form, Json,
+    Form,
 };
 use axum_extra::extract::cookie::{Cookie, SignedCookieJar};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use time::Duration;
 
 use crate::auth::middleware::AuthUser;
@@ -249,11 +249,6 @@ pub struct AiConsentBody {
     ai_consent: bool,
 }
 
-#[derive(Serialize)]
-struct AiConsentResponse {
-    ai_consent: bool,
-}
-
 /// POST /account/ai-consent — set AI processing consent for the authenticated user.
 ///
 /// Accepts a JSON body `{"ai_consent": true|false}` and returns the resulting
@@ -262,14 +257,14 @@ struct AiConsentResponse {
 pub async fn set_ai_consent(
     user: AuthUser,
     State(state): State<AppState>,
-    Json(body): Json<AiConsentBody>,
+    Form(body): Form<AiConsentBody>,
 ) -> Result<Response, AppError> {
     sqlx::query("UPDATE users SET ai_consent = ? WHERE id = ?")
         .bind(body.ai_consent)
         .bind(&user.id)
         .execute(&state.db)
         .await?;
-    Ok(Json(AiConsentResponse { ai_consent: body.ai_consent }).into_response())
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// DELETE /account — permanently delete the authenticated user's account and all data
