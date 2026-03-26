@@ -29,6 +29,11 @@
                 {% endif %}
             {% endif %}
 
+            {# Caption text (content submitted alongside media) #}
+            {% if let Some(caption) = entry.content %}
+                <p class="entry-caption">{{ caption }}</p>
+            {% endif %}
+
             {% if let Some(transcript) = entry.transcript %}
             <p class="entry-transcription">{{ transcript }}</p>
             {% endif %}

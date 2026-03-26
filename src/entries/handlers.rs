@@ -203,6 +203,16 @@ pub async fn create_entry(
         let relative_path =
             media::save_media(&state.config.media_dir, &user.id, &file_id, &ext, &bytes).await?;
 
+        // Trim content and enforce length limit; treat empty as None
+        let trimmed_content = content
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty());
+        if let Some(ref text) = trimmed_content {
+            if text.len() > MAX_TEXT_LENGTH {
+                return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
+            }
+        }
+
         let entry = models::create_media_entry(
             &state.db,
             &user.id,
@@ -210,6 +220,7 @@ pub async fn create_entry(
             &relative_path,
             &detected_mime,
             bytes.len() as i64,
+            trimmed_content.as_deref(),
         )
         .await?;
 

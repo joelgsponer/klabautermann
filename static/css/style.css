@@ -458,6 +458,15 @@ a:hover {
     color: var(--red-dim);
 }
 
+.entry-caption {
+    margin-top: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+}
+
 .entry-actions {
     display: flex;
     align-items: center;

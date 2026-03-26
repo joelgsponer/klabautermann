@@ -89,16 +89,18 @@ pub async fn create_media_entry(
     media_path: &str,
     media_mime: &str,
     media_size: i64,
+    content: Option<&str>,
 ) -> Result<Entry, sqlx::Error> {
     let id = uuid::Uuid::new_v4().to_string();
     let transcription_status = if entry_type == "image" { "none" } else { "pending" };
     sqlx::query(
-        r#"INSERT INTO entries (id, user_id, entry_type, media_path, media_mime, media_size, transcription_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        r#"INSERT INTO entries (id, user_id, entry_type, content, media_path, media_mime, media_size, transcription_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(&id)
     .bind(user_id)
     .bind(entry_type)
+    .bind(content)
     .bind(media_path)
     .bind(media_mime)
     .bind(media_size)
