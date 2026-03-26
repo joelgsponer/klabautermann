@@ -7,7 +7,8 @@ edition = "2021"
 axum = { version = "0.8", features = ["multipart"] }
 axum-extra = { version = "0.10", features = ["cookie-signed"] }
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["fs", "trace"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "set-header"] }
+infer = "0.16"
 askama = "0.15"
 askama_web = { version = "0.15", features = ["axum-0.8"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }

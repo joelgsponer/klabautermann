@@ -11,6 +11,8 @@ pub struct AppState {
     pub config: Config,
     pub cookie_key: Key,
     pub transcription_tx: mpsc::Sender<String>,
+    /// Shared HTTP client — reuses the connection pool across requests.
+    pub http_client: reqwest::Client,
 }
 
 impl FromRef<AppState> for Key {

@@ -39,6 +39,9 @@ async fn main() -> anyhow::Result<()> {
     // Transcription channel
     let (tx, rx) = mpsc::channel::<String>(100);
 
+    // Shared HTTP client (connection pool reused across all requests)
+    let http_client = reqwest::Client::new();
+
     // Build state
     let cookie_key = Key::from(&config.cookie_secret);
     let state = state::AppState {
@@ -46,16 +49,37 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         cookie_key,
         transcription_tx: tx.clone(),
+        http_client: http_client.clone(),
     };
 
     // Spawn transcription worker
-    entries::transcription::spawn_worker(pool.clone(), config.clone(), rx);
+    entries::transcription::spawn_worker(pool.clone(), config.clone(), http_client, rx);
 
     // Re-enqueue pending transcriptions from crash recovery
     entries::transcription::recover_pending(&pool, &tx).await;
 
     // Spawn daily summary scheduler
     summary::scheduler::spawn_scheduler(pool.clone(), config.clone());
+
+    // Spawn periodic session cleanup (runs every hour)
+    {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            let mut interval =
+                tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                let result = sqlx::query(
+                    "DELETE FROM sessions WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                )
+                .execute(&pool)
+                .await;
+                if let Err(e) = result {
+                    tracing::warn!(error = %e, "Session cleanup failed");
+                }
+            }
+        });
+    }
 
     // Build router
     let app = routes::build_router(state);

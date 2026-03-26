@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -22,11 +22,34 @@ pub async fn save_media(
 }
 
 /// Delete a media file given its relative path.
+///
+/// Path traversal protection: the resolved absolute path must remain within
+/// `media_dir`. Any attempt to escape via `..` components is rejected.
 pub async fn delete_media(media_dir: &str, relative_path: &str) -> Result<()> {
-    let full_path = Path::new(media_dir).join(relative_path);
-    if full_path.exists() {
-        fs::remove_file(&full_path).await?;
+    let media_base = Path::new(media_dir);
+    let full_path = media_base.join(relative_path);
+
+    // Only proceed if the media_dir itself exists (skip if not yet created)
+    if !media_base.exists() {
+        return Ok(());
     }
+
+    let canonical_base = fs::canonicalize(media_base).await?;
+
+    // The target file may not exist yet; build its canonical form manually by
+    // canonicalizing the parent directory and appending the filename.
+    let canonical_path = if full_path.exists() {
+        fs::canonicalize(&full_path).await?
+    } else {
+        // File does not exist — nothing to delete
+        return Ok(());
+    };
+
+    if !canonical_path.starts_with(&canonical_base) {
+        bail!("Attempted path traversal in delete_media: {}", relative_path);
+    }
+
+    fs::remove_file(&canonical_path).await?;
     Ok(())
 }
 

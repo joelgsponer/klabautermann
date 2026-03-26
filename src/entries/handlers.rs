@@ -17,6 +17,17 @@ use crate::tags::models::{self as tag_models, Tag};
 
 const PAGE_SIZE: i64 = 20;
 
+/// Maximum allowed upload size (50 MB). Matched by the DefaultBodyLimit layer.
+const MAX_UPLOAD_SIZE: usize = 50 * 1024 * 1024;
+
+/// Maximum length of a text entry (100 000 characters).
+const MAX_TEXT_LENGTH: usize = 100_000;
+
+/// Permitted file extensions for uploaded media (lowercase, no dot).
+const ALLOWED_EXTENSIONS: &[&str] = &[
+    "webm", "mp4", "ogg", "wav", "png", "jpg", "jpeg", "gif", "webp",
+];
+
 pub struct EntryWithTags {
     pub entry: Entry,
     pub tags: Vec<Tag>,
@@ -158,30 +169,46 @@ pub async fn create_entry(
     }
 
     let entry = if let Some((bytes, filename, mime)) = media_data {
-        // Media entry
+        // Enforce upload size limit (belt-and-suspenders alongside DefaultBodyLimit)
+        if bytes.len() > MAX_UPLOAD_SIZE {
+            return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
+        }
+
         let file_id = uuid::Uuid::new_v4().to_string();
         let default_ext = if mime.starts_with("image/") { "png" } else { "webm" };
         let ext = filename
             .rsplit('.')
             .next()
-            .unwrap_or(default_ext);
-        let entry_type = if mime.starts_with("image/") {
+            .unwrap_or(default_ext)
+            .to_lowercase();
+
+        // Allowlist check — reject extensions not on the approved list
+        if !ALLOWED_EXTENSIONS.contains(&ext.as_str()) {
+            return Ok(StatusCode::BAD_REQUEST.into_response());
+        }
+
+        // Detect actual MIME type via magic bytes; fall back to client-supplied value
+        let detected_mime = infer::get(&bytes)
+            .map(|t| t.mime_type().to_string())
+            .unwrap_or_else(|| mime.clone());
+
+        let entry_type = if detected_mime.starts_with("image/") {
             "image"
-        } else if mime.starts_with("video/") {
+        } else if detected_mime.starts_with("video/") {
             "video"
         } else {
             "audio"
         };
 
         let relative_path =
-            media::save_media(&state.config.media_dir, &user.id, &file_id, ext, &bytes).await?;
+            media::save_media(&state.config.media_dir, &user.id, &file_id, &ext, &bytes).await?;
 
         let entry = models::create_media_entry(
             &state.db,
             &user.id,
             entry_type,
             &relative_path,
-            &mime,
+            &detected_mime,
             bytes.len() as i64,
         )
         .await?;
@@ -196,6 +223,10 @@ pub async fn create_entry(
         let text = text.trim().to_string();
         if text.is_empty() {
             return Ok(StatusCode::BAD_REQUEST.into_response());
+        }
+        // Enforce text entry length limit
+        if text.len() > MAX_TEXT_LENGTH {
+            return Ok(StatusCode::PAYLOAD_TOO_LARGE.into_response());
         }
         models::create_text_entry(&state.db, &user.id, &text).await?
     } else {
@@ -336,41 +367,40 @@ pub async fn update_entry(
 }
 
 /// GET /media/:user_id/:filename — serve stored media
+///
+/// Access control: the authenticated user must own the media (user_id path segment
+/// must match the session user). Returns 404 for missing files and unauthorized requests
+/// to avoid leaking existence information.
 pub async fn serve_media(
     user: AuthUser,
     State(state): State<AppState>,
     Path((user_id, filename)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
-    // BOLA fix: only allow access to the authenticated user's own media
+    // IDOR guard: only the owning user may access their media
     if user_id != user.id {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
-    let media_dir = std::path::Path::new(&state.config.media_dir);
-    let expected_prefix = media_dir.join(&user_id);
-    let path = expected_prefix.join(&filename);
+    let media_base = std::path::Path::new(&state.config.media_dir);
+    let requested = media_base.join(&user_id).join(&filename);
 
-    // Path canonicalization: prevent directory traversal by verifying
-    // the resolved path is still inside the user's media directory
-    let canonical_path = match path.canonicalize() {
+    // Path traversal protection: canonicalize both paths and verify the requested
+    // path is still within the media directory.
+    let canonical_base = match tokio::fs::canonicalize(media_base).await {
         Ok(p) => p,
         Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
-    let canonical_prefix = match expected_prefix.canonicalize() {
+    let canonical_path = match tokio::fs::canonicalize(&requested).await {
         Ok(p) => p,
         Err(_) => return Ok(StatusCode::NOT_FOUND.into_response()),
     };
-    if !canonical_path.starts_with(&canonical_prefix) {
-        return Ok(StatusCode::NOT_FOUND.into_response());
-    }
-
-    if !canonical_path.exists() {
+    if !canonical_path.starts_with(&canonical_base) {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
 
     let bytes = tokio::fs::read(&canonical_path).await?;
 
-    // Guess MIME from extension
+    // Determine MIME from allowed extensions only (no SVG to prevent XSS)
     let mime = match canonical_path.extension().and_then(|e| e.to_str()) {
         Some("webm") => "video/webm",
         Some("mp4") => "video/mp4",
@@ -380,7 +410,6 @@ pub async fn serve_media(
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("gif") => "image/gif",
         Some("webp") => "image/webp",
-        Some("svg") => "image/svg+xml",
         _ => "application/octet-stream",
     };
 

@@ -231,6 +231,7 @@ pub async fn generate_tag_report_handler(
             .into_response());
     }
 
+
     let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;

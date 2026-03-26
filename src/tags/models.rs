@@ -226,6 +226,8 @@ pub async fn delete_tag(
     Ok(result.rows_affected() > 0)
 }
 
+/// Fetch a tag by ID, enforcing ownership. Returns `None` when the tag does not
+/// exist or belongs to a different user, preventing IDOR information leakage.
 pub async fn get_tag(
     pool: &SqlitePool,
     tag_id: &str,

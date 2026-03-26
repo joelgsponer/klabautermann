@@ -2,7 +2,7 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::{
     extract::State,
-    http::header,
+    http::{header, StatusCode},
     response::{IntoResponse, Redirect, Response},
     Form, Json,
 };
@@ -56,7 +56,13 @@ pub async fn login_submit(
     .fetch_optional(&state.db)
     .await?;
 
+    // Constant-time response: always run password verify to prevent timing attacks
     let Some((user_id, password_hash)) = user else {
+        // Run a dummy verify so timing doesn't reveal whether the user exists
+        let _ = verify_password(
+            &form.password,
+            "$argon2id$v=19$m=19456,t=2,p=1$dummysalt00000000$dummyhash000000000000000000000000",
+        );
         return Ok(LoginTemplate {
             error: Some("Invalid credentials".into()),
         }
@@ -90,8 +96,19 @@ pub async fn login_submit(
     Ok((jar.add(cookie), Redirect::to("/")).into_response())
 }
 
-pub async fn register_page() -> impl IntoResponse {
-    RegisterTemplate { error: None }
+pub async fn register_page(
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    if !state.config.allow_registration {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            RegisterTemplate {
+                error: Some("Registration is disabled on this server".into()),
+            },
+        )
+            .into_response());
+    }
+    Ok(RegisterTemplate { error: None }.into_response())
 }
 
 pub async fn register_submit(
@@ -99,9 +116,35 @@ pub async fn register_submit(
     jar: SignedCookieJar,
     Form(form): Form<RegisterForm>,
 ) -> Result<Response, AppError> {
+    // Check registration is allowed
+    if !state.config.allow_registration {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            RegisterTemplate {
+                error: Some("Registration is disabled on this server".into()),
+            },
+        )
+            .into_response());
+    }
+
     if form.username.trim().is_empty() || form.password.is_empty() {
         return Ok(RegisterTemplate {
             error: Some("Username and password are required".into()),
+        }
+        .into_response());
+    }
+
+    // Validate username: max 50 chars, alphanumeric/underscore/hyphen only
+    let username = form.username.trim().to_string();
+    if username.len() > 50 {
+        return Ok(RegisterTemplate {
+            error: Some("Username must be 50 characters or less".into()),
+        }
+        .into_response());
+    }
+    if !username.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
+        return Ok(RegisterTemplate {
+            error: Some("Username can only contain letters, numbers, _ and -".into()),
         }
         .into_response());
     }
@@ -122,7 +165,7 @@ pub async fn register_submit(
 
     // Check for existing username
     let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE username = ?")
-        .bind(&form.username)
+        .bind(&username)
         .fetch_one(&state.db)
         .await?;
 
@@ -138,7 +181,7 @@ pub async fn register_submit(
 
     sqlx::query("INSERT INTO users (id, username, password_hash) VALUES (?, ?, ?)")
         .bind(&user_id)
-        .bind(&form.username)
+        .bind(&username)
         .bind(&password_hash)
         .execute(&state.db)
         .await?;
