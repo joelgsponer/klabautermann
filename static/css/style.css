@@ -830,3 +830,24 @@ a:hover {
 .btn-danger:hover {
     background: rgba(200, 80, 80, 0.25);
 }
+
+/* ── Klabautermann Mascot ────────────────── */
+
+@keyframes klabautermann-gesture {
+    from { background-position: 0 0; }
+    to { background-position: -265px 0; }
+}
+
+.mascot {
+    position: fixed;
+    bottom: 4px;
+    left: 8px;
+    width: 53px;
+    height: 64px;
+    background: url('/static/images/klabautermann-gesture-sm.png') 0 0 no-repeat;
+    image-rendering: pixelated;
+    animation: klabautermann-gesture 1.2s steps(5) infinite;
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 9999;
+}

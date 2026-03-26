@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=3">
+    <link rel="stylesheet" href="/static/css/style.css?v=4">
     <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"
             integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"
             crossorigin="anonymous"></script>
@@ -15,6 +15,7 @@
 </head>
 <body>
     {% block body %}{% endblock %}
+    <div class="mascot" aria-hidden="true"></div>
     <div id="version-badge" style="position:fixed;bottom:4px;right:8px;font-size:0.65rem;opacity:0.3;color:var(--text,#888);pointer-events:none;z-index:9999;font-family:monospace;"></div>
     <script>fetch('/version').then(r=>r.text()).then(v=>{document.getElementById('version-badge').textContent=v.trim()})</script>
 </body>
