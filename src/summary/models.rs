@@ -63,6 +63,27 @@ pub async fn users_with_entries_on_date(
     .await
 }
 
+/// Get all distinct tags referenced in a user's entries on a given date.
+/// Returns (name, tag_type) pairs for feeding into the summary prompt.
+pub async fn get_tags_for_date(
+    pool: &SqlitePool,
+    user_id: &str,
+    date: &str,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, String)>(
+        r#"SELECT DISTINCT t.name, t.tag_type
+           FROM tags t
+           JOIN entry_tags et ON et.tag_id = t.id
+           JOIN entries e ON e.id = et.entry_id
+           WHERE e.user_id = ? AND date(e.created_at) = ?
+           ORDER BY t.tag_type, t.name"#,
+    )
+    .bind(user_id)
+    .bind(date)
+    .fetch_all(pool)
+    .await
+}
+
 /// Get entry texts for a user on a given date, for building the prompt.
 pub async fn get_entries_for_date(
     pool: &SqlitePool,

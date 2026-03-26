@@ -11,7 +11,7 @@
                   rows="1"
                   class="entry-input"
                   onInput="this.style.height='auto'; this.style.height=this.scrollHeight+'px';"
-                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){var dd=document.getElementById('tag-autocomplete'); if(dd && !dd.hidden) return; event.preventDefault(); this.closest('form').requestSubmit();}"></textarea>
         <div id="tag-autocomplete" class="tag-autocomplete" hidden></div>
     </div>
     <div class="form-actions">

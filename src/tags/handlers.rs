@@ -62,6 +62,8 @@ struct TagEntriesPageTemplate {
     tag: Tag,
     entries: Vec<EntryWithTags>,
     has_more: bool,
+    report: Option<TagReport>,
+    has_gemini_key: bool,
 }
 
 // ── Handlers ──────────────────────────────────────────────
@@ -97,11 +99,11 @@ pub async fn autocomplete(
     let q = query.q.unwrap_or_default();
     let tag_type = query.r#type.unwrap_or_else(|| "tag".to_string());
 
-    if q.is_empty() {
-        return Ok(TagAutocompleteTemplate { tags: vec![] });
-    }
-
-    let tags = models::search_tags(&state.db, &user.id, &q, &tag_type).await?;
+    let tags = if q.is_empty() {
+        models::list_tags_by_type(&state.db, &user.id, &tag_type).await?
+    } else {
+        models::search_tags(&state.db, &user.id, &q, &tag_type).await?
+    };
     Ok(TagAutocompleteTemplate { tags })
 }
 
@@ -180,11 +182,16 @@ pub async fn tag_entries(
         })
         .collect();
 
+    let report = report::get_tag_report(&state.db, &id, &user.id).await?;
+    let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
+
     Ok(TagEntriesPageTemplate {
         username: user.username,
         tag,
         entries,
         has_more,
+        report,
+        has_gemini_key,
     })
 }
 

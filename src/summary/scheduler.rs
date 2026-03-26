@@ -79,7 +79,8 @@ pub async fn generate_for_user(
         return Ok(());
     }
 
-    let prompt = gemini::build_summary_prompt(&entries);
+    let tags = models::get_tags_for_date(pool, user_id, date).await?;
+    let prompt = gemini::build_summary_prompt(&entries, &tags);
     let summary = gemini::call_gemini_api(api_key, &prompt).await?;
     models::upsert_summary(pool, user_id, date, &summary).await?;
 

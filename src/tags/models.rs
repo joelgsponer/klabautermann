@@ -162,6 +162,23 @@ pub async fn get_tags_for_entries(
     Ok(map)
 }
 
+pub async fn list_tags_by_type(
+    pool: &SqlitePool,
+    user_id: &str,
+    tag_type: &str,
+) -> Result<Vec<Tag>, sqlx::Error> {
+    sqlx::query_as::<_, Tag>(
+        r#"SELECT * FROM tags
+           WHERE user_id = ? AND tag_type = ?
+           ORDER BY name
+           LIMIT 10"#,
+    )
+    .bind(user_id)
+    .bind(tag_type)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn search_tags(
     pool: &SqlitePool,
     user_id: &str,

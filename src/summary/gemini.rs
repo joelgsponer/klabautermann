@@ -61,15 +61,33 @@ pub async fn call_gemini_api(api_key: &str, prompt: &str) -> anyhow::Result<Stri
     Ok(text)
 }
 
-/// Build a prompt from the day's entries.
-pub fn build_summary_prompt(entries: &[(String, String, Option<String>, Option<String>)]) -> String {
+/// Build a prompt from the day's entries and their associated tags.
+pub fn build_summary_prompt(
+    entries: &[(String, String, Option<String>, Option<String>)],
+    tags: &[(String, String)],
+) -> String {
     let mut prompt = String::from(
         "You are a personal journal summariser. Below are all the log entries for a single day. \
          Write a concise, reflective daily summary in 2-4 paragraphs. Highlight key themes, \
          activities, and any notable patterns. Write in second person (\"you\"). \
          Do not include a title or heading — just the summary text.\n\n\
-         ---\n\n"
+         IMPORTANT: Preserve ALL specific names, @mentions, #tags, project names, places, \
+         and concrete details exactly as they appear. Never generalise a named person into \
+         \"a colleague\" or \"someone\" — use their actual name or @mention. Never generalise \
+         a named project into \"a project\" — use its actual name. Specific details are what \
+         make a journal entry valuable.\n\n"
     );
+
+    if !tags.is_empty() {
+        prompt.push_str("Entities referenced today:\n");
+        for (name, tag_type) in tags {
+            let sigil = if tag_type == "person" { "@" } else { "#" };
+            prompt.push_str(&format!("- {}{}\n", sigil, name));
+        }
+        prompt.push_str("\nMake sure all of these entities appear in the summary where relevant.\n\n");
+    }
+
+    prompt.push_str("---\n\n");
 
     for (entry_type, created_at, content, transcript) in entries {
         // Extract time portion
