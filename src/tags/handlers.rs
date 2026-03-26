@@ -194,7 +194,6 @@ pub async fn tag_report(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    // get_tag already enforces user ownership; no separate check needed
     let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
@@ -220,7 +219,19 @@ pub async fn generate_tag_report_handler(
         _ => return Ok(StatusCode::SERVICE_UNAVAILABLE.into_response()),
     };
 
-    // get_tag already enforces user ownership; no separate check needed
+    // Check AI consent before calling Gemini
+    let has_consent = crate::auth::check_ai_consent(&state.db, &user.id)
+        .await
+        .map_err(|e| AppError::from(anyhow::anyhow!(e)))?;
+    if !has_consent {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            "AI processing requires consent. Enable it in account settings.",
+        )
+            .into_response());
+    }
+
+
     let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;

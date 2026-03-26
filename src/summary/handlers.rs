@@ -51,6 +51,18 @@ pub async fn generate_summary(
         }
     };
 
+    // Check AI consent before calling Gemini
+    let has_consent = crate::auth::check_ai_consent(&state.db, &user.id)
+        .await
+        .map_err(|e| AppError::from(anyhow::anyhow!(e)))?;
+    if !has_consent {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            "AI processing requires consent. Enable it in account settings.",
+        )
+            .into_response());
+    }
+
     let today = Utc::now().format("%Y-%m-%d").to_string();
 
     if let Err(e) = scheduler::generate_for_user(&state.db, &api_key, &user.id, &today).await {

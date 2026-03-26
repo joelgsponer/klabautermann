@@ -18,7 +18,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "klabautermann=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "klabautermann=info,tower_http=info".into()),
         )
         .init();
 
@@ -117,6 +117,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("004_tags", include_str!("../migrations/004_tags.sql")),
         ("005_daily_summaries", include_str!("../migrations/005_daily_summaries.sql")),
         ("006_tag_reports", include_str!("../migrations/006_tag_reports.sql")),
+        ("007_ai_consent", include_str!("../migrations/007_ai_consent.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

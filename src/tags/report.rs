@@ -93,7 +93,7 @@ pub async fn generate_tag_report(
     tag_id: &str,
     user_id: &str,
 ) -> anyhow::Result<TagReport> {
-    // 1. Fetch the tag — get_tag enforces ownership via user_id filter
+    // 1. Fetch the tag (get_tag enforces ownership via user_id filter)
     let tag = super::models::get_tag(pool, tag_id, user_id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
@@ -105,17 +105,17 @@ pub async fn generate_tag_report(
         anyhow::bail!("No entries found for this tag");
     }
 
-    // 4. Get existing report
+    // 3. Get existing report
     let existing = get_tag_report(pool, tag_id, user_id).await?;
     let existing_text = existing.as_ref().map(|r| r.report.as_str());
 
-    // 5. Build prompt
+    // 4. Build prompt
     let prompt = build_tag_report_prompt(&tag.name, &tag.tag_type, &entries, existing_text);
 
-    // 6. Call Gemini
+    // 5. Call Gemini
     let report_text = crate::summary::gemini::call_gemini_api(api_key, &prompt).await?;
 
-    // 7. Upsert and return
+    // 6. Upsert and return
     let report = upsert_tag_report(pool, tag_id, user_id, &report_text, entries.len() as i32).await?;
 
     Ok(report)

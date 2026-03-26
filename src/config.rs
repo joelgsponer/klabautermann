@@ -8,11 +8,7 @@ pub struct Config {
     pub listen_addr: String,
     pub media_dir: String,
     pub gemini_api_key: Option<String>,
-    /// Whether to set the Secure flag on session cookies (default: true).
-    /// Set SECURE_COOKIES=false only in development without TLS.
     pub secure_cookies: bool,
-    /// Whether new user registration is permitted (default: false).
-    /// Set ALLOW_REGISTRATION=true to enable open registration.
     pub allow_registration: bool,
 }
 
