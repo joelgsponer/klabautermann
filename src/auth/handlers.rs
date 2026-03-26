@@ -2,13 +2,15 @@ use askama::Template;
 use askama_web::WebTemplate;
 use axum::{
     extract::State,
+    http::header,
     response::{IntoResponse, Redirect, Response},
-    Form,
+    Form, Json,
 };
 use axum_extra::extract::cookie::{Cookie, SignedCookieJar};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use time::Duration;
 
+use crate::auth::middleware::AuthUser;
 use crate::auth::password::{hash_password, verify_password};
 use crate::error::AppError;
 use crate::state::AppState;
@@ -81,6 +83,7 @@ pub async fn login_submit(
     let cookie = Cookie::build(("session_id", session_id))
         .path("/")
         .http_only(true)
+        .secure(state.config.secure_cookies)
         .max_age(Duration::days(30))
         .same_site(axum_extra::extract::cookie::SameSite::Lax);
 
@@ -154,6 +157,7 @@ pub async fn register_submit(
     let cookie = Cookie::build(("session_id", session_id))
         .path("/")
         .http_only(true)
+        .secure(state.config.secure_cookies)
         .max_age(Duration::days(30))
         .same_site(axum_extra::extract::cookie::SameSite::Lax);
 
@@ -173,4 +177,136 @@ pub async fn logout(
 
     let jar = jar.remove(Cookie::from("session_id"));
     Ok((jar, Redirect::to("/login")).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct AiConsentBody {
+    ai_consent: bool,
+}
+
+#[derive(Serialize)]
+struct AiConsentResponse {
+    ai_consent: bool,
+}
+
+/// POST /account/ai-consent — set AI processing consent for the authenticated user.
+///
+/// Accepts a JSON body `{"ai_consent": true|false}` and returns the resulting
+/// consent state as `{"ai_consent": true|false}`. Idempotent: calling with the
+/// same value multiple times has no additional effect.
+pub async fn set_ai_consent(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Json(body): Json<AiConsentBody>,
+) -> Result<Response, AppError> {
+    sqlx::query("UPDATE users SET ai_consent = ? WHERE id = ?")
+        .bind(body.ai_consent)
+        .bind(&user.id)
+        .execute(&state.db)
+        .await?;
+    Ok(Json(AiConsentResponse { ai_consent: body.ai_consent }).into_response())
+}
+
+/// DELETE /account — permanently delete the authenticated user's account and all data
+pub async fn delete_account(
+    user: AuthUser,
+    State(state): State<AppState>,
+    jar: SignedCookieJar,
+) -> Result<Response, AppError> {
+    // Delete user (CASCADE handles entries, tags, sessions, summaries)
+    sqlx::query("DELETE FROM users WHERE id = ?")
+        .bind(&user.id)
+        .execute(&state.db)
+        .await?;
+
+    // Clean up media files; log on failure so orphaned directories can be identified
+    if let Err(e) = crate::media::delete_user_media_dir(&state.config.media_dir, &user.id).await {
+        tracing::warn!(user_id = %user.id, error = %e, "Failed to delete user media directory during account deletion");
+    }
+
+    // Remove session cookie
+    let jar = jar.remove(Cookie::from("session_id"));
+    Ok((jar, Redirect::to("/login")).into_response())
+}
+
+/// GET /account/export — export all user data as JSON
+pub async fn export_data(
+    user: AuthUser,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    // Fetch all entries
+    let entries = sqlx::query_as::<_, crate::entries::models::Entry>(
+        "SELECT * FROM entries WHERE user_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    // Fetch all tags
+    let tags = crate::tags::models::list_tags(&state.db, &user.id).await?;
+
+    // Fetch all daily summaries
+    let daily_summaries = sqlx::query_as::<_, crate::summary::models::DailySummary>(
+        "SELECT * FROM daily_summaries WHERE user_id = ? ORDER BY date DESC",
+    )
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    // Fetch all tag reports
+    let tag_reports = sqlx::query_as::<_, crate::tags::report::TagReport>(
+        "SELECT * FROM tag_reports WHERE user_id = ? ORDER BY generated_at DESC",
+    )
+    .bind(&user.id)
+    .fetch_all(&state.db)
+    .await?;
+
+    // Build export
+    let export = serde_json::json!({
+        "user": {
+            "id": user.id,
+            "username": user.username,
+        },
+        "entries": entries.iter().map(|e| serde_json::json!({
+            "id": e.id,
+            "entry_type": e.entry_type,
+            "content": e.content,
+            "media_path": e.media_path,
+            "media_mime": e.media_mime,
+            "transcript": e.transcript,
+            "created_at": e.created_at,
+            "updated_at": e.updated_at,
+        })).collect::<Vec<_>>(),
+        "tags": tags.iter().map(|t| serde_json::json!({
+            "id": t.id,
+            "name": t.name,
+            "tag_type": t.tag_type,
+            "created_at": t.created_at,
+        })).collect::<Vec<_>>(),
+        "daily_summaries": daily_summaries.iter().map(|s| serde_json::json!({
+            "id": s.id,
+            "date": s.date,
+            "summary": s.summary,
+            "generated_at": s.generated_at,
+        })).collect::<Vec<_>>(),
+        "tag_reports": tag_reports.iter().map(|r| serde_json::json!({
+            "id": r.id,
+            "tag_id": r.tag_id,
+            "report": r.report,
+            "entry_count": r.entry_count,
+            "generated_at": r.generated_at,
+        })).collect::<Vec<_>>(),
+    });
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/json"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"klabautermann-export.json\"",
+            ),
+        ],
+        serde_json::to_string_pretty(&export)?,
+    )
+        .into_response())
 }

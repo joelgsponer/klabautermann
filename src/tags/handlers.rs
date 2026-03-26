@@ -124,7 +124,7 @@ pub async fn rename_tag(
 
     models::rename_tag(&state.db, &id, &user.id, &new_name).await?;
 
-    let tag = models::get_tag(&state.db, &id)
+    let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
 
@@ -153,7 +153,7 @@ pub async fn tag_entries(
     Path(id): Path<String>,
     Query(query): Query<TagEntriesQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let tag = models::get_tag(&state.db, &id)
+    let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
 
@@ -194,13 +194,9 @@ pub async fn tag_report(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let tag = models::get_tag(&state.db, &id)
+    let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
-    // Ownership check
-    if tag.user_id != user.id {
-        return Err(anyhow::anyhow!("Tag not found").into());
-    }
     let report = report::get_tag_report(&state.db, &id, &user.id).await?;
     let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
 
@@ -223,12 +219,21 @@ pub async fn generate_tag_report_handler(
         _ => return Ok(StatusCode::SERVICE_UNAVAILABLE.into_response()),
     };
 
-    let tag = models::get_tag(&state.db, &id)
+    // Check AI consent before calling Gemini
+    let has_consent = crate::auth::check_ai_consent(&state.db, &user.id)
+        .await
+        .map_err(|e| AppError::from(anyhow::anyhow!(e)))?;
+    if !has_consent {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            "AI processing requires consent. Enable it in account settings.",
+        )
+            .into_response());
+    }
+
+    let tag = models::get_tag(&state.db, &id, &user.id)
         .await?
         .ok_or_else(|| anyhow::anyhow!("Tag not found"))?;
-    if tag.user_id != user.id {
-        return Err(anyhow::anyhow!("Tag not found").into());
-    }
 
     match report::generate_tag_report(&state.db, &api_key, &id, &user.id).await {
         Ok(_) => {},
