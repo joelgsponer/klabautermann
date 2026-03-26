@@ -1,0 +1,51 @@
+<div class="entry entry-expanded" id="entry-{{ entry.id }}">
+    <div class="entry-time">{{ entry.formatted_time() }}</div>
+    <div class="entry-body">
+        {% if entry.entry_type == "text" %}
+            <p class="entry-text">{{ entry.display_text().unwrap_or("") }}</p>
+            <button class="btn btn-ghost btn-expand"
+                    hx-get="/entries/{{ entry.id }}/collapse"
+                    hx-target="#entry-{{ entry.id }}"
+                    hx-swap="outerHTML">
+                Show less
+            </button>
+        {% else %}
+            {# Media entry — same as collapsed but full transcript #}
+            {% if entry.entry_type == "audio" %}
+                {% if let Some(path) = entry.media_path %}
+                <audio controls preload="metadata" class="entry-audio">
+                    <source src="/media/{{ path }}" type="{{ entry.media_mime.as_deref().unwrap_or("audio/webm") }}">
+                </audio>
+                {% endif %}
+            {% else %}
+                {% if let Some(path) = entry.media_path %}
+                <video controls preload="metadata" class="entry-video">
+                    <source src="/media/{{ path }}" type="{{ entry.media_mime.as_deref().unwrap_or("video/webm") }}">
+                </video>
+                {% endif %}
+            {% endif %}
+
+            {% if let Some(transcript) = entry.transcript %}
+            <p class="entry-transcription">{{ transcript }}</p>
+            {% endif %}
+
+            <button class="btn btn-ghost btn-expand"
+                    hx-get="/entries/{{ entry.id }}/collapse"
+                    hx-target="#entry-{{ entry.id }}"
+                    hx-swap="outerHTML">
+                Show less
+            </button>
+        {% endif %}
+
+        <div class="entry-actions">
+            <span class="entry-type-badge">{{ entry.entry_type }}</span>
+            <button class="btn btn-ghost btn-delete"
+                    hx-delete="/entries/{{ entry.id }}"
+                    hx-target="#entry-{{ entry.id }}"
+                    hx-swap="delete"
+                    hx-confirm="Delete this entry?">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+        </div>
+    </div>
+</div>

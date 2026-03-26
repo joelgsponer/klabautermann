@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In — Klabautermann{% endblock %}
+
+{% block body %}
+<div class="auth-container">
+    <div class="auth-card">
+        <h1 class="auth-title">Klabautermann</h1>
+        <p class="auth-subtitle">Ship's Log</p>
+
+        {% if let Some(msg) = error %}
+        <div class="error-message">{{ msg }}</div>
+        {% endif %}
+
+        <form method="POST" action="/login" class="auth-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autofocus
+                       placeholder="Navigator">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required
+                       placeholder="Secret passage">
+            </div>
+            <button type="submit" class="btn btn-primary">Board the Ship</button>
+        </form>
+
+        <p class="auth-link">
+            No account yet? <a href="/register">Register</a>
+        </p>
+    </div>
+</div>
+{% endblock %}

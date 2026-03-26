@@ -1,0 +1,15 @@
+{% for entry in entries %}
+{% include "partials/entry.html" %}
+{% endfor %}
+
+{% if has_more %}
+{% if let Some(last) = entries.last() %}
+<div class="scroll-sentinel"
+     hx-get="/entries/page?before={{ last.created_at }}"
+     hx-trigger="revealed"
+     hx-target="#timeline"
+     hx-swap="beforeend"
+     hx-indicator=".loading-indicator">
+</div>
+{% endif %}
+{% endif %}

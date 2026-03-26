@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Ship's Log — Klabautermann{% endblock %}
+
+{% block head %}
+<script src="/static/js/recorder.js" defer></script>
+{% endblock %}
+
+{% block body %}
+<div class="app-container">
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">Klabautermann</h1>
+            <span class="header-subtitle">Ship's Log</span>
+        </div>
+        <div class="header-right">
+            <span class="username">{{ username }}</span>
+            <form method="POST" action="/logout" class="inline-form">
+                <button type="submit" class="btn btn-ghost">Disembark</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="timeline-container">
+        {# Entry form #}
+        {% include "partials/entry_form.html" %}
+
+        {# Timeline #}
+        <div id="timeline">
+            {% for entry in entries %}
+            {% include "partials/entry.html" %}
+            {% endfor %}
+        </div>
+
+        {# Infinite scroll sentinel #}
+        {% if has_more %}
+        {% if let Some(last) = entries.last() %}
+        <div class="scroll-sentinel"
+             hx-get="/entries/page?before={{ last.created_at }}"
+             hx-trigger="revealed"
+             hx-target="#timeline"
+             hx-swap="beforeend"
+             hx-indicator=".loading-indicator">
+        </div>
+        {% endif %}
+        {% endif %}
+
+        <div class="loading-indicator htmx-indicator">
+            <span>Loading older entries...</span>
+        </div>
+
+        {% if entries.is_empty() %}
+        <div class="empty-state">
+            <p class="empty-title">The log is empty</p>
+            <p class="empty-text">Begin your voyage. Write your first entry above.</p>
+        </div>
+        {% endif %}
+    </main>
+</div>
+{% endblock %}
