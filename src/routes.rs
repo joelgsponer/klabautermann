@@ -1,14 +1,19 @@
 use axum::{
+    extract::DefaultBodyLimit,
+    http::{HeaderName, HeaderValue},
     routing::{get, post, put},
     Router,
 };
-use tower_http::services::ServeDir;
+use tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer};
 
 use crate::auth::handlers as auth;
 use crate::entries::handlers as entries;
 use crate::state::AppState;
 use crate::summary::handlers as summary;
 use crate::tags::handlers as tags;
+
+/// Maximum allowed request body size (50 MB).
+pub const MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -42,4 +47,19 @@ pub fn build_router(state: AppState) -> Router {
         // Static files
         .nest_service("/static", ServeDir::new("static"))
         .with_state(state)
+        // Enforce a 50 MB request body limit across all routes
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
+        // Security response headers
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
 }

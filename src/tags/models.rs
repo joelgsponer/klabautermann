@@ -215,12 +215,16 @@ pub async fn delete_tag(
     Ok(result.rows_affected() > 0)
 }
 
+/// Fetch a tag by ID, enforcing ownership. Returns `None` when the tag does not
+/// exist or belongs to a different user, preventing IDOR information leakage.
 pub async fn get_tag(
     pool: &SqlitePool,
     tag_id: &str,
+    user_id: &str,
 ) -> Result<Option<Tag>, sqlx::Error> {
-    sqlx::query_as::<_, Tag>("SELECT * FROM tags WHERE id = ?")
+    sqlx::query_as::<_, Tag>("SELECT * FROM tags WHERE id = ? AND user_id = ?")
         .bind(tag_id)
+        .bind(user_id)
         .fetch_optional(pool)
         .await
 }

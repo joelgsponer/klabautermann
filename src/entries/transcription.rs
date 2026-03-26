@@ -5,17 +5,32 @@ use tracing::{error, info, warn};
 use crate::config::Config;
 
 /// Spawn the background transcription worker.
-pub fn spawn_worker(pool: SqlitePool, config: Config, mut rx: mpsc::Receiver<String>) {
+///
+/// Accepts a shared `reqwest::Client` to avoid the overhead of creating a new
+/// HTTP connection pool for every transcription request.
+pub fn spawn_worker(
+    pool: SqlitePool,
+    config: Config,
+    http_client: reqwest::Client,
+    mut rx: mpsc::Receiver<String>,
+) {
     tokio::spawn(async move {
         info!("Transcription worker started");
         while let Some(entry_id) = rx.recv().await {
             info!(entry_id = %entry_id, "Processing transcription");
-            if let Err(e) = process_transcription(&pool, &config, &entry_id).await {
+            if let Err(e) = process_transcription(&pool, &config, &http_client, &entry_id).await {
                 error!(entry_id = %entry_id, error = %e, "Transcription failed");
+                // Store a sanitized error message in the DB so that raw API responses
+                // (which may contain sensitive information) are never persisted.
+                let safe_error = if e.to_string().contains("Whisper API error") {
+                    "Transcription API error".to_string()
+                } else {
+                    "Transcription failed".to_string()
+                };
                 let _ = sqlx::query(
                     "UPDATE entries SET transcription_status = 'failed', transcription_error = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?",
                 )
-                .bind(e.to_string())
+                .bind(safe_error)
                 .bind(&entry_id)
                 .execute(&pool)
                 .await;
@@ -45,6 +60,7 @@ pub async fn recover_pending(pool: &SqlitePool, tx: &mpsc::Sender<String>) {
 async fn process_transcription(
     pool: &SqlitePool,
     config: &Config,
+    http_client: &reqwest::Client,
     entry_id: &str,
 ) -> anyhow::Result<()> {
     // Mark as processing
@@ -76,8 +92,10 @@ async fn process_transcription(
 
     let mime_type = entry.media_mime.unwrap_or_else(|| "audio/webm".into());
 
-    // Call OpenAI Whisper API
-    let transcript = call_whisper_api(&config.openai_api_key, file_bytes, &filename, &mime_type).await?;
+    // Call OpenAI Whisper API using the shared client
+    let transcript =
+        call_whisper_api(http_client, &config.openai_api_key, file_bytes, &filename, &mime_type)
+            .await?;
 
     // Update entry with transcript
     sqlx::query(
@@ -96,13 +114,12 @@ async fn process_transcription(
 }
 
 async fn call_whisper_api(
+    client: &reqwest::Client,
     api_key: &str,
     file_bytes: Vec<u8>,
     filename: &str,
     mime_type: &str,
 ) -> anyhow::Result<String> {
-    let client = reqwest::Client::new();
-
     let file_part = reqwest::multipart::Part::bytes(file_bytes)
         .file_name(filename.to_string())
         .mime_str(mime_type)?;
