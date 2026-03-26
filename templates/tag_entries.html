@@ -1,9 +1,8 @@
 {% extends "base.html" %}
 
-{% block title %}Ship's Log — Klabautermann{% endblock %}
+{% block title %}{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} — Klabautermann{% endblock %}
 
 {% block head %}
-<script src="/static/js/recorder.js?v=2" defer></script>
 <script src="/static/js/tags.js?v=1" defer></script>
 {% endblock %}
 
@@ -12,10 +11,11 @@
     <header class="app-header">
         <div class="header-left">
             <h1 class="logo">Klabautermann</h1>
-            <span class="header-subtitle">Ship's Log</span>
+            <span class="header-subtitle">{% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }}</span>
         </div>
         <div class="header-right">
-            <a href="/tags" class="btn btn-ghost">Tags</a>
+            <a href="/tags" class="btn btn-ghost">All Tags</a>
+            <a href="/" class="btn btn-ghost">Back to Log</a>
             <span class="username">{{ username }}</span>
             <form method="POST" action="/logout" class="inline-form">
                 <button type="submit" class="btn btn-ghost">Disembark</button>
@@ -24,10 +24,6 @@
     </header>
 
     <main class="timeline-container">
-        {# Entry form #}
-        {% include "partials/entry_form.html" %}
-
-        {# Timeline #}
         <div id="timeline">
             {% for ew in entries %}
             {% let entry = ew.entry %}
@@ -36,11 +32,10 @@
             {% endfor %}
         </div>
 
-        {# Infinite scroll sentinel #}
         {% if has_more %}
         {% if let Some(last) = entries.last() %}
         <div class="scroll-sentinel"
-             hx-get="/entries/page?before={{ last.entry.created_at }}"
+             hx-get="/tags/{{ tag.id }}/entries?before={{ last.entry.created_at }}"
              hx-trigger="revealed"
              hx-target="#timeline"
              hx-swap="beforeend"
@@ -55,8 +50,8 @@
 
         {% if entries.is_empty() %}
         <div class="empty-state">
-            <p class="empty-title">The log is empty</p>
-            <p class="empty-text">Begin your voyage. Write your first entry above.</p>
+            <p class="empty-title">No entries with this tag</p>
+            <p class="empty-text">Entries tagged {% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }} will appear here.</p>
         </div>
         {% endif %}
     </main>

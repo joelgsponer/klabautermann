@@ -1,0 +1,5 @@
+{% for tag in tags %}
+<div class="autocomplete-item" data-name="{{ tag.name }}" data-type="{{ tag.tag_type }}">
+    {% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }}
+</div>
+{% endfor %}

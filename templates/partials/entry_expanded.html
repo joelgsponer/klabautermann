@@ -41,6 +41,16 @@
             </button>
         {% endif %}
 
+        {% if !tags.is_empty() %}
+        <div class="entry-tags">
+            {% for tag in tags %}
+            <a href="/tags/{{ tag.id }}/entries" class="entry-tag entry-tag-{{ tag.tag_type }}">
+                {% if tag.tag_type == "person" %}@{% else %}#{% endif %}{{ tag.name }}
+            </a>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <div class="entry-actions">
             <span class="entry-type-badge">{{ entry.entry_type }}</span>
             <button class="btn btn-ghost btn-delete"

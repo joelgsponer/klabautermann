@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use tower_http::services::ServeDir;
@@ -7,6 +7,7 @@ use tower_http::services::ServeDir;
 use crate::auth::handlers as auth;
 use crate::entries::handlers as entries;
 use crate::state::AppState;
+use crate::tags::handlers as tags;
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -25,6 +26,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/entries/{id}", get(entries::get_entry).delete(entries::delete_entry))
         .route("/entries/{id}/expand", get(entries::expand_entry))
         .route("/entries/{id}/collapse", get(entries::collapse_entry))
+        // Tags
+        .route("/tags", get(tags::tags_page))
+        .route("/tags/autocomplete", get(tags::autocomplete))
+        .route("/tags/{id}", put(tags::rename_tag).delete(tags::delete_tag))
+        .route("/tags/{id}/entries", get(tags::tag_entries))
         // Media
         .route("/media/{user_id}/{filename}", get(entries::serve_media))
         // Static files

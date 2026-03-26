@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Tags — Klabautermann{% endblock %}
+
+{% block head %}
+<script src="/static/js/tags.js?v=1" defer></script>
+{% endblock %}
+
+{% block body %}
+<div class="app-container">
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">Klabautermann</h1>
+            <span class="header-subtitle">Tags</span>
+        </div>
+        <div class="header-right">
+            <a href="/" class="btn btn-ghost">Back to Log</a>
+            <span class="username">{{ username }}</span>
+            <form method="POST" action="/logout" class="inline-form">
+                <button type="submit" class="btn btn-ghost">Disembark</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="timeline-container">
+        <div class="tag-section">
+            <h2 class="tag-section-title"># Tags</h2>
+            {% if tags.is_empty() %}
+            <p class="empty-text">No tags yet. Use #hashtags in your entries to create them.</p>
+            {% else %}
+            <div class="tag-list">
+                {% for tag in tags %}
+                {% include "partials/tag_row.html" %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="tag-section">
+            <h2 class="tag-section-title">@ People</h2>
+            {% if people.is_empty() %}
+            <p class="empty-text">No people yet. Use @mentions in your entries to create them.</p>
+            {% else %}
+            <div class="tag-list">
+                {% for tag in people %}
+                {% include "partials/tag_row.html" %}
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </main>
+</div>
+{% endblock %}

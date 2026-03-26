@@ -12,8 +12,14 @@ use crate::entries::models::{self, Entry};
 use crate::error::AppError;
 use crate::media;
 use crate::state::AppState;
+use crate::tags::models::{self as tag_models, Tag};
 
 const PAGE_SIZE: i64 = 20;
+
+pub struct EntryWithTags {
+    pub entry: Entry,
+    pub tags: Vec<Tag>,
+}
 
 // ── Templates ──────────────────────────────────────────────
 
@@ -21,7 +27,7 @@ const PAGE_SIZE: i64 = 20;
 #[template(path = "timeline.html")]
 struct TimelineTemplate {
     username: String,
-    entries: Vec<Entry>,
+    entries: Vec<EntryWithTags>,
     has_more: bool,
 }
 
@@ -29,18 +35,20 @@ struct TimelineTemplate {
 #[template(path = "partials/entry.html")]
 struct EntryCollapsedTemplate {
     entry: Entry,
+    tags: Vec<Tag>,
 }
 
 #[derive(Template, WebTemplate)]
 #[template(path = "partials/entry_expanded.html")]
 struct EntryExpandedTemplate {
     entry: Entry,
+    tags: Vec<Tag>,
 }
 
 #[derive(Template, WebTemplate)]
 #[template(path = "partials/timeline_page.html")]
 struct TimelinePageTemplate {
-    entries: Vec<Entry>,
+    entries: Vec<EntryWithTags>,
     has_more: bool,
 }
 
@@ -51,9 +59,19 @@ pub async fn timeline(
     user: AuthUser,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
-    let entries = models::list_entries(&state.db, &user.id, None, PAGE_SIZE + 1).await?;
-    let has_more = entries.len() > PAGE_SIZE as usize;
-    let entries: Vec<Entry> = entries.into_iter().take(PAGE_SIZE as usize).collect();
+    let raw_entries = models::list_entries(&state.db, &user.id, None, PAGE_SIZE + 1).await?;
+    let has_more = raw_entries.len() > PAGE_SIZE as usize;
+    let raw_entries: Vec<Entry> = raw_entries.into_iter().take(PAGE_SIZE as usize).collect();
+
+    let entry_ids: Vec<String> = raw_entries.iter().map(|e| e.id.clone()).collect();
+    let tags_map = tag_models::get_tags_for_entries(&state.db, &entry_ids).await?;
+    let entries: Vec<EntryWithTags> = raw_entries
+        .into_iter()
+        .map(|entry| {
+            let tags = tags_map.get(&entry.id).cloned().unwrap_or_default();
+            EntryWithTags { entry, tags }
+        })
+        .collect();
 
     Ok(TimelineTemplate {
         username: user.username,
@@ -73,10 +91,20 @@ pub async fn timeline_page(
     State(state): State<AppState>,
     Query(query): Query<PageQuery>,
 ) -> Result<impl IntoResponse, AppError> {
-    let entries =
+    let raw_entries =
         models::list_entries(&state.db, &user.id, query.before.as_deref(), PAGE_SIZE + 1).await?;
-    let has_more = entries.len() > PAGE_SIZE as usize;
-    let entries: Vec<Entry> = entries.into_iter().take(PAGE_SIZE as usize).collect();
+    let has_more = raw_entries.len() > PAGE_SIZE as usize;
+    let raw_entries: Vec<Entry> = raw_entries.into_iter().take(PAGE_SIZE as usize).collect();
+
+    let entry_ids: Vec<String> = raw_entries.iter().map(|e| e.id.clone()).collect();
+    let tags_map = tag_models::get_tags_for_entries(&state.db, &entry_ids).await?;
+    let entries: Vec<EntryWithTags> = raw_entries
+        .into_iter()
+        .map(|entry| {
+            let tags = tags_map.get(&entry.id).cloned().unwrap_or_default();
+            EntryWithTags { entry, tags }
+        })
+        .collect();
 
     Ok(TimelinePageTemplate { entries, has_more })
 }
@@ -159,7 +187,20 @@ pub async fn create_entry(
         return Ok(StatusCode::BAD_REQUEST.into_response());
     };
 
-    Ok(EntryCollapsedTemplate { entry }.into_response())
+    // Parse and link tags from content text (for both text and media entries with content)
+    let tag_text = entry.content.as_deref().unwrap_or("");
+    let parsed = tag_models::parse_tags_from_text(tag_text);
+    let mut tag_ids = Vec::new();
+    for (name, tag_type) in &parsed {
+        let tag = tag_models::get_or_create_tag(&state.db, &user.id, name, tag_type).await?;
+        tag_ids.push(tag.id);
+    }
+    if !tag_ids.is_empty() {
+        tag_models::link_entry_tags(&state.db, &entry.id, &tag_ids).await?;
+    }
+    let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
+
+    Ok(EntryCollapsedTemplate { entry, tags }.into_response())
 }
 
 /// GET /entries/:id/expand
@@ -172,8 +213,9 @@ pub async fn expand_entry(
         .await?
         .filter(|e| e.user_id == user.id)
         .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
+    let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
 
-    Ok(EntryExpandedTemplate { entry }.into_response())
+    Ok(EntryExpandedTemplate { entry, tags }.into_response())
 }
 
 /// GET /entries/:id/collapse
@@ -186,8 +228,9 @@ pub async fn collapse_entry(
         .await?
         .filter(|e| e.user_id == user.id)
         .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
+    let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
 
-    Ok(EntryCollapsedTemplate { entry }.into_response())
+    Ok(EntryCollapsedTemplate { entry, tags }.into_response())
 }
 
 /// GET /entries/:id — single entry (used for transcription polling)
@@ -200,8 +243,9 @@ pub async fn get_entry(
         .await?
         .filter(|e| e.user_id == user.id)
         .ok_or_else(|| anyhow::anyhow!("Entry not found"))?;
+    let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
 
-    Ok(EntryCollapsedTemplate { entry }.into_response())
+    Ok(EntryCollapsedTemplate { entry, tags }.into_response())
 }
 
 /// DELETE /entries/:id

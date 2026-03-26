@@ -1,0 +1,15 @@
+<div class="tag-row" id="tag-{{ tag.id }}">
+    <a href="/tags/{{ tag.id }}/entries" class="tag-row-name">
+        {% if tag.tag_type == "person" %}@{% else %}#{% endif %}<span class="tag-name-text">{{ tag.name }}</span>
+    </a>
+    <div class="tag-row-actions">
+        <button class="btn btn-ghost" onclick="startRenameTag('{{ tag.id }}', '{{ tag.name }}')">Rename</button>
+        <button class="btn btn-ghost btn-delete-tag"
+                hx-delete="/tags/{{ tag.id }}"
+                hx-target="#tag-{{ tag.id }}"
+                hx-swap="delete"
+                hx-confirm="Delete this tag? It will be unlinked from all entries.">
+            Delete
+        </button>
+    </div>
+</div>

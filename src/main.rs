@@ -5,6 +5,7 @@ mod error;
 mod media;
 mod routes;
 mod state;
+mod tags;
 
 use axum_extra::extract::cookie::Key;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -85,6 +86,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("001_initial_schema", include_str!("../migrations/001_initial_schema.sql")),
         ("002_sessions", include_str!("../migrations/002_sessions.sql")),
         ("003_add_image_type", include_str!("../migrations/003_add_image_type.sql")),
+        ("004_tags", include_str!("../migrations/004_tags.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

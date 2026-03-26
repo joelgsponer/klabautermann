@@ -575,3 +575,131 @@ a:hover {
         opacity: 1;
     }
 }
+
+/* ── Tag Pills ────────────────────────────── */
+
+.entry-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 0.5rem;
+}
+
+.entry-tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    text-decoration: none;
+    transition: opacity var(--transition);
+}
+
+.entry-tag:hover {
+    opacity: 0.8;
+}
+
+.entry-tag-tag {
+    background: rgba(127, 179, 179, 0.15);
+    color: var(--seafoam);
+}
+
+.entry-tag-person {
+    background: rgba(201, 169, 110, 0.15);
+    color: var(--brass);
+}
+
+/* ── Tag Autocomplete ─────────────────────── */
+
+.tag-autocomplete {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    background: var(--navy-light);
+    border: 1px solid var(--navy-lighter);
+    border-radius: var(--radius);
+    box-shadow: 0 -4px 16px var(--shadow);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 100;
+}
+
+.autocomplete-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text);
+}
+
+.autocomplete-item:hover,
+.autocomplete-item.active {
+    background: var(--navy-lighter);
+    color: var(--parchment);
+}
+
+/* ── Tags Management Page ─────────────────── */
+
+.tag-section {
+    margin-bottom: 2rem;
+}
+
+.tag-section-title {
+    font-size: 1.125rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--navy-lighter);
+}
+
+.tag-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.tag-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius);
+    transition: background var(--transition);
+}
+
+.tag-row:hover {
+    background: var(--parchment-faint);
+}
+
+.tag-row-name {
+    font-size: 0.95rem;
+    color: var(--parchment);
+}
+
+.tag-row-actions {
+    display: flex;
+    gap: 0.25rem;
+    opacity: 0;
+    transition: opacity var(--transition);
+}
+
+.tag-row:hover .tag-row-actions {
+    opacity: 1;
+}
+
+.tag-rename-input {
+    padding: 4px 8px;
+    background: var(--navy);
+    border: 1px solid var(--brass);
+    border-radius: var(--radius);
+    color: var(--parchment);
+    font-size: 0.95rem;
+    font-family: inherit;
+    outline: none;
+}
+
+.btn-delete-tag {
+    color: var(--red-dim);
+}
+
+.btn-delete-tag:hover {
+    color: var(--red);
+}
