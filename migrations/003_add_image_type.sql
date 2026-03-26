@@ -1,6 +1,9 @@
 -- SQLite doesn't support ALTER TABLE to modify CHECK constraints directly.
 -- We need to recreate the table with the updated constraint.
 
+-- Clean up from any partial previous run
+DROP TABLE IF EXISTS entries_new;
+
 CREATE TABLE entries_new (
     id                    TEXT PRIMARY KEY NOT NULL,
     user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

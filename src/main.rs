@@ -95,17 +95,20 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
 
         if !applied {
             info!(migration = name, "Applying migration");
-            // Execute each statement separately
+            // Run all statements in a single transaction (same connection)
+            // to ensure DDL visibility across statements
+            let mut tx = pool.begin().await?;
             for statement in sql.split(';') {
                 let stmt = statement.trim();
                 if !stmt.is_empty() {
-                    sqlx::query(stmt).execute(pool).await?;
+                    sqlx::query(stmt).execute(&mut *tx).await?;
                 }
             }
             sqlx::query("INSERT INTO _migrations (name) VALUES (?)")
                 .bind(name)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
+            tx.commit().await?;
         }
     }
 
