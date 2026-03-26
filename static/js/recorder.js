@@ -155,6 +155,49 @@ function onRecordingComplete(blob, type) {
 }
 
 // ═══════════════════════════════════════════════
+// CAMERA (mobile capture)
+// ═══════════════════════════════════════════════
+
+function openCameraMenu() {
+    // On mobile, directly open photo capture
+    // On desktop, fall back to file picker
+    document.getElementById('camera-photo').click();
+}
+
+// Camera photo capture → attach to main media input
+document.getElementById('camera-photo').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        attachImageFile(file);
+    }
+    e.target.value = '';
+});
+
+// Camera video capture → attach to main media input
+document.getElementById('camera-video').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+        attachVideoFile(file);
+    }
+    e.target.value = '';
+});
+
+function attachVideoFile(file) {
+    const preview = document.getElementById('media-preview');
+    clearPreview();
+    preview.hidden = false;
+
+    const videoEl = document.createElement('video');
+    videoEl.controls = true;
+    videoEl.src = URL.createObjectURL(file);
+    preview.appendChild(videoEl);
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById('media-file').files = dt.files;
+}
+
+// ═══════════════════════════════════════════════
 // IMAGE PASTE & FILE UPLOAD HANDLING
 // ═══════════════════════════════════════════════
 
