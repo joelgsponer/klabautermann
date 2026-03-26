@@ -5,8 +5,11 @@ Covers:
 - GET / renders the timeline HTML page
 - GET /api/tags/suggestions returns an empty list when no orchestrator is set
 - GET /api/tags/suggestions returns an empty list for empty query
+- GET /api/tags/suggestions filters results from graphiti by prefix
 - Static assets are mounted at /static
 """
+
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,3 +91,61 @@ class TestTagSuggestionsEndpoint:
         """Response content-type should be application/json."""
         resp = client.get("/api/tags/suggestions", params={"q": "test"})
         assert "application/json" in resp.headers["content-type"]
+
+    def test_suggestions_with_mock_orchestrator_returns_matching_names(self) -> None:
+        """When orchestrator.graphiti returns nodes, only names matching the prefix are returned."""
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(
+            return_value={
+                "nodes": [
+                    {"name": "JohnDoe", "uuid": "1"},
+                    {"name": "JohnSmith", "uuid": "2"},
+                    {"name": "Alice", "uuid": "3"},
+                    {"name": "johnathan", "uuid": "4"},  # lowercase match
+                ]
+            }
+        )
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.graphiti = mock_graphiti
+
+        set_orchestrator(mock_orchestrator)
+        try:
+            with TestClient(app, raise_server_exceptions=True) as c:
+                resp = c.get("/api/tags/suggestions", params={"q": "john"})
+        finally:
+            set_orchestrator(None)
+
+        assert resp.status_code == 200
+        suggestions = resp.json()
+        # "Alice" does not start with "john" so must not appear
+        assert "Alice" not in suggestions
+        # All returned names must start with the prefix (case-insensitive)
+        for name in suggestions:
+            assert name.lower().startswith("john")
+        # At least the exact matches should be present
+        assert "JohnDoe" in suggestions
+        assert "JohnSmith" in suggestions
+
+    def test_suggestions_with_mock_orchestrator_no_match_returns_empty(self) -> None:
+        """When no node names match the prefix, the endpoint returns an empty list."""
+        mock_graphiti = MagicMock()
+        mock_graphiti.search = AsyncMock(
+            return_value={
+                "nodes": [
+                    {"name": "Alice", "uuid": "1"},
+                    {"name": "Bob", "uuid": "2"},
+                ]
+            }
+        )
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.graphiti = mock_graphiti
+
+        set_orchestrator(mock_orchestrator)
+        try:
+            with TestClient(app, raise_server_exceptions=True) as c:
+                resp = c.get("/api/tags/suggestions", params={"q": "xyz"})
+        finally:
+            set_orchestrator(None)
+
+        assert resp.status_code == 200
+        assert resp.json() == []

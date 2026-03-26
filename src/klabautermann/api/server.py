@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from klabautermann.core.logger import logger
 from klabautermann.core.metrics import (
     decrement_websocket_connections,
     get_metrics,
@@ -125,7 +126,7 @@ async def tag_suggestions(q: str = Query(default="", min_length=1)) -> list[str]
                     names.append(name)
             return names[:8]
     except Exception:
-        pass
+        logger.exception("[STORM] tag_suggestions: error querying graphiti for prefix %r", q)
 
     return []
 

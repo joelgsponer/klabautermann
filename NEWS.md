@@ -6,6 +6,8 @@ User-visible changes to Klabautermann.
 
 ### Added
 
+- **Captain's Log Web UI**: A new browser-based interface for Klabautermann is now available at `/`. The entry form includes tag autocomplete - start typing a `#` tag and matching entity names from your knowledge graph appear as selectable suggestions. Use arrow keys to navigate the dropdown and Enter to select. The suggestions are visually distinct chips so you can see them clearly. The UI degrades gracefully if the knowledge graph is offline.
+
 - **Telegram Markdown Safety**: Messages to Telegram now automatically escape special characters that would break formatting. Bold, italic, code, and links work correctly. If something still goes wrong, messages fall back to plain text instead of failing. No more "Can't parse entities" errors.
 - **Batch Episode Ingestion**: Process multiple pieces of content at once with `batch_ingest()`. Useful for importing conversation history, batch processing documents, or migrating data. Each episode processes independently - one failure won't stop the batch. Control parallelism with `max_concurrent` parameter. Get a summary result with success/failure counts and per-episode details.
 - **VIP Whitelist**: Important senders can now bypass TheSieve's noise filters. Add VIPs by exact email address (`ceo@company.com`) or domain wildcard (`@company.com`) to ensure their messages always reach you. Security checks still apply - VIPs don't get a pass on prompt injection detection. Configure via `vip_whitelist` in PurserConfig. Manage at runtime with `add_vip()` and `remove_vip()`.
