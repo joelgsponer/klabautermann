@@ -76,6 +76,7 @@ async function startRecording(type) {
 
         const status = document.getElementById('recording-status');
         status.hidden = false;
+        status.classList.add('active');
         startTime = Date.now();
         timerInterval = setInterval(updateTimer, 1000);
 
@@ -112,6 +113,7 @@ function stopRecording() {
 
     const status = document.getElementById('recording-status');
     status.hidden = true;
+    status.classList.remove('active');
     clearInterval(timerInterval);
 
     mediaRecorder = null;
