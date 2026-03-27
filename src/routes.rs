@@ -1,7 +1,7 @@
 use axum::{
     extract::DefaultBodyLimit,
     http::{HeaderName, HeaderValue},
-    routing::{delete, get, post, put},
+    routing::{get, patch, post, put},
     Router,
 };
 use tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer};
@@ -11,6 +11,7 @@ use crate::entries::handlers as entries;
 use crate::state::AppState;
 use crate::summary::handlers as summary;
 use crate::tags::handlers as tags;
+use crate::tasks::handlers as tasks;
 
 /// Maximum allowed request body size (50 MB).
 pub const MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
@@ -47,6 +48,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/tags/{id}/entries", get(tags::tag_entries))
         .route("/tags/{id}/report", get(tags::tag_report))
         .route("/tags/{id}/report/generate", post(tags::generate_tag_report_handler))
+        // Tasks
+        .route("/tasks", get(tasks::tasks_page))
+        .route("/tasks/{id}/done", patch(tasks::task_done))
+        .route("/tasks/{id}/snooze", patch(tasks::task_snooze))
+        .route("/tasks/{id}/cancel", patch(tasks::task_cancel))
+        .route("/tasks/{id}/reopen", patch(tasks::task_reopen))
         // Version
         .route("/version", get(|| async { env!("GIT_HASH") }))
         // Media

@@ -255,6 +255,12 @@ pub async fn create_entry(
     if !tag_ids.is_empty() {
         tag_models::link_entry_tags(&state.db, &entry.id, &tag_ids).await?;
     }
+
+    // Auto-create task if entry contains #task tag
+    if parsed.iter().any(|(name, tt)| name == "task" && tt == "tag") {
+        crate::tasks::models::create_task_if_not_exists(&state.db, &user.id, &entry.id).await?;
+    }
+
     let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
 
     Ok(EntryCollapsedTemplate { entry, tags }.into_response())
@@ -372,6 +378,15 @@ pub async fn update_entry(
     if !tag_ids.is_empty() {
         tag_models::link_entry_tags(&state.db, &entry.id, &tag_ids).await?;
     }
+
+    // Sync task: create if #task present, delete if removed
+    let has_task_tag = parsed.iter().any(|(name, tt)| name == "task" && tt == "tag");
+    if has_task_tag {
+        crate::tasks::models::create_task_if_not_exists(&state.db, &user.id, &entry.id).await?;
+    } else {
+        crate::tasks::models::delete_task_for_entry(&state.db, &entry.id).await?;
+    }
+
     let tags = tag_models::get_tags_for_entry(&state.db, &entry.id).await?;
 
     Ok(EntryCollapsedTemplate { entry, tags }.into_response())

@@ -7,6 +7,7 @@ mod routes;
 mod state;
 mod summary;
 mod tags;
+mod tasks;
 
 use axum_extra::extract::cookie::Key;
 use sqlx::sqlite::SqlitePoolOptions;
@@ -118,6 +119,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("005_daily_summaries", include_str!("../migrations/005_daily_summaries.sql")),
         ("006_tag_reports", include_str!("../migrations/006_tag_reports.sql")),
         ("007_ai_consent", include_str!("../migrations/007_ai_consent.sql")),
+        ("008_tasks", include_str!("../migrations/008_tasks.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

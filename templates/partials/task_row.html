@@ -1,0 +1,35 @@
+<div class="task-row {% if tw.task.status == "done" %}task-done{% endif %}{% if tw.task.status == "cancelled" %}task-cancelled{% endif %}{% if tw.task.status == "snoozed" %}task-snoozed{% endif %}" id="task-{{ tw.task.id }}">
+    <div class="task-content">
+        <a href="/entries/{{ tw.entry.id }}" class="task-entry-link">{{ tw.entry.preview_text() }}</a>
+        <span class="task-status-badge task-badge-{{ tw.task.status }}">{{ tw.task.status }}</span>
+        {% if tw.task.status == "snoozed" %}
+        {% if let Some(until) = tw.task.snoozed_until %}
+        <span class="task-snooze-date">until {{ until }}</span>
+        {% endif %}
+        {% endif %}
+    </div>
+    <div class="task-actions">
+        {% if tw.task.status == "open" %}
+        <button class="btn btn-ghost btn-sm"
+                hx-patch="/tasks/{{ tw.task.id }}/done"
+                hx-target="#task-{{ tw.task.id }}"
+                hx-swap="outerHTML">Done</button>
+        <form class="inline-form snooze-form"
+              hx-patch="/tasks/{{ tw.task.id }}/snooze"
+              hx-target="#task-{{ tw.task.id }}"
+              hx-swap="outerHTML">
+            <input type="date" name="date" class="snooze-date-input" required>
+            <button type="submit" class="btn btn-ghost btn-sm">Snooze</button>
+        </form>
+        <button class="btn btn-ghost btn-sm"
+                hx-patch="/tasks/{{ tw.task.id }}/cancel"
+                hx-target="#task-{{ tw.task.id }}"
+                hx-swap="outerHTML">Cancel</button>
+        {% else %}
+        <button class="btn btn-ghost btn-sm"
+                hx-patch="/tasks/{{ tw.task.id }}/reopen"
+                hx-target="#task-{{ tw.task.id }}"
+                hx-swap="outerHTML">Reopen</button>
+        {% endif %}
+    </div>
+</div>
