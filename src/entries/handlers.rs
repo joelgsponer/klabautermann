@@ -7,11 +7,14 @@ use axum::{
 };
 use serde::Deserialize;
 
+use std::collections::HashMap;
+
 use crate::auth::middleware::AuthUser;
 use crate::entries::models::{self, Entry};
 use crate::error::AppError;
 use crate::media;
 use crate::state::AppState;
+use crate::summary::handlers::format_date;
 use crate::summary::models::{self as summary_models, DailySummary};
 use crate::tags::models::{self as tag_models, Tag};
 
@@ -33,16 +36,25 @@ pub struct EntryWithTags {
     pub tags: Vec<Tag>,
 }
 
+pub enum TimelineItem {
+    Entry(EntryWithTags),
+    DaySeparator {
+        date: String,
+        formatted_date: String,
+        summary: Option<DailySummary>,
+        has_gemini_key: bool,
+    },
+}
+
 // ── Templates ──────────────────────────────────────────────
 
 #[derive(Template, WebTemplate)]
 #[template(path = "timeline.html")]
 struct TimelineTemplate {
     username: String,
-    entries: Vec<EntryWithTags>,
+    items: Vec<TimelineItem>,
     has_more: bool,
-    summary: Option<DailySummary>,
-    has_gemini_key: bool,
+    last_entry_time: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -62,8 +74,9 @@ struct EntryExpandedTemplate {
 #[derive(Template, WebTemplate)]
 #[template(path = "partials/timeline_page.html")]
 struct TimelinePageTemplate {
-    entries: Vec<EntryWithTags>,
+    items: Vec<TimelineItem>,
     has_more: bool,
+    last_entry_time: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -93,16 +106,25 @@ pub async fn timeline(
         })
         .collect();
 
-    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-    let summary = summary_models::get_summary_for_date(&state.db, &user.id, &today).await?;
     let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
+
+    // Collect distinct dates and fetch summaries
+    let dates: Vec<String> = entries
+        .iter()
+        .map(|ew| ew.entry.created_at[..10].to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let summaries = summary_models::get_summaries_for_dates(&state.db, &user.id, &dates).await?;
+
+    let last_entry_time = entries.last().map(|ew| ew.entry.created_at.clone());
+    let items = interleave_summaries(entries, &summaries, has_gemini_key);
 
     Ok(TimelineTemplate {
         username: user.username,
-        entries,
+        items,
         has_more,
-        summary,
-        has_gemini_key,
+        last_entry_time,
     })
 }
 
@@ -132,7 +154,50 @@ pub async fn timeline_page(
         })
         .collect();
 
-    Ok(TimelinePageTemplate { entries, has_more })
+    let has_gemini_key = state.config.gemini_api_key.as_ref().is_some_and(|k| !k.is_empty());
+
+    let dates: Vec<String> = entries
+        .iter()
+        .map(|ew| ew.entry.created_at[..10].to_string())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let summaries = summary_models::get_summaries_for_dates(&state.db, &user.id, &dates).await?;
+
+    let last_entry_time = entries.last().map(|ew| ew.entry.created_at.clone());
+    let items = interleave_summaries(entries, &summaries, has_gemini_key);
+
+    Ok(TimelinePageTemplate {
+        items,
+        has_more,
+        last_entry_time,
+    })
+}
+
+/// Interleave day separator cards between entries of different days.
+fn interleave_summaries(
+    entries: Vec<EntryWithTags>,
+    summaries: &HashMap<String, DailySummary>,
+    has_gemini_key: bool,
+) -> Vec<TimelineItem> {
+    let mut items = Vec::new();
+    let mut current_date: Option<String> = None;
+
+    for ew in entries {
+        let entry_date = ew.entry.created_at[..10].to_string();
+        if current_date.as_ref() != Some(&entry_date) {
+            items.push(TimelineItem::DaySeparator {
+                formatted_date: format_date(&entry_date),
+                summary: summaries.get(&entry_date).cloned(),
+                has_gemini_key,
+                date: entry_date.clone(),
+            });
+            current_date = Some(entry_date);
+        }
+        items.push(TimelineItem::Entry(ew));
+    }
+
+    items
 }
 
 /// POST /entries — create entry (text or multipart media)

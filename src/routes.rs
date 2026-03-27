@@ -30,6 +30,7 @@ pub fn build_router(state: AppState) -> Router {
         // Account management
         .route("/account", get(auth::account_page).delete(auth::delete_account))
         .route("/account/ai-consent", post(auth::set_ai_consent))
+        .route("/account/summary-schedule", post(auth::set_summary_schedule))
         .route("/account/export", get(auth::export_data))
         // Entries
         .route("/entries", post(entries::create_entry))

@@ -1,13 +1,18 @@
-{% for ew in entries %}
-{% let entry = ew.entry %}
-{% let tags = ew.tags %}
-{% include "partials/entry.html" %}
+{% for item in items %}
+{% match item %}
+{% when TimelineItem::DaySeparator { date, formatted_date, summary, has_gemini_key } %}
+    {% include "partials/day_separator.html" %}
+{% when TimelineItem::Entry with (ew) %}
+    {% let entry = ew.entry %}
+    {% let tags = ew.tags %}
+    {% include "partials/entry.html" %}
+{% endmatch %}
 {% endfor %}
 
 {% if has_more %}
-{% if let Some(last) = entries.last() %}
+{% if let Some(last_time) = last_entry_time %}
 <div class="scroll-sentinel"
-     hx-get="/entries/page?before={{ last.entry.created_at }}"
+     hx-get="/entries/page?before={{ last_time }}"
      hx-trigger="revealed"
      hx-target="#timeline"
      hx-swap="beforeend"

@@ -120,6 +120,7 @@ async fn run_migrations(pool: &sqlx::SqlitePool) -> anyhow::Result<()> {
         ("006_tag_reports", include_str!("../migrations/006_tag_reports.sql")),
         ("007_ai_consent", include_str!("../migrations/007_ai_consent.sql")),
         ("008_tasks", include_str!("../migrations/008_tasks.sql")),
+        ("009_user_summary_schedule", include_str!("../migrations/009_user_summary_schedule.sql")),
     ];
 
     // Recover from partial migration 003 run (entries_new exists, entries dropped)

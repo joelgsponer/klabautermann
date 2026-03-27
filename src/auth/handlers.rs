@@ -32,6 +32,9 @@ struct RegisterTemplate {
 struct AccountTemplate {
     username: String,
     ai_consent: bool,
+    summary_time: String,
+    summary_timezone: String,
+    timezone_list: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -238,9 +241,21 @@ pub async fn account_page(
         .await
         .unwrap_or(false);
 
+    let row = sqlx::query_as::<_, (String, String)>(
+        "SELECT summary_time, summary_timezone FROM users WHERE id = ?",
+    )
+    .bind(&user.id)
+    .fetch_one(&state.db)
+    .await?;
+
+    let timezone_list: Vec<String> = chrono_tz::TZ_VARIANTS.iter().map(|tz| tz.name().to_string()).collect();
+
     Ok(AccountTemplate {
         username: user.username,
         ai_consent,
+        summary_time: row.0,
+        summary_timezone: row.1,
+        timezone_list,
     })
 }
 
@@ -264,6 +279,39 @@ pub async fn set_ai_consent(
         .bind(&user.id)
         .execute(&state.db)
         .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+#[derive(Deserialize)]
+pub struct SummaryScheduleForm {
+    summary_time: String,
+    summary_timezone: String,
+}
+
+/// POST /account/summary-schedule — set daily summary schedule
+pub async fn set_summary_schedule(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Form(form): Form<SummaryScheduleForm>,
+) -> Result<Response, AppError> {
+    // Validate time format
+    if chrono::NaiveTime::parse_from_str(&form.summary_time, "%H:%M").is_err() {
+        return Ok((StatusCode::BAD_REQUEST, "Invalid time format").into_response());
+    }
+    // Validate timezone
+    if form.summary_timezone.parse::<chrono_tz::Tz>().is_err() {
+        return Ok((StatusCode::BAD_REQUEST, "Invalid timezone").into_response());
+    }
+
+    crate::summary::models::update_summary_schedule(
+        &state.db,
+        &user.id,
+        &form.summary_time,
+        &form.summary_timezone,
+    )
+    .await
+    .map_err(|e| AppError::from(anyhow::anyhow!(e)))?;
+
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

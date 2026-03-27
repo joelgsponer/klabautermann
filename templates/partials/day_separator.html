@@ -1,0 +1,21 @@
+<div class="day-separator" id="day-{{ date }}">
+    <div class="day-separator-header">
+        <span class="day-separator-date">{{ formatted_date }}</span>
+    </div>
+    {% if let Some(s) = summary %}
+    <div class="day-summary">
+        <p class="day-summary-text">{{ s.summary }}</p>
+        {% if has_gemini_key %}
+        <button class="btn btn-ghost btn-sm"
+                hx-post="/summary/generate?date={{ date }}"
+                hx-target="#day-{{ date }}"
+                hx-swap="outerHTML">Regenerate</button>
+        {% endif %}
+    </div>
+    {% else if has_gemini_key %}
+    <button class="btn btn-ghost btn-sm"
+            hx-post="/summary/generate?date={{ date }}"
+            hx-target="#day-{{ date }}"
+            hx-swap="outerHTML">Generate Summary</button>
+    {% endif %}
+</div>

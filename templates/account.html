@@ -37,6 +37,33 @@
         </div>
 
         <div class="settings-section">
+            <h2 class="tag-section-title">Daily Summary Schedule</h2>
+            <p class="settings-description">
+                Choose when your daily summary is generated. The summary covers the previous day's entries.
+            </p>
+            <form class="schedule-form"
+                  hx-post="/account/summary-schedule"
+                  hx-swap="none">
+                <div class="schedule-row">
+                    <div class="form-group">
+                        <label for="summary-time">Time</label>
+                        <input type="time" id="summary-time" name="summary_time"
+                               value="{{ summary_time }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="summary-timezone">Timezone</label>
+                        <select id="summary-timezone" name="summary_timezone">
+                            {% for tz in timezone_list %}
+                            <option value="{{ tz }}" {% if *tz == summary_timezone %}selected{% endif %}>{{ tz }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm">Save Schedule</button>
+            </form>
+        </div>
+
+        <div class="settings-section">
             <h2 class="tag-section-title">Data</h2>
             <div class="settings-actions">
                 <a href="/account/export" class="btn btn-ghost">Export All Data (JSON)</a>

@@ -1,4 +1,12 @@
 use sqlx::SqlitePool;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct UserSummarySchedule {
+    pub id: String,
+    pub summary_time: String,
+    pub summary_timezone: String,
+}
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DailySummary {
@@ -82,6 +90,56 @@ pub async fn get_tags_for_date(
     .bind(date)
     .fetch_all(pool)
     .await
+}
+
+/// Get all user summary schedules for the scheduler.
+pub async fn get_all_user_schedules(
+    pool: &SqlitePool,
+) -> Result<Vec<UserSummarySchedule>, sqlx::Error> {
+    sqlx::query_as::<_, UserSummarySchedule>(
+        "SELECT id, summary_time, summary_timezone FROM users",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// Update a user's summary schedule preferences.
+pub async fn update_summary_schedule(
+    pool: &SqlitePool,
+    user_id: &str,
+    time: &str,
+    timezone: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET summary_time = ?, summary_timezone = ? WHERE id = ?")
+        .bind(time)
+        .bind(timezone)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Get summaries for multiple dates at once, returned as a map of date -> summary.
+pub async fn get_summaries_for_dates(
+    pool: &SqlitePool,
+    user_id: &str,
+    dates: &[String],
+) -> Result<HashMap<String, DailySummary>, sqlx::Error> {
+    if dates.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // Build dynamic IN clause
+    let placeholders: Vec<&str> = dates.iter().map(|_| "?").collect();
+    let query = format!(
+        "SELECT * FROM daily_summaries WHERE user_id = ? AND date IN ({})",
+        placeholders.join(", ")
+    );
+    let mut q = sqlx::query_as::<_, DailySummary>(&query).bind(user_id);
+    for date in dates {
+        q = q.bind(date);
+    }
+    let summaries = q.fetch_all(pool).await?;
+    Ok(summaries.into_iter().map(|s| (s.date.clone(), s)).collect())
 }
 
 /// Get entry texts for a user on a given date, for building the prompt.
