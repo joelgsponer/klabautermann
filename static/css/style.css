@@ -24,6 +24,77 @@
     --transition: 150ms ease;
 }
 
+/* ── Calm Theme (Sunny Sailing Day) ──────── */
+
+[data-theme="calm"] {
+    --navy:            #f5f0e8;
+    --navy-light:      #ffffff;
+    --navy-lighter:    #e8e0d0;
+    --parchment:       #2c2416;
+    --parchment-dim:   #5a4d3a;
+    --parchment-faint: rgba(44, 36, 22, 0.05);
+    --brass:           #b8860b;
+    --brass-dim:       #9a7209;
+    --seafoam:         #2e8b8b;
+    --seafoam-dim:     #1f6666;
+    --red:             #c0392b;
+    --red-dim:         #962d22;
+    --text:            #3d3425;
+    --text-dim:        #7a6e5a;
+    --text-faint:      #a89e8a;
+    --shadow:          rgba(0, 0, 0, 0.08);
+}
+
+/* ── Calm overrides for hardcoded rgba ────── */
+
+[data-theme="calm"] .entry-tag-tag {
+    background: rgba(46, 139, 139, 0.12);
+}
+
+[data-theme="calm"] .entry-tag-person {
+    background: rgba(184, 134, 11, 0.12);
+}
+
+[data-theme="calm"] .btn-danger {
+    border-color: rgba(192, 57, 43, 0.4);
+    background: rgba(192, 57, 43, 0.08);
+    color: #c0392b;
+}
+
+[data-theme="calm"] .btn-danger:hover {
+    background: rgba(192, 57, 43, 0.18);
+}
+
+[data-theme="calm"] .settings-danger {
+    border-color: rgba(192, 57, 43, 0.25);
+}
+
+[data-theme="calm"] .btn-icon.recording {
+    background: rgba(192, 57, 43, 0.1);
+}
+
+[data-theme="calm"] .task-badge-open {
+    background: rgba(46, 139, 139, 0.12);
+}
+
+[data-theme="calm"] .task-badge-done {
+    background: rgba(60, 140, 60, 0.12);
+    color: #2d8a2d;
+}
+
+[data-theme="calm"] .task-badge-snoozed {
+    background: rgba(184, 134, 11, 0.12);
+}
+
+[data-theme="calm"] .task-badge-cancelled {
+    background: rgba(192, 57, 43, 0.08);
+}
+
+[data-theme="calm"] .error-message {
+    background: rgba(192, 57, 43, 0.08);
+    border-color: rgba(192, 57, 43, 0.3);
+}
+
 /* ── Reset & Base ──────────────────────────── */
 
 *, *::before, *::after {
@@ -997,8 +1068,8 @@ a:hover {
 
 .mascot {
     position: fixed;
-    bottom: 4px;
-    left: 8px;
+    bottom: 24px;
+    right: 12px;
     width: 53px;
     height: 64px;
     background: url('/static/images/klabautermann-gesture-sm.png') 0 0 no-repeat;
@@ -1007,4 +1078,71 @@ a:hover {
     opacity: 0.35;
     pointer-events: none;
     z-index: 9999;
+}
+
+/* ── Mascot per theme ────────────────────── */
+
+[data-theme="calm"] .mascot {
+    animation: klabautermann-gesture 1.8s steps(5) infinite;
+    opacity: 0.5;
+}
+
+[data-theme="storm"] .mascot {
+    animation: klabautermann-gesture 0.6s steps(5) infinite,
+               storm-shake 0.3s ease-in-out infinite;
+    opacity: 0.55;
+}
+
+@keyframes storm-shake {
+    0%, 100% { transform: translate(0, 0) rotate(0deg); }
+    25%      { transform: translate(-1px, -2px) rotate(-2deg); }
+    50%      { transform: translate(1px, 0px) rotate(1deg); }
+    75%      { transform: translate(-1px, 1px) rotate(-1deg); }
+}
+
+/* ── Storm lightning effect ──────────────── */
+
+[data-theme="storm"] body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: white;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 9998;
+    animation: lightning 8s ease-in-out infinite;
+}
+
+@keyframes lightning {
+    0%, 96%, 100% { opacity: 0; }
+    97%           { opacity: 0.03; }
+    97.5%         { opacity: 0; }
+    98%           { opacity: 0.05; }
+    98.5%         { opacity: 0; }
+}
+
+/* ── Theme Toggle Button ────────────────── */
+
+.theme-toggle {
+    position: fixed;
+    bottom: 96px;
+    right: 16px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 1px solid var(--navy-lighter);
+    background: var(--navy-light);
+    color: var(--text);
+    font-size: 1.1rem;
+    cursor: pointer;
+    z-index: 9999;
+    transition: all var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.theme-toggle:hover {
+    background: var(--brass-dim);
+    color: var(--parchment);
 }
