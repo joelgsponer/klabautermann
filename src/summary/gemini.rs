@@ -4,10 +4,7 @@ use tracing::error;
 pub async fn call_gemini_api(api_key: &str, prompt: &str) -> anyhow::Result<String> {
     let client = reqwest::Client::new();
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
-        api_key
-    );
+    let url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
     let body = serde_json::json!({
         "contents": [{
@@ -18,7 +15,8 @@ pub async fn call_gemini_api(api_key: &str, prompt: &str) -> anyhow::Result<Stri
     });
 
     let response = client
-        .post(&url)
+        .post(url)
+        .header("x-goog-api-key", api_key)
         .json(&body)
         .send()
         .await?;
