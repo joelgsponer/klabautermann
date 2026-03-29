@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+
+{% block title %}Crew — Klabautermann{% endblock %}
+
+{% block body %}
+<div class="app-container crew-page">
+    <header class="app-header">
+        <div class="header-left">
+            <h1 class="logo">Klabautermann</h1>
+            <span class="header-subtitle">Crew Manifest</span>
+        </div>
+        <div class="header-right">
+            <a href="/tags" class="btn btn-ghost">Tags</a>
+            <a href="/tasks" class="btn btn-ghost">Tasks</a>
+            <a href="/" class="btn btn-ghost">Back to Log</a>
+            <a href="/account" class="username">{{ username }}</a>
+            <form method="POST" action="/logout" class="inline-form">
+                <button type="submit" class="btn btn-ghost">Disembark</button>
+            </form>
+        </div>
+    </header>
+
+    <main class="timeline-container">
+        <div class="crew-grid">
+            {% for member in crew %}
+            <div class="crew-card">
+                <div class="crew-avatar">
+                    <div class="crew-avatar-placeholder">{{ member.name.chars().next().unwrap_or('?') }}</div>
+                </div>
+                <div class="crew-info">
+                    <div class="crew-name-row">
+                        <h3 class="crew-name">{{ member.name }}</h3>
+                        {% if member.active %}
+                        <span class="crew-status crew-status-active" title="Active"></span>
+                        {% else %}
+                        <span class="crew-status crew-status-offline" title="Offline"></span>
+                        {% endif %}
+                    </div>
+                    <span class="crew-role">{{ member.role }}</span>
+                    <p class="crew-desc">{{ member.description }}</p>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </main>
+</div>
+{% endblock %}

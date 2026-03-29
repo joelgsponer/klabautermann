@@ -7,6 +7,7 @@ use axum::{
 use tower_http::{services::ServeDir, set_header::SetResponseHeaderLayer};
 
 use crate::auth::handlers as auth;
+use crate::crew;
 use crate::entries::handlers as entries;
 use crate::state::AppState;
 use crate::summary::handlers as summary;
@@ -49,6 +50,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/tags/{id}/entries", get(tags::tag_entries))
         .route("/tags/{id}/report", get(tags::tag_report))
         .route("/tags/{id}/report/generate", post(tags::generate_tag_report_handler))
+        // Crew
+        .route("/crew", get(crew::crew_page))
         // Tasks
         .route("/tasks", get(tasks::tasks_page))
         .route("/tasks/{id}/done", patch(tasks::task_done))

@@ -1,5 +1,6 @@
 mod auth;
 mod config;
+mod crew;
 mod entries;
 mod error;
 mod media;
