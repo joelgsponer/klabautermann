@@ -25,7 +25,7 @@
             {% for member in crew %}
             <div class="crew-card">
                 <div class="crew-avatar">
-                    <div class="crew-avatar-placeholder">{{ member.name.chars().next().unwrap_or('?') }}</div>
+                    <img src="/static/images/crew/{{ member.avatar }}" alt="{{ member.name }}" class="crew-avatar-img" />
                 </div>
                 <div class="crew-info">
                     <div class="crew-name-row">
